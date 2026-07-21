@@ -810,6 +810,7 @@ const styles = StyleSheet.create((theme) => ({
     width: "100%",
     maxWidth: MAX_CONTENT_WIDTH,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing[2],
   },
   errorContainer: {
