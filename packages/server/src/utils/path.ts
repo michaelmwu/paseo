@@ -58,6 +58,26 @@ export function createRealpathAwarePathMatcher(target: string): (candidate: stri
   };
 }
 
+/**
+ * Prefer a stable physical path when a local session directory still exists.
+ * The original spelling is retained for deleted or remotely-described paths,
+ * where resolving it would turn a useful provider reference into an error.
+ */
+export function canonicalizeExistingPath(value: string): string {
+  return resolveExistingPath(value) ?? value;
+}
+
+/**
+ * Resolves an existing local path to its physical spelling. Unlike
+ * `canonicalizeExistingPath`, this deliberately returns null when the path
+ * cannot be proved to exist. Callers that use a path as an identity boundary
+ * (rather than a display/fallback value) must not silently fall back to its
+ * unresolved spelling.
+ */
+export function resolveExistingPath(value: string): string | null {
+  return resolveRealpathVariants(value)[0] ?? null;
+}
+
 export function isPathInsideRoot(root: string, candidate: string): boolean {
   return getRelativePathInsideRoot(root, candidate) !== null;
 }

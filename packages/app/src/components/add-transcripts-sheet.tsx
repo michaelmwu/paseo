@@ -12,13 +12,12 @@ import type { ChatHistoryContextAttachment } from "@/attachments/types";
 import { getChatHistorySourceKey } from "@/attachments/chat-history-identity";
 import { getProviderIcon } from "@/components/provider-icons";
 import { useAgentHistory, type AgentHistoryUnavailableHost } from "@/hooks/use-agent-history";
-import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
+import { useProviderSessionHistory } from "@/hooks/use-provider-session-history";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useHostFeatureMap } from "@/runtime/host-features";
 import { formatTimeAgo } from "@/utils/time";
 import {
   buildTranscriptSourceGroups,
-  getTranscriptSourceKey,
   INITIAL_TRANSCRIPT_PICKER_STATE,
   MAX_TRANSCRIPT_ATTACHMENTS,
   reduceTranscriptPickerState,
@@ -27,6 +26,18 @@ import {
   type TranscriptSourceGroupKind,
 } from "@/components/add-transcripts-sheet-view-model";
 import { exportSelectedTranscripts } from "@/components/add-transcripts-export";
+import {
+  getTranscriptSourceExportAvailability,
+  getTranscriptExportSourceKey,
+  getTranscriptExportSourceLastActivity,
+  getTranscriptExportSourceProvider,
+  getTranscriptExportSourceServerId,
+  getTranscriptExportSourceServerLabel,
+  getTranscriptExportSourceTitle,
+  getTranscriptExportSourceWorkspaceLabel,
+  type TranscriptExportSource,
+  type TranscriptSourceExportAvailability,
+} from "@/components/transcript-source";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
@@ -61,14 +72,8 @@ interface AddTranscriptsSheetProps {
   onAddTranscript: (attachment: ChatHistoryContextAttachment) => void;
 }
 
-function resolveAgentTitle(agent: AggregatedAgent): string {
-  return (
-    agent.title?.trim() || agent.projectPlacement?.workspaceName?.trim() || agent.cwd || agent.id
-  );
-}
-
 function sourceGroupLabel(
-  kind: TranscriptSourceGroupKind,
+  kind: TranscriptSourceGroupKind | "provider_session",
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
   if (kind === "workspace") {
@@ -77,19 +82,28 @@ function sourceGroupLabel(
   if (kind === "project") {
     return t("addTranscripts.groups.otherWorkspaces");
   }
-  return t("addTranscripts.groups.sameRepository");
+  if (kind === "repository") {
+    return t("addTranscripts.groups.sameRepository");
+  }
+  if (kind === "provider_session") {
+    return t("addTranscripts.groups.externalSessions");
+  }
+  return t("addTranscripts.groups.otherProjects");
 }
 
-function buildSourceMeta(agent: AggregatedAgent): string {
-  const workspace = agent.projectPlacement?.workspaceName?.trim() || agent.cwd;
-  const parts = [agent.provider, workspace];
-  if (agent.serverLabel.trim()) {
-    parts.push(agent.serverLabel);
+function buildSourceMeta(source: TranscriptExportSource): string {
+  const parts = [
+    getTranscriptExportSourceProvider(source),
+    getTranscriptExportSourceWorkspaceLabel(source),
+  ];
+  const serverLabel = getTranscriptExportSourceServerLabel(source);
+  if (serverLabel.trim()) {
+    parts.push(serverLabel);
   }
   return parts.join(" · ");
 }
 
-function TranscriptProviderIcon({ provider }: { provider: AggregatedAgent["provider"] }) {
+function TranscriptProviderIcon({ provider }: { provider: string }) {
   return (
     <ThemedDynamicProviderIcon
       provider={provider}
@@ -100,32 +114,38 @@ function TranscriptProviderIcon({ provider }: { provider: AggregatedAgent["provi
 }
 
 function TranscriptSourceRow({
-  agent,
+  source,
   selected,
   disabled,
-  unavailable,
+  availability,
   error,
   onToggle,
 }: {
-  agent: AggregatedAgent;
+  source: TranscriptExportSource;
   selected: boolean;
   disabled: boolean;
-  unavailable: boolean;
+  availability: TranscriptSourceExportAvailability;
   error: string | null;
-  onToggle: (agent: AggregatedAgent) => void;
+  onToggle: (source: TranscriptExportSource) => void;
 }) {
   const { t } = useTranslation();
   const toggleSource = onToggle;
-  const title = resolveAgentTitle(agent);
+  const title = getTranscriptExportSourceTitle(source);
+  let availabilityNotice: string | null = null;
+  if (availability === "host_upgrade_required") {
+    availabilityNotice = t("addTranscripts.status.updateHost");
+  } else if (availability === "source_unavailable") {
+    availabilityNotice = t("addTranscripts.status.providerSessionUnavailable");
+  }
   let statusNotice: string | null = null;
   if (error) {
     statusNotice = error;
-  } else if (unavailable) {
-    statusNotice = t("addTranscripts.status.updateHost");
-  } else if (agent.status === "running") {
+  } else if (availabilityNotice) {
+    statusNotice = availabilityNotice;
+  } else if (source.kind === "paseo_agent" && source.agent.status === "running") {
     statusNotice = t("addTranscripts.status.runningSnapshot");
   }
-  const accessibilityLabel = [title, buildSourceMeta(agent), statusNotice]
+  const accessibilityLabel = [title, buildSourceMeta(source), statusNotice]
     .filter((value): value is string => Boolean(value))
     .join(". ");
   const accessibilityState = useMemo(() => ({ checked: selected, disabled }), [disabled, selected]);
@@ -143,8 +163,8 @@ function TranscriptSourceRow({
     [selected],
   );
   const handlePress = useCallback(() => {
-    toggleSource(agent);
-  }, [agent, toggleSource]);
+    toggleSource(source);
+  }, [source, toggleSource]);
 
   return (
     <Pressable
@@ -155,28 +175,34 @@ function TranscriptSourceRow({
       disabled={disabled}
       onPress={handlePress}
       style={pressableStyle}
-      testID={`add-transcripts-source-${agent.serverId}-${agent.id}`}
+      testID={
+        source.kind === "paseo_agent"
+          ? `add-transcripts-source-${source.agent.serverId}-${source.agent.id}`
+          : `add-transcripts-provider-session-${source.session.serverId}-${encodeURIComponent(source.session.providerId)}-${encodeURIComponent(source.session.providerHandleId)}`
+      }
     >
       <View style={selectionControlStyle}>
         {selected ? <ThemedCheck size={12} uniProps={accentForegroundColorMapping} /> : null}
       </View>
       <View style={styles.rowIconWrap}>
-        <TranscriptProviderIcon provider={agent.provider} />
+        <TranscriptProviderIcon provider={getTranscriptExportSourceProvider(source)} />
       </View>
       <View style={styles.rowContent}>
         <View style={styles.rowHeader}>
           <Text style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.rowTime}>{formatTimeAgo(agent.lastActivityAt)}</Text>
+          <Text style={styles.rowTime}>
+            {formatTimeAgo(getTranscriptExportSourceLastActivity(source))}
+          </Text>
         </View>
         <Text style={styles.rowMeta} numberOfLines={1}>
-          {buildSourceMeta(agent)}
+          {buildSourceMeta(source)}
         </Text>
-        {unavailable ? (
-          <Text style={styles.rowNotice}>{t("addTranscripts.status.updateHost")}</Text>
-        ) : null}
-        {!unavailable && agent.status === "running" ? (
+        {availabilityNotice ? <Text style={styles.rowNotice}>{availabilityNotice}</Text> : null}
+        {!availabilityNotice &&
+        source.kind === "paseo_agent" &&
+        source.agent.status === "running" ? (
           <Text style={styles.rowNotice}>{t("addTranscripts.status.runningSnapshot")}</Text>
         ) : null}
         {error ? (
@@ -241,27 +267,75 @@ function SelectionStatus({
   return null;
 }
 
+type TranscriptDisplayGroupKind = TranscriptSourceGroupKind | "provider_session";
+
+interface TranscriptDisplayGroup {
+  kind: TranscriptDisplayGroupKind;
+  sources: readonly TranscriptExportSource[];
+}
+
+function doesTranscriptSourceMatchQuery(
+  source: TranscriptExportSource,
+  normalizedQuery: string,
+): boolean {
+  if (!normalizedQuery) {
+    return true;
+  }
+  const searchableValues = [
+    getTranscriptExportSourceTitle(source),
+    getTranscriptExportSourceProvider(source),
+    getTranscriptExportSourceWorkspaceLabel(source),
+    getTranscriptExportSourceServerLabel(source),
+  ];
+  for (const value of searchableValues) {
+    if (value.toLocaleLowerCase().includes(normalizedQuery)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filterTranscriptDisplayGroups(
+  groups: readonly TranscriptDisplayGroup[],
+  query: string,
+): TranscriptDisplayGroup[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredGroups: TranscriptDisplayGroup[] = [];
+  for (const group of groups) {
+    const sources: TranscriptExportSource[] = [];
+    for (const source of group.sources) {
+      if (doesTranscriptSourceMatchQuery(source, normalizedQuery)) {
+        sources.push(source);
+      }
+    }
+    if (sources.length > 0) {
+      filteredGroups.push({ kind: group.kind, sources });
+    }
+  }
+  return filteredGroups;
+}
+
 type TranscriptListItem =
-  | { kind: "group"; key: string; groupKind: TranscriptSourceGroupKind }
-  | { kind: "source"; key: string; agent: AggregatedAgent };
+  | { kind: "group"; key: string; groupKind: TranscriptDisplayGroupKind }
+  | { kind: "source"; key: string; source: TranscriptExportSource };
 
 function TranscriptPickerList({
   groups,
   selection,
   errorsBySource,
-  sourceSupportsTranscriptExport,
+  sourceExportAvailability,
   isAdding,
   onToggleSource,
   virtualized,
   header,
   footer,
 }: {
-  groups: ReturnType<typeof buildTranscriptSourceGroups>;
+  groups: readonly TranscriptDisplayGroup[];
   selection: readonly string[];
   errorsBySource: Readonly<Record<string, string>>;
-  sourceSupportsTranscriptExport: ReadonlyMap<string, boolean | undefined>;
+  sourceExportAvailability: ReadonlyMap<string, TranscriptSourceExportAvailability>;
   isAdding: boolean;
-  onToggleSource: (agent: AggregatedAgent) => void;
+  onToggleSource: (source: TranscriptExportSource) => void;
   virtualized: boolean;
   header: React.ReactNode;
   footer: React.ReactNode;
@@ -271,37 +345,38 @@ function TranscriptPickerList({
     () =>
       groups.flatMap((group) => [
         { kind: "group" as const, key: `group:${group.kind}`, groupKind: group.kind },
-        ...group.agents.map((agent) => ({
+        ...group.sources.map((source) => ({
           kind: "source" as const,
-          key: getTranscriptSourceKey(agent),
-          agent,
+          key: getTranscriptExportSourceKey(source),
+          source,
         })),
       ]),
     [groups],
   );
   const renderSource = useCallback(
-    (agent: AggregatedAgent) => {
-      const key = getTranscriptSourceKey(agent);
-      const unavailable = sourceSupportsTranscriptExport.get(agent.serverId) !== true;
+    (source: TranscriptExportSource) => {
+      const key = getTranscriptExportSourceKey(source);
+      const availability = sourceExportAvailability.get(key) ?? "host_upgrade_required";
+      const unavailable = availability !== "available";
       return (
         <TranscriptSourceRow
-          agent={agent}
+          source={source}
           selected={selection.includes(key)}
-          disabled={isAdding || unavailable}
-          unavailable={unavailable}
+          disabled={isAdding || (unavailable && !selection.includes(key))}
+          availability={availability}
           error={errorsBySource[key] ?? null}
           onToggle={onToggleSource}
         />
       );
     },
-    [errorsBySource, isAdding, onToggleSource, selection, sourceSupportsTranscriptExport],
+    [errorsBySource, isAdding, onToggleSource, selection, sourceExportAvailability],
   );
   const renderItem = useCallback(
     ({ item }: { item: TranscriptListItem }) =>
       item.kind === "group" ? (
         <Text style={styles.virtualizedGroupTitle}>{sourceGroupLabel(item.groupKind, t)}</Text>
       ) : (
-        renderSource(item.agent)
+        renderSource(item.source)
       ),
     [renderSource, t],
   );
@@ -341,8 +416,8 @@ function TranscriptPickerList({
         {groups.map((group) => (
           <View key={group.kind} style={styles.group}>
             <Text style={styles.groupTitle}>{sourceGroupLabel(group.kind, t)}</Text>
-            {group.agents.map((agent) => (
-              <View key={getTranscriptSourceKey(agent)}>{renderSource(agent)}</View>
+            {group.sources.map((source) => (
+              <View key={getTranscriptExportSourceKey(source)}>{renderSource(source)}</View>
             ))}
           </View>
         ))}
@@ -392,6 +467,7 @@ export function AddTranscriptsSheet({
   const { t } = useTranslation();
   const useVirtualizedList = useIsCompactFormFactor() && isNative;
   const history = useAgentHistory({ enabled: visible });
+  const providerSessionHistory = useProviderSessionHistory({ enabled: visible });
   const [pickerState, dispatchPicker] = useReducer(
     reduceTranscriptPickerState,
     INITIAL_TRANSCRIPT_PICKER_STATE,
@@ -399,33 +475,81 @@ export function AddTranscriptsSheet({
   const { query, selection, errorsBySource, selectionError, isAdding, searchResetKey } =
     pickerState;
 
-  const sourceServerIds = useMemo(
-    () => [...new Set(history.agents.map((agent) => agent.serverId))],
-    [history.agents],
-  );
-  const sourceSupportsTranscriptExport = useHostFeatureMap(
-    sourceServerIds,
-    "agentTranscriptExport",
-  );
-  const allGroups = useMemo(
+  const agentGroups = useMemo(
     () => buildTranscriptSourceGroups({ agents: history.agents, destination, query: "" }),
     [destination, history.agents],
   );
-  const groups = useMemo(
-    () => buildTranscriptSourceGroups({ agents: history.agents, destination, query }),
-    [destination, history.agents, query],
+  const allGroups = useMemo<TranscriptDisplayGroup[]>(
+    () => [
+      ...agentGroups.map((group) => ({
+        kind: group.kind,
+        sources: group.agents.map((agent) => ({ kind: "paseo_agent" as const, agent })),
+      })),
+      ...(providerSessionHistory.entries.length > 0
+        ? [
+            {
+              kind: "provider_session" as const,
+              sources: providerSessionHistory.entries.map((session) => ({
+                kind: "provider_session" as const,
+                session,
+              })),
+            },
+          ]
+        : []),
+    ],
+    [agentGroups, providerSessionHistory.entries],
   );
-  const unavailableHosts = useMemo(
-    () =>
-      selectTranscriptUnavailableHosts({
-        hosts: history.unavailableHosts,
-        destinationServerId: destination.serverId,
-      }),
-    [destination.serverId, history.unavailableHosts],
+  const groups = useMemo(() => filterTranscriptDisplayGroups(allGroups, query), [allGroups, query]);
+  const agentSourceServerIds = useMemo(
+    () => [...new Set(history.agents.map((agent) => agent.serverId))],
+    [history.agents],
   );
+  const providerSessionSourceServerIds = useMemo(
+    () => [...new Set(providerSessionHistory.entries.map((session) => session.serverId))],
+    [providerSessionHistory.entries],
+  );
+  const agentSupportsTranscriptExport = useHostFeatureMap(
+    agentSourceServerIds,
+    "agentTranscriptExport",
+  );
+  const providerSessionSupportsTranscriptExport = useHostFeatureMap(
+    providerSessionSourceServerIds,
+    "providerSessionTranscriptExport",
+  );
+  const sourceExportAvailability = useMemo(() => {
+    const availabilityBySourceKey = new Map<string, TranscriptSourceExportAvailability>();
+    for (const group of allGroups) {
+      for (const source of group.sources) {
+        const serverId = getTranscriptExportSourceServerId(source);
+        const hostSupportsTranscriptExport =
+          source.kind === "paseo_agent"
+            ? agentSupportsTranscriptExport.get(serverId)
+            : providerSessionSupportsTranscriptExport.get(serverId);
+        availabilityBySourceKey.set(
+          getTranscriptExportSourceKey(source),
+          getTranscriptSourceExportAvailability(source, hostSupportsTranscriptExport),
+        );
+      }
+    }
+    return availabilityBySourceKey;
+  }, [agentSupportsTranscriptExport, allGroups, providerSessionSupportsTranscriptExport]);
+  const unavailableHosts = useMemo(() => {
+    const mergedByServerId = new Map(
+      history.unavailableHosts.map((host) => [host.serverId, host] as const),
+    );
+    for (const host of providerSessionHistory.unavailableHosts) {
+      if (!mergedByServerId.has(host.serverId)) {
+        mergedByServerId.set(host.serverId, host);
+      }
+    }
+    return selectTranscriptUnavailableHosts({
+      hosts: [...mergedByServerId.values()],
+      destinationServerId: destination.serverId,
+    });
+  }, [destination.serverId, history.unavailableHosts, providerSessionHistory.unavailableHosts]);
   const sourcesByKey = useMemo(() => {
-    const entries = allGroups.flatMap((group) => group.agents);
-    return new Map(entries.map((agent) => [getTranscriptSourceKey(agent), agent]));
+    const entries = allGroups.flatMap((group) => group.sources);
+    return new Map(entries.map((source) => [getTranscriptExportSourceKey(source), source]));
   }, [allGroups]);
   const existingSourceKeys = useMemo(
     () =>
@@ -454,10 +578,10 @@ export function AddTranscriptsSheet({
   }, [isAdding, onClose]);
 
   const handleToggleSource = useCallback(
-    (source: AggregatedAgent) => {
+    (source: TranscriptExportSource) => {
       dispatchPicker({
         type: "toggle_source",
-        key: getTranscriptSourceKey(source),
+        key: getTranscriptExportSourceKey(source),
         existingSourceKeys,
         maximumError: t("addTranscripts.status.maximumSelected", {
           count: MAX_TRANSCRIPT_ATTACHMENTS,
@@ -523,19 +647,25 @@ export function AddTranscriptsSheet({
   const handleAddPress = useCallback(() => {
     void handleAdd();
   }, [handleAdd]);
-  const refreshHistory = history.refreshAll;
+  const refreshAgentHistory = history.refreshAll;
+  const refreshProviderSessionHistory = providerSessionHistory.refresh;
   const handleRefresh = useCallback(() => {
-    void refreshHistory();
-  }, [refreshHistory]);
+    void Promise.all([refreshAgentHistory(), refreshProviderSessionHistory()]);
+  }, [refreshAgentHistory, refreshProviderSessionHistory]);
 
   const hasSources = groups.length > 0;
   const listHeader = useMemo(
     () => (
       <>
+        <Alert
+          variant="info"
+          description={t("addTranscripts.status.transcriptOnlyDisclosure")}
+          testID="add-transcripts-transcript-only-disclosure"
+        />
         <UnavailableHostsNotice hosts={unavailableHosts} onRefresh={handleRefresh} />
         <SelectionStatus
-          isLoading={history.isInitialLoad}
-          isError={history.isError}
+          isLoading={history.isInitialLoad || providerSessionHistory.isInitialLoad}
+          isError={history.isError || providerSessionHistory.isError}
           hasSources={hasSources}
           hasAnySources={allGroups.length > 0}
           hasQuery={query.trim().length > 0}
@@ -555,8 +685,11 @@ export function AddTranscriptsSheet({
       hasSources,
       history.isError,
       history.isInitialLoad,
+      providerSessionHistory.isError,
+      providerSessionHistory.isInitialLoad,
       query,
       selectionError,
+      t,
       unavailableHosts,
     ],
   );
@@ -613,7 +746,7 @@ export function AddTranscriptsSheet({
         groups={groups}
         selection={selection}
         errorsBySource={errorsBySource}
-        sourceSupportsTranscriptExport={sourceSupportsTranscriptExport}
+        sourceExportAvailability={sourceExportAvailability}
         isAdding={isAdding}
         onToggleSource={handleToggleSource}
         virtualized={useVirtualizedList}

@@ -353,6 +353,69 @@ test("exports a bounded transcript snapshot through the daemon RPC", async () =>
   });
 });
 
+test("exports an importable provider session without resuming it", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "provider_session_transcript_export",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+
+  const connect = client.connect();
+  mock.triggerOpen({ features: { providerSessionTranscriptExport: true } });
+  await connect;
+
+  const transcriptPromise = client.exportProviderSessionTranscript({
+    providerId: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    maxBytes: 4096,
+    requestId: "provider-session-transcript-export-1",
+  });
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "provider.session.transcript.export.request",
+    providerId: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    maxBytes: 4096,
+    requestId: "provider-session-transcript-export-1",
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "provider.session.transcript.export.response",
+      payload: {
+        requestId: "provider-session-transcript-export-1",
+        providerId: "codex",
+        providerHandleId: "thread-1",
+        sourceCwd: "/tmp/source-repo",
+        attachment: {
+          type: "text",
+          mimeType: "text/plain",
+          contextKind: "chat_history",
+          title: "Chat history",
+          text: "<chat-history-summary>\n[User] Continue\n</chat-history-summary>",
+        },
+        totalItemCount: 4,
+        includedItemCount: 4,
+        byteCount: 68,
+        truncated: false,
+        error: null,
+      },
+    }),
+  );
+
+  await expect(transcriptPromise).resolves.toMatchObject({
+    providerId: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    includedItemCount: 4,
+    attachment: { contextKind: "chat_history" },
+  });
+});
+
 test("normalizes legacy and dedicated agent attention notifications", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
@@ -4060,6 +4123,7 @@ test("fetches scoped recent provider sessions", async () => {
     providers: ["my-claude"],
     since: "2026-04-30T00:00:00.000Z",
     limit: 25,
+    transcriptOnly: true,
   });
 
   expect(mock.sent).toHaveLength(1);
@@ -4072,6 +4136,7 @@ test("fetches scoped recent provider sessions", async () => {
       providers?: string[];
       since?: string;
       limit?: number;
+      transcriptOnly?: boolean;
     };
   };
   expect(request.message).toMatchObject({
@@ -4080,6 +4145,7 @@ test("fetches scoped recent provider sessions", async () => {
     providers: ["my-claude"],
     since: "2026-04-30T00:00:00.000Z",
     limit: 25,
+    transcriptOnly: true,
   });
 
   mock.triggerMessage(

@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -34,7 +34,11 @@ import type {
   AgentSlashCommand,
   AgentStreamEvent,
   AgentTimelineItem,
+  ImportableProviderSession,
   ImportProviderSessionInput,
+  ListImportableSessionsOptions,
+  ReadImportableSessionTimelineInput,
+  ReadImportableSessionTimelineResult,
   ResolveAgentDefaultModeInput,
 } from "./agent-sdk-types.js";
 import type { PaseoToolCatalog } from "./tools/types.js";
@@ -2533,6 +2537,13 @@ test("importProviderSession imports the selected session without listing and pub
           metadata: { provider: "codex", cwd: workdir },
         },
         timeline: [
+          {
+            timestamp: "2026-07-19T11:59:00.000Z",
+            item: {
+              type: "user_message",
+              text: "<system_instruction>desktop integration secret</system_instruction>",
+            },
+          },
           {
             item: { type: "user_message" as const, text: "Trace provider imports" },
             timestamp: "2026-01-02T00:00:00.000Z",
@@ -8041,8 +8052,12 @@ test("replaceAgentRun succeeds when foreground turn terminal event is never deli
 class RecordingPersistedAgentsClient implements AgentClient {
   readonly capabilities = TEST_CAPABILITIES;
   calls = 0;
+  readonly listOptions: Array<ListImportableSessionsOptions | undefined> = [];
 
-  constructor(public readonly provider: AgentProvider) {}
+  constructor(
+    public readonly provider: AgentProvider,
+    private readonly importableSessions?: ImportableProviderSession[],
+  ) {}
 
   async isAvailable(): Promise<boolean> {
     return true;
@@ -8060,8 +8075,12 @@ class RecordingPersistedAgentsClient implements AgentClient {
     return { models: [], modes: [] };
   }
 
-  async listImportableSessions() {
+  async listImportableSessions(options?: ListImportableSessionsOptions) {
     this.calls += 1;
+    this.listOptions.push(options);
+    if (this.importableSessions) {
+      return this.importableSessions;
+    }
     return [
       {
         providerHandleId: `${this.provider}-session`,
@@ -8072,6 +8091,31 @@ class RecordingPersistedAgentsClient implements AgentClient {
         lastPromptPreview: null,
       },
     ];
+  }
+}
+
+class ReadablePersistedAgentsClient extends RecordingPersistedAgentsClient {
+  readonly readInputs: ReadImportableSessionTimelineInput[] = [];
+
+  constructor(
+    provider: AgentProvider,
+    private readonly sessions: ImportableProviderSession[],
+    private readonly result: ReadImportableSessionTimelineResult,
+  ) {
+    super(provider);
+  }
+
+  override async listImportableSessions(options?: ListImportableSessionsOptions) {
+    this.calls += 1;
+    this.listOptions.push(options);
+    return this.sessions;
+  }
+
+  async readImportableSessionTimeline(
+    input: ReadImportableSessionTimelineInput,
+  ): Promise<ReadImportableSessionTimelineResult> {
+    this.readInputs.push(input);
+    return this.result;
   }
 }
 
@@ -8123,6 +8167,159 @@ test("listImportableSessions includes derived providers that list persisted agen
   expect(result.map((d) => d.provider).sort()).toEqual(["claude", "omp"]);
 });
 
+test("listImportableSessions preserves profiles for import and coalesces shared stores for transcripts", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "agent-manager-shared-provider-store-"));
+  const cwdAlias = `${cwd}-alias`;
+  symlinkSync(cwd, cwdAlias, process.platform === "win32" ? "junction" : "dir");
+
+  try {
+    const sharedStoreFingerprint = "opaque-shared-codex-store";
+    const builtin = new RecordingPersistedAgentsClient("codex", [
+      {
+        providerHandleId: "desktop-thread",
+        cwd,
+        title: "Builtin Codex",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-01T10:00:00Z"),
+        sessionStoreFingerprint: sharedStoreFingerprint,
+      },
+    ]);
+    const profile = new RecordingPersistedAgentsClient("conductor-codex", [
+      {
+        providerHandleId: "desktop-thread",
+        cwd: cwdAlias,
+        title: "Conductor Codex",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-02T10:00:00Z"),
+        sessionStoreFingerprint: sharedStoreFingerprint,
+      },
+    ]);
+    const manager = new AgentManager({
+      clients: { codex: builtin, "conductor-codex": profile },
+      providerDefinitions: {
+        codex: { enabled: true, derivedFromProviderId: null },
+        "conductor-codex": { enabled: true, derivedFromProviderId: "codex" },
+      },
+      logger,
+    });
+
+    await expect(manager.listImportableSessions()).resolves.toMatchObject([
+      {
+        provider: "conductor-codex",
+        providerHandleId: "desktop-thread",
+        title: "Conductor Codex",
+      },
+      {
+        provider: "codex",
+        providerHandleId: "desktop-thread",
+        title: "Builtin Codex",
+      },
+    ]);
+
+    await expect(
+      manager.listImportableSessions({ deduplicateSharedStores: true }),
+    ).resolves.toMatchObject([
+      {
+        provider: "codex",
+        providerHandleId: "desktop-thread",
+        title: "Builtin Codex",
+      },
+    ]);
+  } finally {
+    rmSync(cwdAlias, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("listImportableSessions keeps same-handle sessions from isolated stores distinct", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "agent-manager-isolated-provider-store-"));
+  try {
+    const builtin = new RecordingPersistedAgentsClient("codex", [
+      {
+        providerHandleId: "thread-1",
+        cwd,
+        title: "Default Codex home",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-01T10:00:00Z"),
+        sessionStoreFingerprint: "opaque-default-codex-store",
+      },
+    ]);
+    const isolatedProfile = new RecordingPersistedAgentsClient("conductor-codex", [
+      {
+        providerHandleId: "thread-1",
+        cwd,
+        title: "Isolated Conductor home",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-02T10:00:00Z"),
+        sessionStoreFingerprint: "opaque-isolated-codex-store",
+      },
+    ]);
+    const manager = new AgentManager({
+      clients: { codex: builtin, "conductor-codex": isolatedProfile },
+      providerDefinitions: {
+        codex: { enabled: true, derivedFromProviderId: null },
+        "conductor-codex": { enabled: true, derivedFromProviderId: "codex" },
+      },
+      logger,
+    });
+
+    await expect(
+      manager.listImportableSessions({ deduplicateSharedStores: true }),
+    ).resolves.toMatchObject([
+      { provider: "conductor-codex", providerHandleId: "thread-1" },
+      { provider: "codex", providerHandleId: "thread-1" },
+    ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("listImportableSessions uses recency to choose between equally-derived shared profiles", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "agent-manager-derived-provider-store-"));
+  try {
+    const olderProfile = new RecordingPersistedAgentsClient("codex-profile-a", [
+      {
+        providerHandleId: "thread-1",
+        cwd,
+        title: "Older profile",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-01T10:00:00Z"),
+        sessionStoreFingerprint: "opaque-shared-codex-store",
+      },
+    ]);
+    const newerProfile = new RecordingPersistedAgentsClient("codex-profile-b", [
+      {
+        providerHandleId: "thread-1",
+        cwd,
+        title: "Newer profile",
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+        lastActivityAt: new Date("2026-07-02T10:00:00Z"),
+        sessionStoreFingerprint: "opaque-shared-codex-store",
+      },
+    ]);
+    const manager = new AgentManager({
+      clients: { "codex-profile-a": olderProfile, "codex-profile-b": newerProfile },
+      providerDefinitions: {
+        "codex-profile-a": { enabled: true, derivedFromProviderId: "codex" },
+        "codex-profile-b": { enabled: true, derivedFromProviderId: "codex" },
+      },
+      logger,
+    });
+
+    await expect(
+      manager.listImportableSessions({ deduplicateSharedStores: true }),
+    ).resolves.toMatchObject([{ provider: "codex-profile-b", title: "Newer profile" }]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("listImportableSessions narrows to the providerFilter when supplied", async () => {
   const claudeClient = new RecordingPersistedAgentsClient("claude");
   const codexClient = new RecordingPersistedAgentsClient("codex");
@@ -8169,6 +8366,165 @@ test("listImportableSessions skips providers that lack supportsSessionListing ev
   expect(listableClient.calls).toBe(1);
   expect(nonListableClient.calls).toBe(0);
   expect(result.map((d) => d.provider)).toEqual(["claude"]);
+});
+
+test("listImportableSessions exposes transcript export only for readable providers", async () => {
+  const readable = new ReadablePersistedAgentsClient(
+    "codex",
+    [
+      {
+        providerHandleId: "codex-session",
+        cwd: "/tmp/recent",
+        title: null,
+        lastActivityAt: new Date("2026-01-01T00:00:00Z"),
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+      },
+    ],
+    { timeline: [], hasOlderEntries: false },
+  );
+  const unreadable = new RecordingPersistedAgentsClient("claude");
+  const manager = new AgentManager({
+    clients: { codex: readable, claude: unreadable },
+    providerDefinitions: {
+      codex: { enabled: true, derivedFromProviderId: null },
+      claude: { enabled: true, derivedFromProviderId: null },
+    },
+    logger,
+  });
+
+  const sessions = await manager.listImportableSessions({ limit: 20 });
+
+  expect(sessions.find((session) => session.provider === "codex")).toMatchObject({
+    supportsTranscriptExport: true,
+  });
+  expect(sessions.find((session) => session.provider === "claude")).not.toHaveProperty(
+    "supportsTranscriptExport",
+  );
+});
+
+test("readImportableSessionTimeline revalidates the source handle and realpath-equivalent cwd", async () => {
+  const sourceRoot = mkdtempSync(join(tmpdir(), "agent-manager-importable-read-"));
+  const sourceAlias = `${sourceRoot}-alias`;
+  symlinkSync(sourceRoot, sourceAlias, process.platform === "win32" ? "junction" : "dir");
+
+  try {
+    const sourceCwd = realpathSync(sourceRoot);
+    const client = new ReadablePersistedAgentsClient(
+      "codex",
+      [
+        {
+          providerHandleId: "thread-1",
+          cwd: sourceCwd,
+          title: "Desktop session",
+          lastActivityAt: new Date("2026-07-19T12:00:00Z"),
+          firstPromptPreview: "Review the change",
+          lastPromptPreview: "Review the change",
+        },
+      ],
+      {
+        timeline: [
+          {
+            timestamp: "2026-07-19T12:00:00.000Z",
+            item: { type: "user_message", text: "Review the change" },
+          },
+          {
+            timestamp: "2026-07-19T12:01:00.000Z",
+            item: { type: "assistant_message", text: "The change is ready." },
+          },
+        ],
+        hasOlderEntries: false,
+      },
+    );
+    const manager = new AgentManager({
+      clients: { codex: client },
+      providerDefinitions: { codex: { enabled: true, derivedFromProviderId: null } },
+      logger,
+    });
+
+    const result = await manager.readImportableSessionTimeline({
+      provider: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: sourceAlias,
+      limit: 25_000,
+    });
+
+    expect(client.listOptions).toEqual([{ limit: 200 }]);
+    expect(client.readInputs).toEqual([
+      {
+        providerHandleId: "thread-1",
+        cwd: sourceCwd,
+        limit: 25_000,
+      },
+    ]);
+    expect(result).toMatchObject({
+      source: {
+        provider: "codex",
+        providerHandleId: "thread-1",
+        cwd: sourceCwd,
+        supportsTranscriptExport: true,
+      },
+      hasOlderRows: false,
+    });
+    expect(result.rows.map((row) => row.item)).toEqual([
+      { type: "user_message", text: "Review the change" },
+      { type: "assistant_message", text: "The change is ready." },
+    ]);
+  } finally {
+    rmSync(sourceAlias, { recursive: true, force: true });
+    rmSync(sourceRoot, { recursive: true, force: true });
+  }
+});
+
+test("readImportableSessionTimeline rejects stale paths before invoking the provider reader", async () => {
+  const client = new ReadablePersistedAgentsClient(
+    "codex",
+    [
+      {
+        providerHandleId: "thread-1",
+        cwd: "/tmp/actual-source",
+        title: null,
+        lastActivityAt: new Date("2026-07-19T12:00:00Z"),
+        firstPromptPreview: null,
+        lastPromptPreview: null,
+      },
+    ],
+    { timeline: [], hasOlderEntries: false },
+  );
+  const manager = new AgentManager({
+    clients: { codex: client },
+    providerDefinitions: { codex: { enabled: true, derivedFromProviderId: null } },
+    logger,
+  });
+
+  await expect(
+    manager.readImportableSessionTimeline({
+      provider: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/tmp/different-source",
+      limit: 25_000,
+    }),
+  ).rejects.toThrow("Provider session no longer matches the selected directory");
+  expect(client.readInputs).toEqual([]);
+});
+
+test("readImportableSessionTimeline reports unsupported providers without listing or reading", async () => {
+  const client = new RecordingPersistedAgentsClient("codex");
+  const manager = new AgentManager({
+    clients: { codex: client },
+    providerDefinitions: { codex: { enabled: true, derivedFromProviderId: null } },
+    logger,
+  });
+
+  await expect(
+    manager.readImportableSessionTimeline({
+      provider: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/tmp/source",
+      limit: 25_000,
+    }),
+  ).rejects.toThrow("Provider 'codex' does not support transcript export for importable sessions");
+  expect(client.calls).toBe(0);
 });
 
 test("user_message events wrapping a paseo-system envelope are not added to the timeline", async () => {

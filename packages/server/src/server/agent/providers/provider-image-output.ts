@@ -21,6 +21,8 @@ const PROVIDER_IMAGE_ATTACHMENT_DIR = "paseo-attachments";
 const PROVIDER_IMAGE_ATTACHMENT_DIR_PREFIX = `${PROVIDER_IMAGE_ATTACHMENT_DIR}-`;
 const PRIVATE_ATTACHMENT_DIR_MODE = 0o700;
 const MATERIALIZED_IMAGE_FILE_MODE = 0o600;
+/** Hidden markdown provenance marker so transcript curation can drop all provider images. */
+export const PROVIDER_IMAGE_MARKDOWN_MARKER = "<!-- paseo-provider-image -->";
 
 let materializedImageAttachmentDir: string | null = null;
 
@@ -104,11 +106,31 @@ export function materializeProviderImage(image: {
 // keeps user-authored text from being mistaken for a provider image during history replay. The
 // separator still accepts old doubled-backslash Windows history; new Windows output uses file URIs.
 const PROVIDER_IMAGE_MARKDOWN = new RegExp(
-  `^!\\[[^\\]]*\\]\\([^)]*${PROVIDER_IMAGE_ATTACHMENT_DIR}(?:-[^/\\\\)]+)?[/\\\\]+(?:[^/\\\\)]+[/\\\\]+)?[0-9a-f]{64}\\.[a-z0-9]+\\)`,
+  `^!\\[[^\\]]*\\]\\([^)]*${PROVIDER_IMAGE_ATTACHMENT_DIR}(?:-[^/\\\\)]+)?[/\\\\]+(?:[^/\\\\)]+[/\\\\]+)?[0-9a-f]{64}\\.[a-z0-9]+\\)$`,
 );
+const LEGACY_PROVIDER_IMAGE_MARKDOWN = new RegExp(
+  `!\\[[^\\]]*\\]\\([^)]*${PROVIDER_IMAGE_ATTACHMENT_DIR}(?:-[^/\\\\)]+)?[/\\\\]+(?:[^/\\\\)]+[/\\\\]+)?[0-9a-f]{64}\\.[a-z0-9]+\\)`,
+  "g",
+);
+const PROVIDER_IMAGE_MARKDOWN_WITH_MARKER =
+  /!\[(?:\\.|[^\]])*]\((?:\\.|[^)])*\)<!-- paseo-provider-image -->/g;
+const PROVIDER_IMAGE_MARKDOWN_WITH_MARKER_ONLY =
+  /^!\[(?:\\.|[^\]])*]\((?:\\.|[^)])*\)<!-- paseo-provider-image -->$/;
 
 export function isProviderImageMarkdown(text: string): boolean {
-  return PROVIDER_IMAGE_MARKDOWN.test(text);
+  return PROVIDER_IMAGE_MARKDOWN_WITH_MARKER_ONLY.test(text) || PROVIDER_IMAGE_MARKDOWN.test(text);
+}
+
+/**
+ * Removes rendered provider image blocks from a transcript while preserving
+ * adjacent assistant prose. Timeline projection can coalesce adjacent
+ * assistant rows, so checking only whether an entire item is an image is not
+ * sufficient for privacy-safe exports.
+ */
+export function stripProviderImageMarkdown(text: string): string {
+  return text
+    .replace(PROVIDER_IMAGE_MARKDOWN_WITH_MARKER, "")
+    .replace(LEGACY_PROVIDER_IMAGE_MARKDOWN, "");
 }
 
 interface RenderProviderImageOutputOptions {
@@ -178,7 +200,7 @@ export function renderProviderImageOutputAsAssistantMarkdown(
     const altText = escapeMarkdownImageAlt(nonEmptyString(image.altText) ?? "Image");
     return {
       type: "assistant_message",
-      text: `![${altText}](${escapeMarkdownImageSource(source)})`,
+      text: `![${altText}](${escapeMarkdownImageSource(source)})${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
     };
   }
 
@@ -208,6 +230,6 @@ export function renderProviderImageOutputAsAssistantMarkdown(
   const altText = escapeMarkdownImageAlt(nonEmptyString(image.altText) ?? "Image");
   return {
     type: "assistant_message",
-    text: `![${altText}](${escapeMarkdownImageSource(materialized.path)})`,
+    text: `![${altText}](${escapeMarkdownImageSource(materialized.path)})${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
   };
 }

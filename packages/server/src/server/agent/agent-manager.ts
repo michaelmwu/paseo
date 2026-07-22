@@ -42,6 +42,7 @@ import {
   type ImportableProviderSession,
   type ListImportableSessionsOptions,
 } from "./agent-sdk-types.js";
+import { canonicalizeExistingPath, createRealpathAwarePathMatcher } from "../../utils/path.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
@@ -64,6 +65,7 @@ import { AgentRunState, type ForegroundTurnWaiter } from "./agent-run-state.js";
 import { getAgentProviderDefinition } from "@getpaseo/protocol/provider-manifest";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { isSystemInjectedEnvelope } from "./agent-prompt.js";
+import { isProviderInjectedSystemEnvelope } from "./provider-history-privacy.js";
 import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
 import type { PaseoToolCatalogFactory } from "./tools/types.js";
@@ -75,6 +77,8 @@ import {
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+const IMPORTABLE_SESSION_REVALIDATION_LIMIT = 200;
+const IMPORTABLE_SESSION_TIMELINE_MAX_ENTRIES = 25_000;
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
   supportsSessionPersistence: true,
@@ -194,10 +198,32 @@ export type ImportablePersistedAgentQueryOptions = ListImportableSessionsOptions
    * built-in importable allowlist + enabled + non-derived rules.
    */
   providerFilter?: Set<string>;
+  /**
+   * Internal-only read path for portable transcript export. Import-session
+   * adoption preserves every provider profile because its runtime wiring is
+   * meaningful; transcript copy can safely coalesce profiles proven to share
+   * the same native store.
+   */
+  deduplicateSharedStores?: boolean;
 };
 
 export interface ManagedImportableProviderSession extends ImportableProviderSession {
   provider: AgentProvider;
+  /** Present only when the selected provider can read this session without resuming it. */
+  supportsTranscriptExport?: boolean;
+}
+
+export interface ReadImportableProviderSessionTimelineInput {
+  provider: AgentProvider;
+  providerHandleId: string;
+  sourceCwd: string;
+  limit: number;
+}
+
+export interface ReadImportableProviderSessionTimelineResult {
+  source: ManagedImportableProviderSession;
+  rows: AgentTimelineRow[];
+  hasOlderRows: boolean;
 }
 
 export type AgentAttentionCallback = (params: {
@@ -527,7 +553,11 @@ function buildExplicitTimelineSeedForRegister(
 function buildImportedTimelineRows(entries: readonly ImportedTimelineEntry[]): AgentTimelineRow[] {
   const rows: AgentTimelineRow[] = [];
   for (const entry of entries) {
-    if (entry.item.type === "user_message" && isSystemInjectedEnvelope(entry.item.text)) {
+    if (
+      entry.item.type === "user_message" &&
+      (isSystemInjectedEnvelope(entry.item.text) ||
+        isProviderInjectedSystemEnvelope(entry.item.text))
+    ) {
       continue;
     }
     rows.push({
@@ -568,9 +598,28 @@ function getFirstUserMessageTextFromRows(rows: readonly AgentTimelineRow[]): str
   return null;
 }
 
+/**
+ * Returns an internal-only dedupe key for sessions whose provider adapters
+ * proved they read the same physical store. Do not fall back to a native
+ * handle alone: providers may reuse handle formats across independent homes.
+ */
+function getImportableSessionStoreDedupeKey(
+  session: ManagedImportableProviderSession,
+): string | null {
+  if (!session.sessionStoreFingerprint) {
+    return null;
+  }
+  return [
+    session.sessionStoreFingerprint,
+    session.providerHandleId,
+    canonicalizeExistingPath(session.cwd),
+  ].join("\0");
+}
+
 export class AgentManager {
   private readonly clients = new Map<AgentProvider, AgentClient>();
   private readonly providerEnabled = new Map<AgentProvider, boolean>();
+  private readonly providerDerivedFrom = new Map<AgentProvider, string | null>();
   private readonly agents = new Map<string, LiveManagedAgent>();
   private readonly timelineStore = new InMemoryAgentTimelineStore();
   private readonly providerSubagents = new ProviderSubagentStore();
@@ -643,9 +692,11 @@ export class AgentManager {
     clients: ProviderClientMap;
   }): void {
     this.providerEnabled.clear();
+    this.providerDerivedFrom.clear();
     for (const [provider, definition] of Object.entries(input.providerDefinitions)) {
       if (definition) {
         this.providerEnabled.set(provider, definition.enabled);
+        this.providerDerivedFrom.set(provider, definition.derivedFromProviderId ?? null);
       }
     }
 
@@ -822,12 +873,17 @@ export class AgentManager {
     const sessionLists = await Promise.all(
       providerEntries.map(async ([provider, client]) => {
         try {
+          const supportsTranscriptExport = Boolean(client.readImportableSessionTimeline);
           return (
             await client.listImportableSessions!({
               limit: options?.limit,
               cwd: options?.cwd,
             })
-          ).map((session) => Object.assign(session, { provider }));
+          ).map((session) =>
+            supportsTranscriptExport
+              ? Object.assign(session, { provider, supportsTranscriptExport: true })
+              : Object.assign(session, { provider }),
+          );
         } catch (error) {
           this.logger.warn(
             { err: error, provider },
@@ -838,11 +894,116 @@ export class AgentManager {
       }),
     );
     const sessions: ManagedImportableProviderSession[] = sessionLists.flat();
+    const visibleSessions = options?.deduplicateSharedStores
+      ? this.deduplicateImportableSessionsFromSharedStores(sessions)
+      : sessions;
 
     const limit = options?.limit ?? 20;
-    return sessions
+    return visibleSessions
       .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
       .slice(0, limit);
+  }
+
+  private deduplicateImportableSessionsFromSharedStores(
+    sessions: ManagedImportableProviderSession[],
+  ): ManagedImportableProviderSession[] {
+    const deduplicatedSessions = new Map<string, ManagedImportableProviderSession>();
+    const sessionsWithoutStoreIdentity: ManagedImportableProviderSession[] = [];
+    for (const session of sessions) {
+      const dedupeKey = getImportableSessionStoreDedupeKey(session);
+      if (!dedupeKey) {
+        sessionsWithoutStoreIdentity.push(session);
+        continue;
+      }
+
+      const existing = deduplicatedSessions.get(dedupeKey);
+      if (!existing || this.compareImportableSessionPreference(session, existing) < 0) {
+        deduplicatedSessions.set(dedupeKey, session);
+      }
+    }
+    return [...deduplicatedSessions.values(), ...sessionsWithoutStoreIdentity];
+  }
+
+  /**
+   * Select a stable profile for a native session visible through more than one
+   * profile. Prefer the base/built-in provider (it has the least profile
+   * specific runtime behavior), then the freshest descriptor, then provider
+   * ID so registry iteration order cannot affect the result.
+   */
+  private compareImportableSessionPreference(
+    left: ManagedImportableProviderSession,
+    right: ManagedImportableProviderSession,
+  ): number {
+    const leftDerivedRank = this.providerDerivedFrom.get(left.provider) ? 1 : 0;
+    const rightDerivedRank = this.providerDerivedFrom.get(right.provider) ? 1 : 0;
+    if (leftDerivedRank !== rightDerivedRank) {
+      return leftDerivedRank - rightDerivedRank;
+    }
+
+    const activityDifference = right.lastActivityAt.getTime() - left.lastActivityAt.getTime();
+    if (activityDifference !== 0) {
+      return activityDifference;
+    }
+    return left.provider.localeCompare(right.provider);
+  }
+
+  /**
+   * Reads a provider-native session only after proving that it is still in the
+   * provider's current importable-session listing. The source cwd comes from
+   * that listing, not from an untrusted request, before it reaches an adapter.
+   */
+  async readImportableSessionTimeline(
+    input: ReadImportableProviderSessionTimelineInput,
+  ): Promise<ReadImportableProviderSessionTimelineResult> {
+    this.requireEnabledProvider(input.provider);
+    const client = this.requireClient(input.provider);
+    const listImportableSessions = client.listImportableSessions?.bind(client);
+    const readImportableSessionTimeline = client.readImportableSessionTimeline?.bind(client);
+    if (
+      !client.capabilities.supportsSessionListing ||
+      !listImportableSessions ||
+      !readImportableSessionTimeline
+    ) {
+      throw new Error(
+        `Provider '${input.provider}' does not support transcript export for importable sessions`,
+      );
+    }
+
+    const requestedLimit = Number.isFinite(input.limit) ? Math.floor(input.limit) : 1;
+    const limit = Math.min(IMPORTABLE_SESSION_TIMELINE_MAX_ENTRIES, Math.max(1, requestedLimit));
+    const sessions = await listImportableSessions({
+      limit: IMPORTABLE_SESSION_REVALIDATION_LIMIT,
+    });
+    const matchingHandle = sessions.filter(
+      (session) => session.providerHandleId === input.providerHandleId,
+    );
+    if (matchingHandle.length === 0) {
+      throw new Error("Provider session is no longer available for transcript export");
+    }
+
+    const matchesRequestedCwd = createRealpathAwarePathMatcher(input.sourceCwd);
+    const source = matchingHandle.find((session) => matchesRequestedCwd(session.cwd));
+    if (!source) {
+      throw new Error("Provider session no longer matches the selected directory");
+    }
+
+    const result = await readImportableSessionTimeline({
+      providerHandleId: source.providerHandleId,
+      cwd: source.cwd,
+      limit,
+    });
+    const hasOverLimit = result.timeline.length > limit;
+    const timeline = hasOverLimit ? result.timeline.slice(-limit) : result.timeline;
+
+    return {
+      source: {
+        ...source,
+        provider: input.provider,
+        supportsTranscriptExport: true,
+      },
+      rows: buildImportedTimelineRows(timeline),
+      hasOlderRows: result.hasOlderEntries || hasOverLimit,
+    };
   }
 
   private isProviderImportable(

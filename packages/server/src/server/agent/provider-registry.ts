@@ -392,6 +392,7 @@ function wrapClientProvider(
 ): AgentClient {
   const listImportableSessions = inner.listImportableSessions?.bind(inner);
   const importSession = inner.importSession?.bind(inner);
+  const readImportableSessionTimeline = inner.readImportableSessionTimeline?.bind(inner);
   const listFeatures = inner.listFeatures?.bind(inner);
 
   return {
@@ -477,6 +478,9 @@ function wrapClientProvider(
             persistence,
           };
         }
+      : undefined,
+    readImportableSessionTimeline: readImportableSessionTimeline
+      ? async (input) => await readImportableSessionTimeline(input)
       : undefined,
     isAvailable: () => inner.isAvailable(),
     getDiagnostic: inner.getDiagnostic?.bind(inner),

@@ -49,6 +49,11 @@ import { renderPromptAttachmentAsText } from "../../prompt-attachments.js";
 import { claudeQuery, type ClaudeOptions, type ClaudeQueryFactory } from "./query.js";
 import { realClaudeRewindSdk, revertClaudeConversation, revertClaudeFiles } from "./rewind.js";
 import { normalizeProviderReplayTimestamp } from "../../provider-history-timestamps.js";
+import {
+  sanitizeProviderSessionLabel,
+  stripProviderInjectedSystemEnvelopePrefix,
+} from "../../provider-history-privacy.js";
+import { createProviderSessionStoreFingerprint } from "../../provider-session-store-fingerprint.js";
 import { claudeProjectDirSync } from "./project-dir.js";
 import { THINKING_APPLIES_NEXT_TURN_NOTICE } from "../../provider-notices.js";
 import {
@@ -91,6 +96,8 @@ import {
   type ListImportableSessionsOptions,
   type McpServerConfig,
   type ProviderCatalog,
+  type ReadImportableSessionTimelineInput,
+  type ReadImportableSessionTimelineResult,
   type ResolveAgentDefaultModeInput,
 } from "../../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
@@ -116,6 +123,22 @@ const CLAUDE_SETTING_SOURCES: NonNullable<ClaudeOptions["settingSources"]> = [
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function resolveClaudeConfigDir(
+  configDir: string | undefined,
+  runtimeSettings: ProviderRuntimeSettings | undefined,
+  overlays: Array<NodeJS.ProcessEnv | undefined> = [],
+): string {
+  return (
+    configDir ??
+    createProviderEnv({
+      baseEnv: process.env,
+      runtimeSettings,
+      overlays,
+    }).CLAUDE_CONFIG_DIR ??
+    path.join(os.homedir(), ".claude")
+  );
 }
 
 export function normalizeClaudeAskUserQuestionRequestInput(
@@ -372,6 +395,12 @@ interface ClaudeAgentSessionOptions {
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
+  /** Transcript readers must not materialize provider tool-result images. */
+  includeProviderImages?: boolean;
+  /** Transcript readers must report unavailable retained history instead of exporting an empty snapshot. */
+  strictPersistedHistory?: boolean;
+  /** Transcript readers only need the parent timeline, not subagent sidechains. */
+  includePersistedSidechains?: boolean;
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -1508,7 +1537,7 @@ export class ClaudeAgentClient implements AgentClient {
   async listImportableSessions(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]> {
-    const configDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
+    const configDir = resolveClaudeConfigDir(this.configDir, this.runtimeSettings);
     const projectsRoot = path.join(configDir, "projects");
     if (!(await pathExists(projectsRoot))) {
       return [];
@@ -1518,8 +1547,12 @@ export class ClaudeAgentClient implements AgentClient {
     const parsed = await Promise.all(
       candidates.map((candidate) => parseClaudeSessionDescriptor(candidate.path, candidate.mtime)),
     );
+    const sessionStoreFingerprint = createProviderSessionStoreFingerprint("claude", configDir);
     return parsed
       .filter((session): session is ImportableProviderSession => session !== null)
+      .map((session) =>
+        sessionStoreFingerprint ? Object.assign(session, { sessionStoreFingerprint }) : session,
+      )
       .slice(0, limit);
   }
 
@@ -1530,6 +1563,53 @@ export class ClaudeAgentClient implements AgentClient {
       context,
       resumeSession: this.resumeSession.bind(this),
     });
+  }
+
+  async readImportableSessionTimeline(
+    input: ReadImportableSessionTimelineInput,
+  ): Promise<ReadImportableSessionTimelineResult> {
+    const configDir = resolveClaudeConfigDir(this.configDir, this.runtimeSettings);
+    const session = new ClaudeAgentSession(
+      this.assertConfig({
+        provider: "claude",
+        cwd: input.cwd,
+        extra: {
+          claude: {
+            env: { CLAUDE_CONFIG_DIR: configDir },
+          },
+        },
+      }),
+      {
+        defaults: this.defaults,
+        runtimeSettings: this.runtimeSettings,
+        handle: {
+          provider: "claude",
+          sessionId: input.providerHandleId,
+          nativeHandle: input.providerHandleId,
+          metadata: { cwd: input.cwd },
+        },
+        logger: this.logger,
+        queryFactory: this.queryFactory,
+        resolveBinary: this.resolveBinary,
+        includeProviderImages: false,
+        strictPersistedHistory: true,
+        includePersistedSidechains: false,
+      },
+    );
+
+    try {
+      // Constructing this short-lived adapter reads the JSONL directly in its
+      // constructor. It never creates an SDK query, starts a turn, or mutates
+      // the provider-native session.
+      const timeline = session.readRetainedTimelineForTranscript();
+      const hasOlderEntries = timeline.length > input.limit;
+      return {
+        timeline: hasOlderEntries ? timeline.slice(-input.limit) : timeline,
+        hasOlderEntries,
+      };
+    } finally {
+      await session.close();
+    }
   }
 
   async isAvailable(): Promise<boolean> {
@@ -1899,6 +1979,9 @@ class ClaudeAgentSession implements AgentSession {
   private readonly logger: Logger;
   private readonly queryFactory?: ClaudeQueryFactory;
   private readonly resolveBinary: () => Promise<string>;
+  private readonly includeProviderImages: boolean;
+  private readonly strictPersistedHistory: boolean;
+  private readonly includePersistedSidechains: boolean;
   private query: Query | null = null;
   private childProcess: ChildProcess | null = null;
   private input: AsyncMessageInput<SDKUserMessage> | null = null;
@@ -1954,6 +2037,9 @@ class ClaudeAgentSession implements AgentSession {
     this.logger = options.logger.child({ agentId: this.agentId });
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
+    this.includeProviderImages = options.includeProviderImages ?? true;
+    this.strictPersistedHistory = options.strictPersistedHistory ?? false;
+    this.includePersistedSidechains = options.includePersistedSidechains ?? true;
     this.contextUsage = new ClaudeContextUsageState(
       findClaudeModel(this.config.model)?.contextWindowMaxTokens,
     );
@@ -1987,6 +2073,14 @@ class ClaudeAgentSession implements AgentSession {
 
   get id(): string | null {
     return this.claudeSessionId;
+  }
+
+  /**
+   * Returns a snapshot loaded directly from the persisted JSONL. This is used
+   * by the import transcript reader before any provider query is created.
+   */
+  readRetainedTimelineForTranscript(): PersistedTimelineEntry[] {
+    return this.persistedHistory.map((entry) => ({ ...entry }));
   }
 
   get features(): AgentFeature[] {
@@ -4215,13 +4309,22 @@ class ClaudeAgentSession implements AgentSession {
     try {
       const historyPath = this.resolveHistoryPath(sessionId);
       if (!historyPath || !fs.existsSync(historyPath)) {
+        if (this.strictPersistedHistory) {
+          throw new Error(`Claude session history is unavailable: ${sessionId}`);
+        }
         return;
       }
       const content = fs.readFileSync(historyPath, "utf8");
       this.ingestPersistedHistory(content);
-      this.ingestPersistedSidechains(content, readClaudeSidechainHistory(historyPath));
-    } catch {
-      // ignore history load failures
+      if (this.includePersistedSidechains) {
+        this.ingestPersistedSidechains(content, readClaudeSidechainHistory(historyPath));
+      }
+    } catch (error) {
+      if (this.strictPersistedHistory) {
+        throw error;
+      }
+      // Resuming an old local session must keep working even if its retained
+      // history has been pruned or is temporarily unreadable.
     }
   }
 
@@ -4280,7 +4383,6 @@ class ClaudeAgentSession implements AgentSession {
     if (entry.isSidechain) {
       return;
     }
-
     const historyTimestamp = normalizeProviderReplayTimestamp(entry.timestamp);
     const items = this.convertHistoryEntry(entry);
     const isVisibleUserEntry =
@@ -4309,7 +4411,10 @@ class ClaudeAgentSession implements AgentSession {
   private resolveHistoryPath(sessionId: string): string | null {
     const cwd = this.config.cwd;
     if (!cwd) return null;
-    const configDir = process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
+    const configDir = resolveClaudeConfigDir(undefined, this.runtimeSettings, [
+      this.config.extra?.claude?.env,
+      this.launchEnv,
+    ]);
     const candidates = [cwd];
     try {
       const realCwd = fs.realpathSync(cwd);
@@ -4525,6 +4630,20 @@ class ClaudeAgentSession implements AgentSession {
       );
     }
 
+    this.appendProviderImages(images, items);
+
+    if (typeof block.tool_use_id === "string") {
+      this.toolUseCache.delete(block.tool_use_id);
+    }
+  }
+
+  private appendProviderImages(
+    images: readonly ProviderImageOutput[],
+    items: AgentTimelineItem[],
+  ): void {
+    if (!this.includeProviderImages) {
+      return;
+    }
     for (const image of images) {
       const imageItem = renderProviderImageOutputAsAssistantMarkdown(image, {
         materialize: materializeProviderImage,
@@ -4532,10 +4651,6 @@ class ClaudeAgentSession implements AgentSession {
       if (imageItem) {
         items.push(imageItem);
       }
-    }
-
-    if (typeof block.tool_use_id === "string") {
-      this.toolUseCache.delete(block.tool_use_id);
     }
   }
 
@@ -5474,20 +5589,23 @@ function applyClaudeSessionEntryToAccumulator(
   if (entry.isSidechain) {
     return;
   }
-  if (entry.type === "user" && isSyntheticUserEntry(entry)) {
-    return;
-  }
   if (!acc.sessionId && typeof entry.sessionId === "string") {
     acc.sessionId = entry.sessionId;
   }
   if (!acc.cwd && typeof entry.cwd === "string") {
     acc.cwd = entry.cwd;
   }
+  if (
+    entry.type === "user" &&
+    (isSyntheticHistoryUserEntry(entry) || isToolResultUserEntry(entry))
+  ) {
+    return;
+  }
   if (entry.type === "user" && entry.message) {
     const text = extractClaudeUserText(entry.message);
     if (text) {
       if (!acc.title) {
-        acc.title = text;
+        acc.title = sanitizeProviderSessionLabel(text) ?? text;
       }
       const preview = normalizeImportablePromptPreview(text);
       acc.firstPromptPreview ??= preview;
@@ -5554,7 +5672,7 @@ function normalizeImportablePromptPreview(text: string): string | null {
 }
 
 function normalizeClaudeUserPromptText(text: string): string | null {
-  const normalized = text.trim();
+  const normalized = stripProviderInjectedSystemEnvelopePrefix(text).trim();
   if (!CLAUDE_COMMAND_MESSAGE_PATTERN.test(normalized)) {
     return normalized || null;
   }

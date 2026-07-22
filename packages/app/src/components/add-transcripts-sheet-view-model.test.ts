@@ -87,7 +87,7 @@ describe("getGitRemoteIdentity", () => {
 });
 
 describe("buildTranscriptSourceGroups", () => {
-  it("prioritizes the workspace, then the host-local project, then matching remotes", () => {
+  it("prioritizes the workspace, then the host-local project, matching remotes, and other projects", () => {
     const groups = buildTranscriptSourceGroups({
       destination,
       query: "",
@@ -130,6 +130,7 @@ describe("buildTranscriptSourceGroups", () => {
       ["workspace", ["workspace"]],
       ["project", ["project"]],
       ["repository", ["remote"]],
+      ["other", ["unrelated"]],
     ]);
   });
 
@@ -148,14 +149,14 @@ describe("buildTranscriptSourceGroups", () => {
     expect(groups[0]?.agents.map((entry) => entry.id)).toEqual(["remote"]);
   });
 
-  it("does not claim cross-host repository identity without a valid destination remote", () => {
+  it("places cross-host sources in Other projects without a valid destination remote", () => {
     const groups = buildTranscriptSourceGroups({
       destination: { ...destination, remoteUrl: null },
       query: "",
       agents: [agent({ id: "remote", serverId: "host-b" })],
     });
 
-    expect(groups).toEqual([]);
+    expect(summarizeGroups(groups)).toEqual([["other", ["remote"]]]);
   });
 
   it("excludes archived agents until hosts retain their timelines durably", () => {

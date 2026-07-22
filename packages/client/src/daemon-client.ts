@@ -29,6 +29,7 @@ import type {
   FetchAgentTimelineResponseMessage,
   AgentForkContextResponseMessage,
   AgentTranscriptExportResponseMessage,
+  ProviderSessionTranscriptExportResponseMessage,
   GitSetupOptions,
   CheckoutStatusResponse,
   CheckoutCommit,
@@ -544,6 +545,8 @@ type ScheduleUpdatePayload = Extract<
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 export type AgentTranscriptExportPayload = AgentTranscriptExportResponseMessage["payload"];
+export type ProviderSessionTranscriptExportPayload =
+  ProviderSessionTranscriptExportResponseMessage["payload"];
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
 export type FetchAgentTimelineProjection = FetchAgentTimelinePayload["projection"];
@@ -614,6 +617,14 @@ export interface AgentForkContextOptions {
 
 export interface AgentTranscriptExportOptions {
   agentId: string;
+  maxBytes?: number;
+  requestId?: string;
+}
+
+export interface ProviderSessionTranscriptExportOptions {
+  providerId: string;
+  providerHandleId: string;
+  sourceCwd: string;
   maxBytes?: number;
   requestId?: string;
 }
@@ -2047,6 +2058,7 @@ export class DaemonClient {
       ...(options?.providers ? { providers: options.providers } : {}),
       ...(options?.since ? { since: options.since } : {}),
       ...(options?.limit ? { limit: options.limit } : {}),
+      ...(options?.transcriptOnly ? { transcriptOnly: true } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -2810,6 +2822,42 @@ export class DaemonClient {
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "agent.transcript.export.response") {
+          return null;
+        }
+        if (msg.payload.requestId !== resolvedRequestId) {
+          return null;
+        }
+        return msg.payload;
+      },
+    });
+
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+
+    return payload;
+  }
+
+  async exportProviderSessionTranscript(
+    options: ProviderSessionTranscriptExportOptions,
+  ): Promise<ProviderSessionTranscriptExportPayload> {
+    const resolvedRequestId = this.createRequestId(options.requestId);
+    const message = SessionInboundMessageSchema.parse({
+      type: "provider.session.transcript.export.request",
+      providerId: options.providerId,
+      providerHandleId: options.providerHandleId,
+      sourceCwd: options.sourceCwd,
+      requestId: resolvedRequestId,
+      ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}),
+    });
+
+    const payload = await this.sendRequest({
+      requestId: resolvedRequestId,
+      message,
+      timeout: 15000,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "provider.session.transcript.export.response") {
           return null;
         }
         if (msg.payload.requestId !== resolvedRequestId) {

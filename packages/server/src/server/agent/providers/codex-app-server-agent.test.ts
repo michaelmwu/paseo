@@ -38,6 +38,7 @@ import {
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { asInternals as castInternals, createStub } from "../../test-utils/class-mocks.js";
 import { buildProviderRegistry } from "../provider-registry.js";
+import { PROVIDER_IMAGE_MARKDOWN_MARKER } from "./provider-image-output.js";
 
 interface CollaborationModeRecord {
   name: string;
@@ -111,7 +112,7 @@ function asInternals(session: CodexTestSession): CodexSessionTestAccess {
 }
 
 function markdownImageSource(markdown: string): string {
-  const match = markdown.match(/^!\[[^\]]*]\((.*)\)$/);
+  const match = markdown.match(/^!\[[^\]]*]\((.*?)\)(?:<!-- paseo-provider-image -->)?$/);
   if (!match) {
     throw new Error(`Expected markdown image, got: ${markdown}`);
   }
@@ -3867,7 +3868,7 @@ describe("Codex app-server provider", () => {
         turnId: "test-turn",
         item: {
           type: "assistant_message",
-          text: "![Image](file:///tmp/paseo%20image.png)",
+          text: `![Image](file:///tmp/paseo%20image.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
         },
       },
     ]);
@@ -3899,7 +3900,7 @@ describe("Codex app-server provider", () => {
           turnId: "test-turn",
           item: {
             type: "assistant_message",
-            text: `![Image](${expectedPath})`,
+            text: `![Image](${expectedPath})${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
           },
         },
       ]);
@@ -4589,7 +4590,279 @@ describe("Codex importable sessions", () => {
           capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true },
         },
       },
-      { method: "thread/list", params: { limit: 50, cwd: "/workspace/project-a" } },
+      {
+        method: "thread/list",
+        params: {
+          limit: 50,
+          sortKey: "updated_at",
+          sourceKinds: ["cli", "vscode", "appServer"],
+          cwd: "/workspace/project-a",
+        },
+      },
     ]);
+  });
+
+  test("tags importable sessions with the effective CODEX_HOME store identity", async () => {
+    const codexHome = await mkdtemp(path.join(tmpdir(), "paseo-codex-session-store-"));
+    const fakeClient = {
+      request: async (method: string) =>
+        method === "thread/list"
+          ? {
+              data: [
+                {
+                  id: "desktop-thread",
+                  cwd: "/workspace/project-a",
+                  preview: "Desktop task",
+                  updatedAt: 2000,
+                },
+              ],
+            }
+          : {},
+      notify: () => {},
+      dispose: async () => {},
+    };
+    const provider = new CodexAppServerAgentClient(
+      createTestLogger(),
+      { env: { CODEX_HOME: codexHome } },
+      { _createCodexClient: () => fakeClient },
+    );
+    castInternals<{ spawnAppServer: () => Promise<ChildProcessWithoutNullStreams> }>(
+      provider,
+    ).spawnAppServer = async () => {
+      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+      child.exitCode = 0;
+      child.signalCode = null;
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
+      return child;
+    };
+
+    try {
+      const sessions = await provider.listImportableSessions();
+      expect(sessions[0]?.sessionStoreFingerprint).toEqual(expect.any(String));
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  test("strips injected desktop instructions and bounds importable-session labels", async () => {
+    const fakeClient = {
+      request: async (method: string) =>
+        method === "thread/list"
+          ? {
+              data: [
+                {
+                  id: "conductor-thread",
+                  cwd: "/workspace/project-a",
+                  preview:
+                    "<system_instruction>Conductor launch instructions</system_instruction>\n\nAct on PR feedback",
+                  name: `${"A".repeat(300)}\nwith more detail`,
+                  updatedAt: 2000,
+                },
+              ],
+            }
+          : {},
+      notify: () => {},
+      dispose: async () => {},
+    };
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      _createCodexClient: () => fakeClient,
+    });
+    castInternals<{ spawnAppServer: () => Promise<ChildProcessWithoutNullStreams> }>(
+      provider,
+    ).spawnAppServer = async () => {
+      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+      child.exitCode = 0;
+      child.signalCode = null;
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
+      return child;
+    };
+
+    await expect(provider.listImportableSessions()).resolves.toEqual([
+      expect.objectContaining({
+        providerHandleId: "conductor-thread",
+        title: `${"A".repeat(239)}…`,
+        firstPromptPreview: "Act on PR feedback",
+        lastPromptPreview: "Act on PR feedback",
+      }),
+    ]);
+  });
+
+  test("follows thread/list cursors to find a GUI app-server session", async () => {
+    const cwd = "/workspace/project-a";
+    const calls: Array<{ method: string; params?: unknown }> = [];
+    const fakeClient = {
+      request: async (method: string, params?: unknown) => {
+        calls.push({ method, params });
+        if (method !== "thread/list") return {};
+
+        const cursor = (params as { cursor?: string } | undefined)?.cursor;
+        if (!cursor) {
+          return {
+            data: [
+              {
+                id: "other-project-thread",
+                cwd: "/workspace/project-b",
+                preview: "Other project",
+                createdAt: 1000,
+                updatedAt: 2000,
+              },
+            ],
+            nextCursor: "page-2",
+          };
+        }
+        return {
+          data: [
+            {
+              id: "desktop-thread",
+              cwd,
+              preview: "Continue the Desktop task",
+              name: "Desktop task",
+              createdAt: 2000,
+              updatedAt: 3000,
+              source: "appServer",
+            },
+          ],
+          nextCursor: null,
+        };
+      },
+      notify: () => {},
+      dispose: async () => {},
+    };
+
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      _createCodexClient: () => fakeClient,
+    });
+    castInternals<{ spawnAppServer: () => Promise<ChildProcessWithoutNullStreams> }>(
+      provider,
+    ).spawnAppServer = async () => {
+      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+      child.exitCode = 0;
+      child.signalCode = null;
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
+      return child;
+    };
+
+    await expect(provider.listImportableSessions({ cwd, limit: 1 })).resolves.toEqual([
+      expect.objectContaining({
+        providerHandleId: "desktop-thread",
+        cwd,
+        title: "Desktop task",
+      }),
+    ]);
+    expect(calls.filter((call) => call.method === "thread/list")).toEqual([
+      {
+        method: "thread/list",
+        params: {
+          limit: 50,
+          sortKey: "updated_at",
+          sourceKinds: ["cli", "vscode", "appServer"],
+          cwd,
+        },
+      },
+      {
+        method: "thread/list",
+        params: {
+          limit: 50,
+          sortKey: "updated_at",
+          sourceKinds: ["cli", "vscode", "appServer"],
+          cwd,
+          cursor: "page-2",
+        },
+      },
+    ]);
+  });
+
+  test("reads an external thread transcript without resuming or turning the source", async () => {
+    const calls: Array<{ method: string; params?: unknown }> = [];
+    const fakeClient = {
+      request: async (method: string, params?: unknown) => {
+        calls.push({ method, params });
+        if (method === "thread/read") {
+          return {
+            thread: {
+              turns: [
+                {
+                  items: [
+                    {
+                      type: "userMessage",
+                      id: "system-1",
+                      content: [
+                        {
+                          type: "text",
+                          text: "<system_instruction>Desktop runtime secret</system_instruction>",
+                        },
+                      ],
+                    },
+                    {
+                      type: "userMessage",
+                      id: "user-1",
+                      content: [
+                        {
+                          type: "text",
+                          text: "<system_instruction>Desktop runtime secret</system_instruction>\n\nInspect the GUI session",
+                        },
+                      ],
+                    },
+                    {
+                      type: "agentMessage",
+                      id: "assistant-1",
+                      text: "The retained reply.",
+                    },
+                    {
+                      type: "imageGeneration",
+                      id: "image-1",
+                      result: `data:image/png;base64,${ONE_BY_ONE_PNG_BASE64}`,
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        }
+        return {};
+      },
+      notify: () => {},
+      dispose: async () => {},
+    };
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      _createCodexClient: () => fakeClient,
+    });
+    castInternals<{ spawnAppServer: () => Promise<ChildProcessWithoutNullStreams> }>(
+      provider,
+    ).spawnAppServer = async () => {
+      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
+      child.exitCode = 0;
+      child.signalCode = null;
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
+      return child;
+    };
+
+    const transcript = await provider.readImportableSessionTimeline({
+      providerHandleId: "desktop-thread",
+      cwd: "/workspace/gui",
+      limit: 100,
+    });
+    expect(transcript).toMatchObject({
+      hasOlderEntries: false,
+      timeline: [
+        { item: { type: "user_message", text: "Inspect the GUI session" } },
+        { item: { type: "assistant_message", text: "The retained reply." } },
+      ],
+    });
+    expect(JSON.stringify(transcript)).not.toContain("Desktop runtime secret");
+    expect(JSON.stringify(transcript)).not.toContain(ONE_BY_ONE_PNG_BASE64);
+    expect(calls.map((call) => call.method)).toEqual(["initialize", "thread/read"]);
   });
 });

@@ -12,7 +12,10 @@ import {
   type TextPartInput as OpenCodeTextPartInput,
 } from "@opencode-ai/sdk/v2/client";
 import fs from "node:fs/promises";
-import { createPathEquivalenceMatcher } from "../../../utils/path.js";
+import {
+  createPathEquivalenceMatcher,
+  createRealpathAwarePathMatcher,
+} from "../../../utils/path.js";
 import pLimit from "p-limit";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -44,11 +47,14 @@ import {
   type ImportableProviderSession,
   type ImportProviderSessionContext,
   type ImportProviderSessionInput,
+  type ImportedTimelineEntry,
   type ListImportableSessionsOptions,
   type ResolveAgentCreateConfigInput,
   type ResolveAgentCreateConfigResult,
   type McpServerConfig,
   type ProviderCatalog,
+  type ReadImportableSessionTimelineInput,
+  type ReadImportableSessionTimelineResult,
   type ToolCallDetail,
   type ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
@@ -63,7 +69,7 @@ import {
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
 } from "../provider-launch-config.js";
-import { withTimeout } from "../../../utils/promise-timeout.js";
+import { withAbortTimeout, withTimeout } from "../../../utils/promise-timeout.js";
 import { execCommand } from "../../../utils/spawn.js";
 import { mapOpencodeToolCall } from "./opencode/tool-call-mapper.js";
 import {
@@ -82,6 +88,7 @@ import { runProviderTurn } from "./provider-runner.js";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { composeSystemPromptParts } from "../system-prompt.js";
 import { normalizeProviderReplayTimestamp } from "../provider-history-timestamps.js";
+import { isProviderInjectedSystemEnvelope } from "../provider-history-privacy.js";
 import { revertOpenCodeConversationAndFiles } from "./opencode/rewind.js";
 import type { ManagedProcessRegistry } from "../../managed-processes/managed-processes.js";
 
@@ -283,6 +290,7 @@ type OpenCodeMcpConfig =
 
 const MCP_ALREADY_PRESENT_ERROR_TOKENS = ["already", "exists", "connected"] as const;
 const OPENCODE_PROVIDER_LIST_TIMEOUT_MS = 30_000;
+const OPENCODE_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS = 10_000;
 const OPENCODE_METADATA_CONCURRENCY = 4;
 const openCodeMetadataLimit = pLimit(OPENCODE_METADATA_CONCURRENCY);
 const OPENCODE_HANDLED_BUILTIN_SLASH_COMMANDS: AgentSlashCommand[] = [
@@ -943,10 +951,18 @@ async function collectOpenCodeImportableSessionsFromSdk(
 ): Promise<ImportableProviderSession[]> {
   const limit = options?.limit ?? OPENCODE_PERSISTED_SESSION_LIMIT;
   const sessionListLimit = options?.cwd ? Math.max(limit, OPENCODE_PERSISTED_SESSION_LIMIT) : limit;
-  const response = await client.experimental.session.list({
-    archived: true,
-    roots: true,
-    limit: sessionListLimit,
+  const response = await withAbortTimeout({
+    timeoutMs: OPENCODE_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+    message: "OpenCode session.list timed out after 10s",
+    run: async (signal) =>
+      await client.experimental.session.list(
+        {
+          archived: true,
+          roots: true,
+          limit: sessionListLimit,
+        },
+        { signal },
+      ),
   });
 
   if (response.error) {
@@ -970,7 +986,7 @@ async function collectOpenCodeImportableSessionsFromSdk(
 
 function normalizeOpenCodeSessionTitle(title: string | null | undefined): string | null {
   const normalized = title?.trim();
-  return normalized ? normalized : null;
+  return normalized && !isProviderInjectedSystemEnvelope(normalized) ? normalized : null;
 }
 
 function getOpenCodeSessionTimestamp(session: OpenCodePersistedSession): number {
@@ -1075,23 +1091,37 @@ function findOpenCodeCompactionPart(
 async function readOpenCodeSessionMessagesFromSdk(
   client: Pick<OpencodeClient, "session">,
   session: OpenCodePersistedSession,
+  options?: { strict?: boolean; timeoutMs?: number },
 ): Promise<OpenCodeSessionMessage[]> {
-  const response = await client.session.messages({
-    sessionID: session.id,
-    directory: session.directory,
+  const timeoutMs = options?.timeoutMs ?? OPENCODE_PROVIDER_LIST_TIMEOUT_MS;
+  const response = await withAbortTimeout({
+    timeoutMs,
+    message: `OpenCode session.messages timed out after ${timeoutMs / 1000}s`,
+    run: async (signal) =>
+      await client.session.messages(
+        {
+          sessionID: session.id,
+          directory: session.directory,
+        },
+        { signal },
+      ),
   });
 
   if (response.error || !response.data) {
+    if (options?.strict) {
+      throw new Error(`Failed to read OpenCode session messages for ${session.id}`);
+    }
     return [];
   }
 
   return filterOpenCodeRevertedMessages(response.data, session.revert);
 }
 
-function buildOpenCodeSessionTimeline(
+function buildOpenCodeSessionTimelineEntries(
   messages: ReadonlyArray<OpenCodeSessionMessage>,
-): AgentTimelineItem[] {
-  const timeline: AgentTimelineItem[] = [];
+  options?: { excludeInjectedSystemMessages?: boolean },
+): ImportedTimelineEntry[] {
+  const timeline: ImportedTimelineEntry[] = [];
   let hideNextAssistantAfterCompaction = false;
 
   for (const message of messages) {
@@ -1104,17 +1134,35 @@ function buildOpenCodeSessionTimeline(
       hideNextAssistantAfterCompaction = false;
     }
 
-    timeline.push(...buildOpenCodeReplayTimelineEvents(message).map((event) => event.item));
+    for (const event of buildOpenCodeReplayTimelineEvents(message, options)) {
+      if (event.timestamp) {
+        timeline.push({ item: event.item, timestamp: event.timestamp });
+      } else {
+        timeline.push({ item: event.item });
+      }
+    }
 
     if (message.info.role === "user" && compactionPart) {
-      timeline.push(
-        createCompactionTimelineItem("completed", compactionPart.auto ? "auto" : "manual"),
-      );
+      const compactionTimestamp = resolveOpenCodeReplayTimestamp({
+        message: message.info,
+        part: compactionPart,
+      });
+      timeline.push({
+        item: createCompactionTimelineItem("completed", compactionPart.auto ? "auto" : "manual"),
+        ...(compactionTimestamp ? { timestamp: compactionTimestamp } : {}),
+      });
       hideNextAssistantAfterCompaction = true;
     }
   }
 
   return timeline;
+}
+
+function buildOpenCodeSessionTimeline(
+  messages: ReadonlyArray<OpenCodeSessionMessage>,
+  options?: { excludeInjectedSystemMessages?: boolean },
+): AgentTimelineItem[] {
+  return buildOpenCodeSessionTimelineEntries(messages, options).map((entry) => entry.item);
 }
 
 function filterOpenCodeRevertedMessages(
@@ -1171,6 +1219,7 @@ function readOpenCodeMessageModel(
 
 function buildOpenCodeReplayTimelineEvents(
   message: OpenCodeSessionMessage,
+  options?: { excludeInjectedSystemMessages?: boolean },
 ): Extract<AgentStreamEvent, { type: "timeline" }>[] {
   const { info, parts } = message;
   if (isOpenCodeCompactionSummaryMessage(info)) {
@@ -1182,7 +1231,8 @@ function buildOpenCodeReplayTimelineEvents(
       .map((part) => part.text)
       .join("");
 
-    return text
+    return text &&
+      !(options?.excludeInjectedSystemMessages && isProviderInjectedSystemEnvelope(text))
       ? [
           buildOpenCodeReplayTimelineEvent({
             item: { type: "user_message", text, messageId: info.id },
@@ -1463,9 +1513,17 @@ export class OpenCodeAgentClient implements AgentClient {
     });
 
     try {
-      const sessionResponse = await client.session.get({
-        sessionID: input.providerHandleId,
-        directory: input.cwd,
+      const sessionResponse = await withAbortTimeout({
+        timeoutMs: OPENCODE_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+        message: "OpenCode session.get timed out after 10s",
+        run: async (signal) =>
+          await client.session.get(
+            {
+              sessionID: input.providerHandleId,
+              directory: input.cwd,
+            },
+            { signal },
+          ),
       });
       if (sessionResponse.error || !sessionResponse.data) {
         throw new Error(`Failed to load OpenCode session ${input.providerHandleId}`);
@@ -1485,6 +1543,55 @@ export class OpenCodeAgentClient implements AgentClient {
           ...(model ? { model } : {}),
         },
       });
+    } finally {
+      await acquisition.release();
+    }
+  }
+
+  async readImportableSessionTimeline(
+    input: ReadImportableSessionTimelineInput,
+  ): Promise<ReadImportableSessionTimelineResult> {
+    const acquisition = await this.serverManager.acquireCurrent();
+    const client = this.createOpenCodeClient({
+      baseUrl: acquisition.server.url,
+      directory: input.cwd,
+    });
+
+    try {
+      // session.get and session.messages read retained history without
+      // attaching Paseo as the live session owner or starting a provider turn.
+      const sessionResponse = await withAbortTimeout({
+        timeoutMs: OPENCODE_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+        message: "OpenCode session.get timed out after 10s",
+        run: async (signal) =>
+          await client.session.get(
+            {
+              sessionID: input.providerHandleId,
+              directory: input.cwd,
+            },
+            { signal },
+          ),
+      });
+      if (sessionResponse.error || !sessionResponse.data) {
+        throw new Error(`Failed to load OpenCode session ${input.providerHandleId}`);
+      }
+      const session = sessionResponse.data;
+      if (!createRealpathAwarePathMatcher(input.cwd)(session.directory)) {
+        throw new Error("OpenCode session no longer matches the selected directory");
+      }
+
+      const messages = await readOpenCodeSessionMessagesFromSdk(client, session, {
+        strict: true,
+        timeoutMs: OPENCODE_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+      });
+      const timeline = buildOpenCodeSessionTimelineEntries(messages, {
+        excludeInjectedSystemMessages: true,
+      });
+      const hasOlderEntries = timeline.length > input.limit;
+      return {
+        timeline: hasOlderEntries ? timeline.slice(-input.limit) : timeline,
+        hasOlderEntries,
+      };
     } finally {
       await acquisition.release();
     }

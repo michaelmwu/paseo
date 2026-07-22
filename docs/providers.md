@@ -48,6 +48,16 @@ Draft metadata lookups should avoid creating provider sessions when the upstream
 
 Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, and last activity. Import calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the Paseo agent only after it is ready.
 
+When a provider stores sessions under a configurable home, discovery and resumed-history hydration must resolve that home from the same effective provider environment. Do not read only the daemon's process environment: a configured provider profile may deliberately use a different store (for example, `CLAUDE_CONFIG_DIR`). App-server-backed listings must request every user-visible source kind and follow cursors with a bounded scan so GUI-created sessions are not silently omitted.
+
+Providers may additionally implement `readImportableSessionTimeline` for the
+Transcript Context flow. The AgentManager revalidates a selected native handle
+and realpath-aware cwd against a fresh listing before calling it. The adapter
+must read retained history only: it must not resume, register, archive, start a
+turn in, or otherwise mutate the provider-native session. Return normalized
+timeline entries and whether older entries were omitted; the daemon applies the
+shared privacy curation and byte limits.
+
 ## Provider Helper Processes
 
 Provider-owned helper processes that can outlive an individual agent session must be recorded in the daemon's managed-process registry. Store provider/kind metadata, the PID, launch command/args, and process identity captured from the platform process table. Remove the record on normal exit or shutdown.

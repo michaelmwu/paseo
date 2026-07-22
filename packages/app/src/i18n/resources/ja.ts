@@ -352,15 +352,21 @@ export const ja: TranslationResources = {
       thisWorkspace: "このワークスペース",
       otherWorkspaces: "このプロジェクトの他のワークスペース",
       sameRepository: "同じ Git プロジェクト",
+      otherProjects: "他のプロジェクト",
+      externalSessions: "外部セッション",
     },
     status: {
       loading: "トランスクリプトを読み込み中...",
       failedToLoad: "トランスクリプトを読み込めません",
       hostsUnavailable: "一部のホストを利用できません: {{hosts}}",
-      noTranscripts: "このプロジェクトで利用できるトランスクリプトはありません",
+      noTranscripts: "利用可能なトランスクリプトはありません",
       noMatches: "検索に一致するトランスクリプトはありません",
       runningSnapshot: "実行中 · 現時点までのスナップショット",
       updateHost: "トランスクリプトをエクスポートするにはこのホストを更新してください",
+      providerSessionUnavailable:
+        "このプロバイダーセッションはトランスクリプトとしてコピーできません",
+      transcriptOnlyDisclosure:
+        "トランスクリプトのみ: ファイル、ブランチ、未コミットの変更、ツール、設定、ネイティブセッションは元のワークスペースに残ります。",
       unavailable: "トランスクリプトは利用できなくなりました",
       exportFailed: "トランスクリプトをエクスポートできません",
       maximumSelected: "追加できるトランスクリプトは最大 {{count}} 件です",

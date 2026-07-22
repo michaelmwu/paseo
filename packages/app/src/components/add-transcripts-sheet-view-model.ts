@@ -10,7 +10,7 @@ export const MAX_TRANSCRIPT_BYTES = AGENT_TRANSCRIPT_EXPORT_MAX_BYTES;
 export const MAX_DRAFT_TRANSCRIPT_BYTES = 384 * 1024;
 export const TRANSCRIPT_EXPORT_CONCURRENCY = 2;
 
-export type TranscriptSourceGroupKind = "workspace" | "project" | "repository";
+export type TranscriptSourceGroupKind = "workspace" | "project" | "repository" | "other";
 
 export interface TranscriptSourceGroup {
   kind: TranscriptSourceGroupKind;
@@ -236,6 +236,7 @@ export function buildTranscriptSourceGroups(input: {
   const workspace: AggregatedAgent[] = [];
   const project: AggregatedAgent[] = [];
   const repository: AggregatedAgent[] = [];
+  const other: AggregatedAgent[] = [];
   const destinationRemoteIdentity = getGitRemoteIdentity(input.destination.remoteUrl);
   const seen = new Set<string>();
 
@@ -273,13 +274,17 @@ export function buildTranscriptSourceGroups(input: {
       sourceRemoteIdentity(agent) === destinationRemoteIdentity
     ) {
       repository.push(agent);
+      continue;
     }
+
+    other.push(agent);
   }
 
   const groups: TranscriptSourceGroup[] = [
     { kind: "workspace", agents: workspace },
     { kind: "project", agents: project },
     { kind: "repository", agents: repository },
+    { kind: "other", agents: other },
   ];
   return groups
     .filter((group) => group.agents.length > 0)

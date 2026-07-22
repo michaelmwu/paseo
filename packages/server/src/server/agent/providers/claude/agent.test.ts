@@ -987,6 +987,257 @@ describe("normalizeClaudeAskUserQuestionUpdatedInput", () => {
 });
 
 describe("ClaudeAgentClient.listImportableSessions", () => {
+  test("uses the configured CLAUDE_CONFIG_DIR for discovery and resumed history", async () => {
+    const daemonConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-daemon-"));
+    const configuredConfigDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "paseo-claude-configured-"),
+    );
+    const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = daemonConfigDir;
+
+    try {
+      const daemonCwd = "/tmp/paseo-daemon-claude-import";
+      const configuredCwd = "/tmp/paseo-configured-claude-import";
+      const daemonSessionId = "daemon-session";
+      const configuredSessionId = "configured-session";
+      const writeSession = async (
+        configDir: string,
+        cwd: string,
+        sessionId: string,
+        prompt: string,
+      ) => {
+        const projectDir = path.join(configDir, "projects", cwd.replace(/[\\/._:]/g, "-"));
+        await fs.mkdir(projectDir, { recursive: true });
+        await fs.writeFile(
+          path.join(projectDir, `${sessionId}.jsonl`),
+          `${JSON.stringify({
+            parentUuid: null,
+            isSidechain: false,
+            type: "user",
+            message: { role: "user", content: prompt },
+            cwd,
+            sessionId,
+          })}\n`,
+          "utf-8",
+        );
+      };
+
+      await writeSession(daemonConfigDir, daemonCwd, daemonSessionId, "Daemon-only session");
+      await writeSession(
+        configuredConfigDir,
+        configuredCwd,
+        configuredSessionId,
+        "<system_instruction>Configured desktop runtime secret</system_instruction>\n\nConfigured profile session",
+      );
+
+      const client = new ClaudeAgentClient({
+        logger: createTestLogger(),
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configuredConfigDir } },
+        resolveBinary: async () => "/test/claude/bin",
+      });
+
+      const importableSessions = await client.listImportableSessions();
+      expect(importableSessions).toEqual([
+        expect.objectContaining({
+          providerHandleId: configuredSessionId,
+          cwd: configuredCwd,
+          title: "Configured profile session",
+        }),
+      ]);
+      expect(importableSessions[0]?.sessionStoreFingerprint).toEqual(expect.any(String));
+
+      const resumedSession = await client.resumeSession({
+        provider: "claude",
+        sessionId: configuredSessionId,
+        metadata: { cwd: configuredCwd },
+      });
+      const history: AgentStreamEvent[] = [];
+      for await (const event of resumedSession.streamHistory()) {
+        history.push(event);
+      }
+      expect(history).toContainEqual(
+        expect.objectContaining({
+          type: "timeline",
+          item: expect.objectContaining({
+            type: "user_message",
+            text: "Configured profile session",
+          }),
+        }),
+      );
+      expect(JSON.stringify(importableSessions)).not.toContain("Configured desktop runtime secret");
+      expect(JSON.stringify(history)).not.toContain("Configured desktop runtime secret");
+      await resumedSession.close();
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+      }
+      await Promise.all([
+        fs.rm(daemonConfigDir, { recursive: true, force: true }),
+        fs.rm(configuredConfigDir, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  test("reads a configured-store transcript without creating a Claude SDK query", async () => {
+    const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-transcript-"));
+    const cwd = "/tmp/paseo-claude-transcript-source";
+    const sessionId = "external-claude-session";
+    const projectDir = path.join(configDir, "projects", cwd.replace(/[\\/._:]/g, "-"));
+    const historyPath = path.join(projectDir, `${sessionId}.jsonl`);
+    const queryFactory = vi.fn();
+
+    try {
+      await fs.mkdir(projectDir, { recursive: true });
+      await fs.writeFile(
+        historyPath,
+        [
+          JSON.stringify({
+            type: "user",
+            uuid: "system-1",
+            timestamp: "2026-07-18T08:59:00.000Z",
+            message: {
+              role: "user",
+              content: "<system_instruction>Claude desktop runtime secret</system_instruction>",
+            },
+          }),
+          JSON.stringify({
+            type: "user",
+            uuid: "user-1",
+            timestamp: "2026-07-18T09:00:00.000Z",
+            message: {
+              role: "user",
+              content:
+                "<system_instruction>Claude desktop runtime secret</system_instruction>\n\nRead this without taking it over",
+            },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: "assistant-1",
+            timestamp: "2026-07-18T09:00:01.000Z",
+            message: { role: "assistant", content: "Retained response" },
+          }),
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const client = new ClaudeAgentClient({
+        logger: createTestLogger(),
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
+        queryFactory,
+        resolveBinary: async () => "/test/claude/bin",
+      });
+
+      const transcript = await client.readImportableSessionTimeline({
+        providerHandleId: sessionId,
+        cwd,
+        limit: 100,
+      });
+      expect(transcript).toMatchObject({
+        hasOlderEntries: false,
+        timeline: [
+          {
+            timestamp: "2026-07-18T09:00:00.000Z",
+            item: { type: "user_message", text: "Read this without taking it over" },
+          },
+          {
+            timestamp: "2026-07-18T09:00:01.000Z",
+            item: { type: "assistant_message", text: "Retained response" },
+          },
+        ],
+      });
+      expect(JSON.stringify(transcript)).not.toContain("Claude desktop runtime secret");
+      expect(queryFactory).not.toHaveBeenCalled();
+      await expect(fs.readFile(historyPath, "utf-8")).resolves.toContain("Retained response");
+    } finally {
+      await fs.rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not traverse Claude sidechains while reading an external transcript", async () => {
+    const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-transcript-"));
+    const cwd = "/tmp/paseo-claude-transcript-source";
+    const sessionId = "external-claude-session-with-sidechain";
+    const projectDir = path.join(configDir, "projects", cwd.replace(/[\\/._:]/g, "-"));
+    const historyPath = path.join(projectDir, `${sessionId}.jsonl`);
+    const sidechainPath = path.join(projectDir, sessionId, "subagents");
+    const queryFactory = vi.fn();
+
+    try {
+      await fs.mkdir(path.dirname(sidechainPath), { recursive: true });
+      // A regular file at the sidechain-directory path makes an attempted
+      // recursive sidechain read fail with ENOTDIR. The transcript reader must
+      // still return the parent timeline because it does not load sidechains.
+      await fs.writeFile(sidechainPath, "not a sidechain directory", "utf-8");
+      await fs.writeFile(
+        historyPath,
+        [
+          JSON.stringify({
+            type: "user",
+            uuid: "user-1",
+            timestamp: "2026-07-18T09:00:00.000Z",
+            message: { role: "user", content: "Parent history only" },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: "assistant-1",
+            timestamp: "2026-07-18T09:00:01.000Z",
+            message: { role: "assistant", content: "Parent response only" },
+          }),
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const client = new ClaudeAgentClient({
+        logger: createTestLogger(),
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
+        queryFactory,
+        resolveBinary: async () => "/test/claude/bin",
+      });
+
+      await expect(
+        client.readImportableSessionTimeline({
+          providerHandleId: sessionId,
+          cwd,
+          limit: 100,
+        }),
+      ).resolves.toMatchObject({
+        timeline: [
+          { item: { type: "user_message", text: "Parent history only" } },
+          { item: { type: "assistant_message", text: "Parent response only" } },
+        ],
+      });
+      expect(queryFactory).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails an external Claude transcript read when retained history is missing", async () => {
+    const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-transcript-"));
+    const queryFactory = vi.fn();
+    const client = new ClaudeAgentClient({
+      logger: createTestLogger(),
+      runtimeSettings: { env: { CLAUDE_CONFIG_DIR: configDir } },
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+
+    try {
+      await expect(
+        client.readImportableSessionTimeline({
+          providerHandleId: "missing-external-claude-session",
+          cwd: "/tmp/paseo-claude-missing-source",
+          limit: 100,
+        }),
+      ).rejects.toThrow("Claude session history is unavailable: missing-external-claude-session");
+      expect(queryFactory).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(configDir, { recursive: true, force: true });
+    }
+  });
+
   test("shows Claude slash command prompts without transcript tags", async () => {
     const tmpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "paseo-claude-import-"));
     const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
@@ -1057,6 +1308,7 @@ describe("ClaudeAgentClient.listImportableSessions", () => {
           firstPromptPreview: "/diagnose recently the PR data does not update",
           lastPromptPreview: "/diagnose recently the PR data does not update",
           lastActivityAt: new Date("2026-06-12T11:00:00.000Z"),
+          sessionStoreFingerprint: expect.any(String),
         },
         {
           providerHandleId: commandSessionId,
@@ -1065,6 +1317,7 @@ describe("ClaudeAgentClient.listImportableSessions", () => {
           firstPromptPreview: "/caveman:caveman",
           lastPromptPreview: "/caveman:caveman",
           lastActivityAt: new Date("2026-06-12T10:00:00.000Z"),
+          sessionStoreFingerprint: expect.any(String),
         },
       ]);
     } finally {

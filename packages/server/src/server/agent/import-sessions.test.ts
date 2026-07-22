@@ -20,6 +20,7 @@ import {
   importProviderSession,
   listImportableProviderSessions,
   normalizeImportAgentRequest,
+  readEligibleImportableProviderSessionTimeline,
 } from "./import-sessions.js";
 
 const directorySymlinkType = process.platform === "win32" ? "junction" : "dir";
@@ -273,6 +274,40 @@ test("listImportableProviderSessions filters, sorts, limits, and projects import
   });
 });
 
+test("listImportableProviderSessions requests shared-store dedupe only for transcript discovery", async () => {
+  const listImportableSessions = vi.fn(async () => []);
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions,
+  } satisfies Pick<AgentManager, "listAgents" | "listImportableSessions">;
+
+  await listImportableProviderSessions({
+    request: makeRequest({ transcriptOnly: true }),
+    agentManager,
+    agentStorage: { list: async () => [] },
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+
+  expect(listImportableSessions).toHaveBeenCalledWith({
+    limit: 20,
+    providerFilter: undefined,
+    deduplicateSharedStores: true,
+  });
+
+  listImportableSessions.mockClear();
+  await listImportableProviderSessions({
+    request: makeRequest(),
+    agentManager,
+    agentStorage: { list: async () => [] },
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+
+  expect(listImportableSessions).toHaveBeenCalledWith({
+    limit: 20,
+    providerFilter: undefined,
+  });
+});
+
 test("listImportableProviderSessions includes a provider session after its Paseo agent is archived", async () => {
   const cwd = "/tmp/project";
   const archivedSession = makeImportableSession({
@@ -307,6 +342,41 @@ test("listImportableProviderSessions includes a provider session after its Paseo
 
   expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["archived-session"]);
   expect(result.filteredAlreadyImportedCount).toBe(0);
+});
+
+test("listImportableProviderSessions hides archived Paseo sessions for transcript-only discovery", async () => {
+  const cwd = "/tmp/project";
+  const archivedSession = makeImportableSession({
+    provider: "claude",
+    sessionId: "archived-transcript-session",
+    cwd,
+    title: "Archived import",
+    lastActivityAt: "2026-04-30T12:00:00.000Z",
+    firstPrompt: "do not offer this externally",
+  });
+
+  const result = await listImportableProviderSessions({
+    request: makeRequest({ cwd, providers: ["claude"], transcriptOnly: true }),
+    agentManager: {
+      listAgents: () => [],
+      listImportableSessions: async () => [archivedSession],
+    },
+    agentStorage: {
+      list: async () => [
+        {
+          provider: "claude",
+          archivedAt: "2026-04-30T12:01:00.000Z",
+          persistence: {
+            provider: "claude",
+            sessionId: "archived-transcript-session",
+          },
+        } as StoredAgentRecord,
+      ],
+    },
+    providerSnapshotManager: { getProviderLabel: () => "Claude" },
+  });
+
+  expect(result).toEqual({ entries: [], filteredAlreadyImportedCount: 0 });
 });
 
 test("listImportableProviderSessions includes an archived provider session still loaded in memory", async () => {
@@ -393,6 +463,190 @@ test("listImportableProviderSessions filters out metadata generation sessions", 
   expect(result.filteredAlreadyImportedCount).toBe(0);
 });
 
+test("readEligibleImportableProviderSessionTimeline refuses sessions hidden by import policy", async () => {
+  const cwd = "/tmp/project";
+  const cases: Array<{
+    name: string;
+    firstPrompt: string;
+    storedRecords: StoredAgentRecord[];
+  }> = [
+    {
+      name: "metadata generation",
+      firstPrompt: "Generate metadata for a coding agent based on the user prompt.",
+      storedRecords: [],
+    },
+    {
+      name: "already imported",
+      firstPrompt: "Review this implementation",
+      storedRecords: [
+        {
+          id: "paseo-owned-agent",
+          provider: "codex",
+          persistence: {
+            provider: "codex",
+            sessionId: "hidden-handle",
+            nativeHandle: "hidden-handle",
+          },
+        } as StoredAgentRecord,
+      ],
+    },
+  ];
+
+  for (const scenario of cases) {
+    const source = makeImportableSession({
+      sessionId: "hidden-handle",
+      nativeHandle: "hidden-handle",
+      cwd,
+      title: scenario.name,
+      lastActivityAt: "2026-07-19T12:00:00.000Z",
+      firstPrompt: scenario.firstPrompt,
+    });
+    const readImportableSessionTimeline = vi.fn(async () => ({
+      source,
+      rows: [],
+      hasOlderRows: false,
+    }));
+    const agentManager = {
+      listAgents: () => [],
+      listImportableSessions: async () => [source],
+      readImportableSessionTimeline,
+    } satisfies Pick<
+      AgentManager,
+      "listAgents" | "listImportableSessions" | "readImportableSessionTimeline"
+    >;
+
+    await expect(
+      readEligibleImportableProviderSessionTimeline({
+        requestId: `hidden-${scenario.name}`,
+        provider: "codex",
+        providerHandleId: "hidden-handle",
+        cwd,
+        limit: 25_000,
+        agentManager,
+        agentStorage: { list: async () => scenario.storedRecords },
+        providerSnapshotManager: { getProviderLabel: () => "Codex" },
+      }),
+    ).rejects.toThrow("Provider session is not eligible for transcript export");
+    expect(readImportableSessionTimeline).not.toHaveBeenCalled();
+  }
+});
+
+test("readEligibleImportableProviderSessionTimeline rejects a third concurrent export before reading it", async () => {
+  const cwd = "/tmp/project";
+  const sources = ["first", "second", "third"].map((name) =>
+    makeImportableSession({
+      sessionId: `${name}-handle`,
+      nativeHandle: `${name}-handle`,
+      cwd,
+      title: `${name} concurrent session`,
+      lastActivityAt: "2026-07-19T12:00:00.000Z",
+      firstPrompt: "Review this",
+    }),
+  );
+  let releaseRead: (() => void) | undefined;
+  const readBlocked = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  const readImportableSessionTimeline = vi.fn(async () => {
+    await readBlocked;
+    return { source: sources[0], rows: [], hasOlderRows: false };
+  });
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions: async () => sources,
+    readImportableSessionTimeline,
+  } satisfies Pick<
+    AgentManager,
+    "listAgents" | "listImportableSessions" | "readImportableSessionTimeline"
+  >;
+  const inputFor = (providerHandleId: string) => ({
+    requestId: `concurrent-export-${providerHandleId}`,
+    provider: "codex" as const,
+    providerHandleId,
+    cwd,
+    limit: 25_000,
+    agentManager,
+    agentStorage: { list: async () => [] } satisfies Pick<AgentStorage, "list">,
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+
+  const first = readEligibleImportableProviderSessionTimeline(inputFor("first-handle"));
+  const second = readEligibleImportableProviderSessionTimeline(inputFor("second-handle"));
+  await vi.waitFor(() => expect(readImportableSessionTimeline).toHaveBeenCalledTimes(2));
+
+  await expect(
+    readEligibleImportableProviderSessionTimeline(inputFor("third-handle")),
+  ).rejects.toThrow("Transcript export is busy. Please retry.");
+  expect(readImportableSessionTimeline).toHaveBeenCalledTimes(2);
+
+  releaseRead?.();
+  await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+});
+
+test("readEligibleImportableProviderSessionTimeline releases capacity after a provider reader times out", async () => {
+  vi.useFakeTimers();
+  try {
+    const cwd = "/tmp/project";
+    const sources = ["first", "second", "retry"].map((name) =>
+      makeImportableSession({
+        sessionId: `${name}-stalled-handle`,
+        nativeHandle: `${name}-stalled-handle`,
+        cwd,
+        title: `${name} stalled session`,
+        lastActivityAt: "2026-07-19T12:00:00.000Z",
+        firstPrompt: "Review this",
+      }),
+    );
+    const readImportableSessionTimeline = vi.fn((input: { providerHandleId: string }) => {
+      if (input.providerHandleId === "retry-stalled-handle") {
+        return Promise.resolve({ source: sources[2], timeline: [], hasOlderRows: false });
+      }
+      return new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("Provider transcript read timed out")), 10_000);
+      });
+    });
+    const agentManager = {
+      listAgents: () => [],
+      listImportableSessions: async () => sources,
+      readImportableSessionTimeline,
+    } satisfies Pick<
+      AgentManager,
+      "listAgents" | "listImportableSessions" | "readImportableSessionTimeline"
+    >;
+    const inputFor = (providerHandleId: string) => ({
+      requestId: `stalled-export-${providerHandleId}`,
+      provider: "codex" as const,
+      providerHandleId,
+      cwd,
+      limit: 25_000,
+      agentManager,
+      agentStorage: { list: async () => [] } satisfies Pick<AgentStorage, "list">,
+      providerSnapshotManager: { getProviderLabel: () => "Codex" },
+    });
+
+    const first = readEligibleImportableProviderSessionTimeline(inputFor("first-stalled-handle"));
+    const second = readEligibleImportableProviderSessionTimeline(inputFor("second-stalled-handle"));
+    const stalledReads = expect(Promise.all([first, second])).rejects.toThrow(
+      "Provider transcript read timed out",
+    );
+    await vi.waitFor(() => expect(readImportableSessionTimeline).toHaveBeenCalledTimes(2));
+    await expect(
+      readEligibleImportableProviderSessionTimeline(inputFor("retry-stalled-handle")),
+    ).rejects.toThrow("Transcript export is busy. Please retry.");
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await stalledReads;
+
+    const retry = readEligibleImportableProviderSessionTimeline(inputFor("retry-stalled-handle"));
+    await vi.waitFor(() => expect(readImportableSessionTimeline).toHaveBeenCalledTimes(3));
+    await expect(retry).resolves.toMatchObject({
+      source: { providerHandleId: "retry-stalled-handle" },
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("listImportableProviderSessions keeps realpath-equivalent cwd matches", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "paseo-import-cwd-"));
   const realCwd = path.join(root, "real-project");
@@ -402,7 +656,7 @@ test("listImportableProviderSessions keeps realpath-equivalent cwd matches", asy
   const persistedCwd = realpathSync(linkedCwd);
 
   const result = await listImportableProviderSessions({
-    request: makeRequest({ cwd: linkedCwd, providers: ["pi"] }),
+    request: makeRequest({ cwd: linkedCwd, providers: ["pi"], transcriptOnly: true }),
     agentManager: {
       listAgents: () => [],
       listImportableSessions: async () => [
@@ -410,7 +664,7 @@ test("listImportableProviderSessions keeps realpath-equivalent cwd matches", asy
           provider: "pi",
           sessionId: "pi-session",
           nativeHandle: "pi-handle",
-          cwd: persistedCwd,
+          cwd: linkedCwd,
           title: "Pi session",
           lastActivityAt: "2026-04-30T12:00:00.000Z",
           firstPrompt: "remember this",
@@ -423,7 +677,7 @@ test("listImportableProviderSessions keeps realpath-equivalent cwd matches", asy
     providerSnapshotManager: { getProviderLabel: () => "Pi" },
   });
 
-  expect(result.entries.map((entry) => entry.providerHandleId)).toEqual(["pi-handle"]);
+  expect(result.entries).toMatchObject([{ providerHandleId: "pi-handle", cwd: persistedCwd }]);
 });
 
 test("listImportableProviderSessions rejects invalid since values", async () => {
@@ -672,6 +926,55 @@ test("importProviderSession uses the provider import path with the requested lab
     timelineSize: 2,
     createdWorkspace: null,
   });
+});
+
+test("provider transcript export holds a native handle until a concurrent import has waited", async () => {
+  const harness = await ProviderImportHarness.create({ sessionId: "thread-shared" });
+  const source = makeImportableSession({
+    sessionId: "thread-shared",
+    nativeHandle: "thread-shared",
+    cwd: harness.snapshot.cwd,
+    title: "Shared desktop session",
+    lastActivityAt: "2026-07-19T12:00:00.000Z",
+    firstPrompt: "Read-only export",
+  });
+  let releaseRead: (() => void) | undefined;
+  const blockedRead = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  const manager = Object.assign(harness.manager, {
+    listAgents: () => [],
+    listImportableSessions: vi.fn(async () => [source]),
+    readImportableSessionTimeline: vi.fn(async () => {
+      await blockedRead;
+      return { source, timeline: [], hasOlderRows: false };
+    }),
+  }) satisfies ImportSessionAgentManager &
+    Pick<AgentManager, "listAgents" | "listImportableSessions" | "readImportableSessionTimeline">;
+
+  const exporting = readEligibleImportableProviderSessionTimeline({
+    requestId: "shared-export",
+    provider: "codex",
+    providerHandleId: "thread-shared",
+    cwd: harness.snapshot.cwd,
+    limit: 25_000,
+    agentManager: manager,
+    agentStorage: harness.storage,
+    providerSnapshotManager: { getProviderLabel: () => "Codex" },
+  });
+  await vi.waitFor(() => expect(manager.readImportableSessionTimeline).toHaveBeenCalledTimes(1));
+
+  const importing = harness.import({
+    providerHandleId: "thread-shared",
+    cwd: harness.snapshot.cwd,
+  });
+  await Promise.resolve();
+  expect(harness.freshImports).toEqual([]);
+
+  releaseRead?.();
+  await expect(exporting).resolves.toMatchObject({ source: { providerHandleId: "thread-shared" } });
+  await expect(importing).resolves.toMatchObject({ snapshot: { id: harness.snapshot.id } });
+  expect(harness.freshImports).toHaveLength(1);
 });
 
 test("importProviderSession rejects a provider session with an active stored owner", async () => {

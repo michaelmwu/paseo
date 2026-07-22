@@ -353,15 +353,21 @@ export const fr: TranslationResources = {
       thisWorkspace: "Cet espace de travail",
       otherWorkspaces: "Autres espaces de travail de ce projet",
       sameRepository: "Même projet Git",
+      otherProjects: "Autres projets",
+      externalSessions: "Sessions externes",
     },
     status: {
       loading: "Chargement des transcriptions...",
       failedToLoad: "Impossible de charger les transcriptions",
       hostsUnavailable: "Certains hôtes sont indisponibles : {{hosts}}",
-      noTranscripts: "Aucune transcription disponible pour ce projet",
+      noTranscripts: "Aucune transcription disponible",
       noMatches: "Aucune transcription ne correspond à votre recherche",
       runningSnapshot: "En cours · instantané jusqu’à maintenant",
       updateHost: "Mettez à jour cet hôte pour exporter des transcriptions",
+      providerSessionUnavailable:
+        "Cette session de fournisseur ne peut pas être copiée comme transcription",
+      transcriptOnlyDisclosure:
+        "Transcription uniquement : les fichiers, branches, modifications non validées, outils, réglages et la session native restent dans l’espace de travail source.",
       unavailable: "La transcription n'est plus disponible",
       exportFailed: "Impossible d'exporter la transcription",
       maximumSelected: "Vous pouvez ajouter jusqu'à {{count}} transcriptions",

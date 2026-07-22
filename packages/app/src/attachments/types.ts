@@ -3,6 +3,7 @@ import type {
   ForgeSearchItem,
   UploadedFileAttachment,
 } from "@getpaseo/protocol/messages";
+import type { ChatHistorySourceIdentity } from "@/attachments/chat-history-identity";
 
 export type AttachmentStorageType = "web-indexeddb" | "desktop-file" | "native-file";
 
@@ -81,9 +82,7 @@ export interface ChatHistoryContextAttachment {
   kind: "chat_history";
   id: string;
   attachment: Extract<AgentAttachment, { type: "text" }>;
-  source: {
-    serverId: string;
-    agentId: string;
+  source: ChatHistorySourceIdentity & {
     /** Human-readable source labels captured with the immutable snapshot. */
     workspaceLabel?: string;
     serverLabel?: string;

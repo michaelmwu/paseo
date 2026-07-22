@@ -9,10 +9,13 @@ import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
 import { isLikelyExternalToolName } from "@getpaseo/protocol/tool-name-normalization";
 import { buildToolCallDisplayModel } from "@getpaseo/protocol/tool-call-display";
 import { projectTimelineRows } from "./timeline-projection.js";
+import { stripProviderImageMarkdown } from "./providers/provider-image-output.js";
 
 const DEFAULT_MAX_ITEMS = 0;
 const MAX_TOOL_INPUT_CHARS = 400;
 const MAX_TOOL_SUMMARY_CHARS = 200;
+const CHAT_HISTORY_REFERENCE_ONLY_NOTICE =
+  "Reference context only; source files, Git state, tools, and session state were not transferred.";
 
 interface ActivityCuratorOptions {
   maxItems?: number;
@@ -22,6 +25,7 @@ interface ActivityCuratorOptions {
   includeToolSummary?: boolean;
   includeSubAgentLog?: boolean;
   portableToolMarkersOnly?: boolean;
+  excludeProviderImages?: boolean;
 }
 
 interface ActivityEntry {
@@ -216,7 +220,10 @@ function curateProjectedActivityEntries(
         entries.push(activityEntry(`[User] ${item.text.trim()}`));
         break;
       case "assistant_message":
-        buffers.message = appendText(buffers.message, item.text);
+        buffers.message = appendText(
+          buffers.message,
+          options?.excludeProviderImages ? stripProviderImageMarkdown(item.text) : item.text,
+        );
         break;
       case "reasoning":
         buffers.thought = appendText(buffers.thought, item.text);
@@ -344,7 +351,10 @@ function buildChatHistoryHeader(input: {
   agentTitle?: string | null;
   cwd?: string | null;
 }): string[] {
-  const header = ["Chat history from a previous Paseo agent."];
+  const header = [
+    "Chat history from a previous coding-agent session.",
+    CHAT_HISTORY_REFERENCE_ONLY_NOTICE,
+  ];
   const agentTitle = trimContextMetadata(input.agentTitle);
   const cwd = trimContextMetadata(input.cwd);
   if (agentTitle) {
@@ -433,8 +443,11 @@ function buildBoundedTranscriptShell(input: {
   agentTitle?: string | null;
   cwd?: string | null;
 }): { prefix: string; suffix: string } {
-  const header = ["Chat history from a previous Paseo agent."];
-  const optionalHeaderLines = buildChatHistoryHeader(input).slice(1);
+  // The reference-only boundary is deliberately mandatory. A portable
+  // transcript can mention a source directory, branch, or working changes,
+  // but none of those resources have been moved to the destination agent.
+  const header = buildChatHistoryHeader({});
+  const optionalHeaderLines = buildChatHistoryHeader(input).slice(header.length);
   const suffix = "\n</chat-history-summary>";
 
   for (const line of optionalHeaderLines) {
@@ -465,6 +478,7 @@ function curateTranscriptEntries(items: readonly AgentTimelineItem[]): Transcrip
       includeToolSummary: false,
       includeSubAgentLog: false,
       portableToolMarkersOnly: true,
+      excludeProviderImages: true,
     });
     if (entries.length === 0) {
       return [];

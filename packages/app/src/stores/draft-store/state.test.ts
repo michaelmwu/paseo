@@ -35,6 +35,27 @@ function transcriptAttachment(input: {
   };
 }
 
+function providerSessionTranscriptAttachment(text: string): ChatHistoryContextAttachment {
+  return {
+    kind: "chat_history",
+    id: "temporary-provider-id",
+    attachment: {
+      type: "text",
+      mimeType: "text/plain",
+      contextKind: "chat_history",
+      title: "External transcript",
+      text,
+    },
+    source: {
+      kind: "provider_session",
+      serverId: "host-external",
+      providerId: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/repos/external",
+    },
+  };
+}
+
 describe("draft-store lifecycle", () => {
   it("prunes finalized tombstones after TTL", () => {
     const nowMs = 1_000_000;
@@ -199,5 +220,49 @@ describe("draft-store normalization", () => {
         id: buildDraftTranscriptAttachmentId({ serverId: "host-2", agentId: "agent-2" }),
       },
     ]);
+  });
+
+  it("persists and refreshes a provider-native source without colliding with an agent", () => {
+    const initial = providerSessionTranscriptAttachment("Original external transcript");
+    const agent = transcriptAttachment({
+      serverId: "host-external",
+      agentId: "thread-1",
+      text: "Managed agent transcript",
+    });
+    const refreshed = providerSessionTranscriptAttachment("Refreshed external transcript");
+    const attachments = upsertDraftTranscriptAttachment({
+      attachments: [agent],
+      attachment: initial,
+    });
+    const replaced = upsertDraftTranscriptAttachment({
+      attachments,
+      attachment: refreshed,
+    });
+
+    expect(replaced).toMatchObject([
+      { attachment: { text: "Managed agent transcript" } },
+      {
+        id: buildDraftTranscriptAttachmentId({
+          kind: "provider_session",
+          serverId: "host-external",
+          providerId: "codex",
+          providerHandleId: "thread-1",
+          sourceCwd: "/repos/external",
+        }),
+        attachment: { text: "Refreshed external transcript" },
+      },
+    ]);
+    expect(
+      removeDraftTranscriptAttachment({
+        attachments: replaced,
+        source: {
+          kind: "provider_session",
+          serverId: "host-external",
+          providerId: "codex",
+          providerHandleId: "thread-1",
+          sourceCwd: "/repos/external",
+        },
+      }),
+    ).toMatchObject([{ attachment: { text: "Managed agent transcript" } }]);
   });
 });

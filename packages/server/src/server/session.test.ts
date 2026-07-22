@@ -1293,6 +1293,192 @@ test("exports a bounded window of live history", async () => {
   });
 });
 
+test("exports a read-only transcript from a revalidated provider session", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const importableSession = {
+    provider: "codex",
+    providerHandleId: "thread-1",
+    cwd: "/tmp/source-repo",
+    title: "Desktop session",
+    firstPromptPreview: "Review the change",
+    lastPromptPreview: "Review the change",
+    lastActivityAt: new Date("2026-07-19T12:00:00.000Z"),
+  };
+  const listImportableSessions = vi.fn(async () => [importableSession]);
+  const readImportableSessionTimeline = vi.fn(async () => ({
+    source: {
+      provider: "codex",
+      providerHandleId: "thread-1",
+      cwd: "/tmp/source-repo",
+      title: "Desktop session",
+      firstPromptPreview: "Review the change",
+      lastPromptPreview: "Review the change",
+      lastActivityAt: new Date("2026-07-19T12:00:00.000Z"),
+      supportsTranscriptExport: true,
+    },
+    rows: [
+      {
+        seq: 1,
+        timestamp: "2026-07-19T12:00:00.000Z",
+        item: { type: "user_message" as const, text: "Review the change" },
+      },
+      {
+        seq: 2,
+        timestamp: "2026-07-19T12:01:00.000Z",
+        item: { type: "assistant_message" as const, text: "The change is ready." },
+      },
+    ],
+    hasOlderRows: false,
+  }));
+  const session = createSessionForTest({
+    messages,
+    agentManager: { listImportableSessions, readImportableSessionTimeline },
+  });
+
+  await session.handleMessage({
+    type: "provider.session.transcript.export.request",
+    providerId: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    maxBytes: 4096,
+    requestId: "provider-session-transcript-1",
+  });
+
+  const [response] = messages;
+  if (response?.type !== "provider.session.transcript.export.response") {
+    throw new Error("expected a provider.session.transcript.export.response");
+  }
+  expect(readImportableSessionTimeline).toHaveBeenCalledWith({
+    provider: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    limit: 25_000,
+  });
+  expect(listImportableSessions).toHaveBeenCalledWith({
+    limit: 200,
+    providerFilter: new Set(["codex"]),
+    deduplicateSharedStores: true,
+  });
+  expect(response.payload).toMatchObject({
+    requestId: "provider-session-transcript-1",
+    providerId: "codex",
+    providerHandleId: "thread-1",
+    sourceCwd: "/tmp/source-repo",
+    totalItemCount: 2,
+    includedItemCount: 2,
+    truncated: false,
+    error: null,
+  });
+  expect(response.payload.attachment?.text).toContain("The change is ready.");
+  expect(response.payload.attachment?.text).toContain(
+    "Reference context only; source files, Git state, tools, and session state were not transferred.",
+  );
+});
+
+test("returns provider-session transcript-export errors without a partial attachment", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const session = createSessionForTest({
+    messages,
+    agentManager: {
+      listImportableSessions: vi.fn(async () => [
+        {
+          provider: "codex",
+          providerHandleId: "thread-unsupported",
+          cwd: "/tmp/source-repo",
+          title: "Unsupported session",
+          firstPromptPreview: "Export this",
+          lastPromptPreview: "Export this",
+          lastActivityAt: new Date("2026-07-19T12:00:00.000Z"),
+        },
+      ]),
+      readImportableSessionTimeline: vi.fn(async () => {
+        throw new Error(
+          "Provider 'codex' does not support transcript export for importable sessions",
+        );
+      }),
+    },
+  });
+
+  await session.handleMessage({
+    type: "provider.session.transcript.export.request",
+    providerId: "codex",
+    providerHandleId: "thread-unsupported",
+    sourceCwd: "/tmp/source-repo",
+    requestId: "provider-session-transcript-unsupported",
+  });
+
+  expect(messages).toEqual([
+    {
+      type: "provider.session.transcript.export.response",
+      payload: {
+        requestId: "provider-session-transcript-unsupported",
+        providerId: "codex",
+        providerHandleId: "thread-unsupported",
+        sourceCwd: "/tmp/source-repo",
+        attachment: null,
+        totalItemCount: 0,
+        includedItemCount: 0,
+        byteCount: 0,
+        truncated: false,
+        error: "Provider 'codex' does not support transcript export for importable sessions",
+      },
+    },
+  ]);
+});
+
+test("does not read an archived Paseo provider session through the external transcript RPC", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const readImportableSessionTimeline = vi.fn();
+  const session = createSessionForTest({
+    messages,
+    agentManager: {
+      listImportableSessions: vi.fn(async () => [
+        {
+          provider: "codex",
+          providerHandleId: "archived-thread",
+          cwd: "/tmp/source-repo",
+          title: "Archived session",
+          firstPromptPreview: "Review this",
+          lastPromptPreview: "Review this",
+          lastActivityAt: new Date("2026-07-19T12:00:00.000Z"),
+        },
+      ]),
+      readImportableSessionTimeline,
+    },
+    agentStorage: {
+      list: vi.fn().mockResolvedValue([
+        {
+          provider: "codex",
+          archivedAt: "2026-07-19T12:01:00.000Z",
+          persistence: {
+            provider: "codex",
+            sessionId: "archived-thread",
+            nativeHandle: "archived-thread",
+          },
+        },
+      ]),
+    },
+  });
+
+  await session.handleMessage({
+    type: "provider.session.transcript.export.request",
+    providerId: "codex",
+    providerHandleId: "archived-thread",
+    sourceCwd: "/tmp/source-repo",
+    requestId: "provider-session-transcript-archived",
+  });
+
+  expect(readImportableSessionTimeline).not.toHaveBeenCalled();
+  expect(messages).toContainEqual({
+    type: "provider.session.transcript.export.response",
+    payload: expect.objectContaining({
+      requestId: "provider-session-transcript-archived",
+      attachment: null,
+      error: "Provider session is not eligible for transcript export",
+    }),
+  });
+});
+
 describe("agent detach RPC", () => {
   test("detaches a stored subagent and emits the updated standalone agent", async () => {
     const messages: unknown[] = [];

@@ -329,6 +329,9 @@ second line'`,
     expect(result.attachment.text).toMatch(/\n<\/chat-history-summary>$/);
     expect(result.attachment.text).toContain("Source agent: Source Agent");
     expect(result.attachment.text).toContain("Source directory: /repo");
+    expect(result.attachment.text).toContain(
+      "Reference context only; source files, Git state, tools, and session state were not transferred.",
+    );
     expect(result.attachment.text).toContain("[User] Ship the thing");
     expect(result.attachment.text).toContain("[Read] src/index.ts");
     expect(result.attachment.text).toContain("[paseo__create_agent]");
@@ -406,6 +409,42 @@ second line'`,
     });
     expect(result.attachment.text).toContain("[User] Recent question");
     expect(result.attachment.text).toContain("[Assistant] Recent answer");
+  });
+
+  it("excludes provider-rendered image markdown from portable transcript snapshots", () => {
+    const result = buildAgentTranscriptExportAttachment({
+      rows: [
+        row(1, { type: "user_message", text: "Review the screenshot" }),
+        row(2, {
+          type: "assistant_message",
+          text: "![Image](https://example.test/signed-image?token=secret)<!-- paseo-provider-image -->",
+        }),
+        row(3, { type: "assistant_message", text: "The screenshot confirms the issue." }),
+      ],
+    });
+
+    expect(result).toMatchObject({ totalItemCount: 2, includedItemCount: 2, truncated: false });
+    expect(result.attachment.text).toContain("The screenshot confirms the issue.");
+    expect(result.attachment.text).not.toContain("signed-image");
+    expect(result.attachment.text).not.toContain("paseo-provider-image");
+  });
+
+  it("keeps adjacent assistant prose while removing a marked provider image", () => {
+    const result = buildAgentTranscriptExportAttachment({
+      rows: [
+        row(1, { type: "user_message", text: "Review the screenshot" }),
+        row(2, { type: "assistant_message", text: "The chart confirms the regression." }),
+        row(3, {
+          type: "assistant_message",
+          text: "![chart \\] private](https://example.test/signed-image?token=secret)<!-- paseo-provider-image -->",
+        }),
+      ],
+    });
+
+    expect(result.attachment.text).toContain("The chart confirms the regression.");
+    expect(result.attachment.text).not.toContain("signed-image");
+    expect(result.attachment.text).not.toContain("token=secret");
+    expect(result.attachment.text).not.toContain("paseo-provider-image");
   });
 
   it("clamps caller size policy at the daemon boundary", () => {

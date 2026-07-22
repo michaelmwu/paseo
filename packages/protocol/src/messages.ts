@@ -745,6 +745,8 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   providerLabel: z.string(),
   providerHandleId: z.string(),
   cwd: z.string(),
+  // COMPAT(providerSessionTranscriptExport): added in v0.2.1, remove gate after 2027-01-19.
+  supportsTranscriptExport: z.boolean().optional(),
   title: z.string().nullable(),
   firstPromptPreview: z.string().nullable(),
   lastPromptPreview: z.string().nullable(),
@@ -1097,6 +1099,8 @@ export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
   providers: z.array(z.string()).optional(),
   since: z.string().optional(),
   limit: z.number().int().positive().max(200).optional(),
+  // COMPAT(providerSessionTranscriptExport): added in v0.2.1, remove gate after 2027-01-19.
+  transcriptOnly: z.boolean().optional(),
 });
 
 export const FetchAgentRequestMessageSchema = z.object({
@@ -1408,6 +1412,16 @@ export const AGENT_TRANSCRIPT_EXPORT_MAX_BYTES = 128 * 1024;
 export const AgentTranscriptExportRequestMessageSchema = z.object({
   type: z.literal("agent.transcript.export.request"),
   agentId: z.string(),
+  // The wire accepts future policy values; each daemon clamps to its supported bounds.
+  maxBytes: z.number().int().positive().optional(),
+  requestId: z.string(),
+});
+
+export const ProviderSessionTranscriptExportRequestMessageSchema = z.object({
+  type: z.literal("provider.session.transcript.export.request"),
+  providerId: z.string(),
+  providerHandleId: z.string(),
+  sourceCwd: z.string(),
   // The wire accepts future policy values; each daemon clamps to its supported bounds.
   maxBytes: z.number().int().positive().optional(),
   requestId: z.string(),
@@ -2423,6 +2437,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
   AgentTranscriptExportRequestMessageSchema,
+  ProviderSessionTranscriptExportRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
   SetAgentThinkingRequestMessageSchema,
@@ -2723,6 +2738,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContextCursor: z.boolean().optional(),
         // COMPAT(agentTranscriptExport): added in v0.2.0, remove gate after 2027-01-18.
         agentTranscriptExport: z.boolean().optional(),
+        // COMPAT(providerSessionTranscriptExport): added in v0.2.1, remove gate after 2027-01-19.
+        providerSessionTranscriptExport: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
@@ -3558,6 +3575,23 @@ export const AgentTranscriptExportResponseMessageSchema = z.object({
     byteCount: z.number().int().nonnegative(),
     truncated: z.boolean(),
     capturedCursor: AgentTimelineCursorSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const ProviderSessionTranscriptExportResponseMessageSchema = z.object({
+  type: z.literal("provider.session.transcript.export.response"),
+  payload: z.object({
+    requestId: z.string(),
+    providerId: z.string(),
+    providerHandleId: z.string(),
+    sourceCwd: z.string(),
+    attachment: TextAttachmentSchema.nullable(),
+    // Null means the bounded provider read did not reach the beginning of the timeline.
+    totalItemCount: z.number().int().nonnegative().nullable(),
+    includedItemCount: z.number().int().nonnegative(),
+    byteCount: z.number().int().nonnegative(),
+    truncated: z.boolean(),
     error: z.string().nullable(),
   }),
 });
@@ -5060,6 +5094,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentAttentionRequiredMessageSchema,
   AgentForkContextResponseMessageSchema,
   AgentTranscriptExportResponseMessageSchema,
+  ProviderSessionTranscriptExportResponseMessageSchema,
   CancelAgentResponseMessageSchema,
   ClearAgentAttentionResponseMessageSchema,
   WorkspaceCreateResponseSchema,
@@ -5243,6 +5278,9 @@ export type AgentForkContextResponseMessage = z.infer<typeof AgentForkContextRes
 export type AgentTranscriptExportResponseMessage = z.infer<
   typeof AgentTranscriptExportResponseMessageSchema
 >;
+export type ProviderSessionTranscriptExportResponseMessage = z.infer<
+  typeof ProviderSessionTranscriptExportResponseMessageSchema
+>;
 export type CancelAgentResponseMessage = z.infer<typeof CancelAgentResponseMessageSchema>;
 export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageResponseMessageSchema>;
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;
@@ -5345,6 +5383,9 @@ export type FetchAgentRequestMessage = z.infer<typeof FetchAgentRequestMessageSc
 export type AgentForkContextRequestMessage = z.infer<typeof AgentForkContextRequestMessageSchema>;
 export type AgentTranscriptExportRequestMessage = z.infer<
   typeof AgentTranscriptExportRequestMessageSchema
+>;
+export type ProviderSessionTranscriptExportRequestMessage = z.infer<
+  typeof ProviderSessionTranscriptExportRequestMessageSchema
 >;
 export type SendAgentMessageRequest = z.infer<typeof SendAgentMessageRequestSchema>;
 export type WaitForFinishRequest = z.infer<typeof WaitForFinishRequestSchema>;

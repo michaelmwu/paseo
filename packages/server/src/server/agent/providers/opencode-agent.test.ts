@@ -2282,6 +2282,136 @@ describe("OpenCode persisted sessions", () => {
     ]);
   });
 
+  test("reads an external OpenCode transcript without listing or resuming it", async () => {
+    const runtime = new TestOpenCodeHarness();
+    const sourceClient = new TestOpenCodeClient();
+    const cwd = "/workspace/repo";
+    sourceClient.sessionGetResponse = {
+      data: {
+        id: "ses_external",
+        directory: cwd,
+        title: "External session",
+        time: { created: 2000, updated: 3000 },
+      },
+    };
+    sourceClient.sessionMessagesResponse = {
+      data: [
+        {
+          info: {
+            id: "msg_system",
+            sessionID: "ses_external",
+            role: "user",
+            time: { created: 2050 },
+            agent: "build",
+            model: { providerID: "opencode", modelID: "big-pickle" },
+          },
+          parts: [
+            {
+              id: "prt_system",
+              sessionID: "ses_external",
+              messageID: "msg_system",
+              type: "text",
+              text: "<system_instruction>Conductor runtime secret</system_instruction>",
+            },
+          ],
+        },
+        {
+          info: {
+            id: "msg_user",
+            sessionID: "ses_external",
+            role: "user",
+            time: { created: 2100 },
+            agent: "build",
+            model: { providerID: "opencode", modelID: "big-pickle" },
+          },
+          parts: [
+            {
+              id: "prt_user",
+              sessionID: "ses_external",
+              messageID: "msg_user",
+              type: "text",
+              text: "Read, do not resume",
+            },
+          ],
+        },
+        {
+          info: {
+            id: "msg_assistant",
+            sessionID: "ses_external",
+            role: "assistant",
+            time: { created: 2200, completed: 2300 },
+            providerID: "opencode",
+            modelID: "big-pickle",
+            agent: "build",
+          },
+          parts: [
+            {
+              id: "prt_assistant",
+              sessionID: "ses_external",
+              messageID: "msg_assistant",
+              type: "text",
+              text: "Retained reply",
+            },
+          ],
+        },
+      ],
+    };
+    runtime.enqueueClient(sourceClient);
+
+    const client = new OpenCodeAgentClient(createTestLogger(), undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+    const transcript = await client.readImportableSessionTimeline({
+      providerHandleId: "ses_external",
+      cwd,
+      limit: 100,
+    });
+    expect(transcript).toMatchObject({
+      hasOlderEntries: false,
+      timeline: [
+        { item: { type: "user_message", text: "Read, do not resume" } },
+        { item: { type: "assistant_message", text: "Retained reply" } },
+      ],
+    });
+    expect(JSON.stringify(transcript)).not.toContain("Conductor runtime secret");
+    expect(sourceClient.calls.experimentalSessionList).toEqual([]);
+    expect(sourceClient.calls.sessionGet).toEqual([{ sessionID: "ses_external", directory: cwd }]);
+    expect(sourceClient.calls.sessionMessages).toEqual([
+      { sessionID: "ses_external", directory: cwd },
+    ]);
+    expect(sourceClient.calls.sessionCreate).toEqual([]);
+    expect(sourceClient.calls.sessionPromptAsync).toEqual([]);
+  });
+
+  test("fails an external transcript read when retained messages are unavailable", async () => {
+    const runtime = new TestOpenCodeHarness();
+    const sourceClient = new TestOpenCodeClient();
+    const cwd = "/workspace/repo";
+    sourceClient.sessionGetResponse = {
+      data: {
+        id: "ses_missing_messages",
+        directory: cwd,
+        title: "External session",
+      },
+    };
+    sourceClient.sessionMessagesResponse = { error: { message: "history pruned" } };
+    runtime.enqueueClient(sourceClient);
+
+    const client = new OpenCodeAgentClient(createTestLogger(), undefined, {
+      serverManager: runtime,
+      createClient: runtime.createClient,
+    });
+
+    await expect(
+      client.readImportableSessionTimeline({
+        providerHandleId: "ses_missing_messages",
+        cwd,
+        limit: 100,
+      }),
+    ).rejects.toThrow("Failed to read OpenCode session messages for ses_missing_messages");
+  });
+
   test("listImportableSessions matches Windows cwd paths with forward slashes", async () => {
     const runtime = new TestOpenCodeHarness();
     const openCodeClient = new TestOpenCodeClient();

@@ -5,7 +5,11 @@ import {
   type UserComposerAttachment,
 } from "@/attachments/types";
 import { ForgeSearchItemSchema, GitHubSearchItemSchema } from "@getpaseo/protocol/messages";
-import { buildChatHistoryAttachmentId } from "@/attachments/chat-history-identity";
+import {
+  areChatHistorySourcesEqual,
+  buildChatHistoryAttachmentId,
+  type ChatHistorySourceIdentity,
+} from "@/attachments/chat-history-identity";
 
 export const DRAFT_STORE_VERSION = 6;
 export const FINALIZED_DRAFT_TTL_MS = 5 * 60 * 1000;
@@ -23,10 +27,7 @@ export interface DraftInput {
   transcriptAttachments: ChatHistoryContextAttachment[];
 }
 
-export interface DraftTranscriptSource {
-  serverId: string;
-  agentId: string;
-}
+export type DraftTranscriptSource = ChatHistorySourceIdentity;
 
 export type DraftLifecycleState = "active" | "abandoned" | "sent";
 
@@ -163,6 +164,10 @@ function isOptionalTranscriptBoundaryCursor(value: unknown): boolean {
   return value === undefined || value === null || isTranscriptBoundaryCursor(value);
 }
 
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === "boolean";
+}
+
 function isChatHistoryTextAttachment(
   value: unknown,
 ): value is ChatHistoryContextAttachment["attachment"] {
@@ -180,24 +185,46 @@ function isChatHistoryTextAttachment(
   );
 }
 
+function isProviderSessionChatHistorySource(source: Record<string, unknown>): boolean {
+  return (
+    source.kind === "provider_session" &&
+    typeof source.serverId === "string" &&
+    typeof source.providerId === "string" &&
+    typeof source.providerHandleId === "string" &&
+    typeof source.sourceCwd === "string"
+  );
+}
+
+function isPaseoAgentChatHistorySource(source: Record<string, unknown>): boolean {
+  return (
+    (source.kind === undefined || source.kind === "paseo_agent") &&
+    typeof source.serverId === "string" &&
+    typeof source.agentId === "string"
+  );
+}
+
+function hasValidChatHistorySourceMetadata(source: Record<string, unknown>): boolean {
+  return (
+    (source.workspaceLabel === undefined || typeof source.workspaceLabel === "string") &&
+    (source.serverLabel === undefined || typeof source.serverLabel === "string") &&
+    isOptionalBoolean(source.capturedWhileRunning) &&
+    isOptionalStringOrNull(source.boundaryMessageId) &&
+    isOptionalTranscriptBoundaryCursor(source.boundaryCursor) &&
+    isOptionalNonnegativeInteger(source.itemCount) &&
+    isOptionalNonnegativeInteger(source.includedItemCount) &&
+    isOptionalNonnegativeInteger(source.byteCount) &&
+    isOptionalBoolean(source.truncated)
+  );
+}
+
 function isChatHistorySource(value: unknown): value is ChatHistoryContextAttachment["source"] {
   if (!value || typeof value !== "object") {
     return false;
   }
   const source = value as Record<string, unknown>;
   return (
-    typeof source.serverId === "string" &&
-    typeof source.agentId === "string" &&
-    (source.workspaceLabel === undefined || typeof source.workspaceLabel === "string") &&
-    (source.serverLabel === undefined || typeof source.serverLabel === "string") &&
-    (source.capturedWhileRunning === undefined ||
-      typeof source.capturedWhileRunning === "boolean") &&
-    isOptionalStringOrNull(source.boundaryMessageId) &&
-    isOptionalTranscriptBoundaryCursor(source.boundaryCursor) &&
-    isOptionalNonnegativeInteger(source.itemCount) &&
-    isOptionalNonnegativeInteger(source.includedItemCount) &&
-    isOptionalNonnegativeInteger(source.byteCount) &&
-    (source.truncated === undefined || typeof source.truncated === "boolean")
+    (isProviderSessionChatHistorySource(source) || isPaseoAgentChatHistorySource(source)) &&
+    hasValidChatHistorySourceMetadata(source)
   );
 }
 
@@ -246,8 +273,19 @@ export function normalizeDraftTranscriptAttachment(
       ...(typeof title === "string" || title === null ? { title } : {}),
     },
     source: {
-      serverId: source.serverId,
-      agentId: source.agentId,
+      ...(source.kind === "provider_session"
+        ? {
+            kind: source.kind,
+            serverId: source.serverId,
+            providerId: source.providerId,
+            providerHandleId: source.providerHandleId,
+            sourceCwd: source.sourceCwd,
+          }
+        : {
+            ...(source.kind === "paseo_agent" ? { kind: source.kind } : {}),
+            serverId: source.serverId,
+            agentId: source.agentId,
+          }),
       ...(workspaceLabel ? { workspaceLabel } : {}),
       ...(serverLabel ? { serverLabel } : {}),
       ...(typeof capturedWhileRunning === "boolean" ? { capturedWhileRunning } : {}),
@@ -284,10 +322,8 @@ export function upsertDraftTranscriptAttachment(input: {
   attachment: ChatHistoryContextAttachment;
 }): ChatHistoryContextAttachment[] {
   const nextAttachment = normalizeDraftTranscriptAttachment(input.attachment);
-  const existingIndex = input.attachments.findIndex(
-    (current) =>
-      current.source.serverId === nextAttachment.source.serverId &&
-      current.source.agentId === nextAttachment.source.agentId,
+  const existingIndex = input.attachments.findIndex((current) =>
+    areChatHistorySourcesEqual(current.source, nextAttachment.source),
   );
   if (existingIndex < 0) {
     return [...input.attachments, nextAttachment];
@@ -311,9 +347,7 @@ export function removeDraftTranscriptAttachment(input: {
   source: DraftTranscriptSource;
 }): ChatHistoryContextAttachment[] {
   return input.attachments.filter(
-    (attachment) =>
-      attachment.source.serverId !== input.source.serverId ||
-      attachment.source.agentId !== input.source.agentId,
+    (attachment) => !areChatHistorySourcesEqual(attachment.source, input.source),
   );
 }
 

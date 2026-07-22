@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import {
   isProviderImageMarkdown,
   materializeProviderImage,
+  PROVIDER_IMAGE_MARKDOWN_MARKER,
   renderProviderImageOutputAsAssistantMarkdown,
 } from "./provider-image-output.js";
 
@@ -44,7 +45,7 @@ describe("isProviderImageMarkdown", () => {
     );
 
     expect(markdown).toBe(
-      `![Image](file:///C:/Users/me/AppData/Local/Temp/paseo-attachments/${HASH}.png)`,
+      `![Image](file:///C:/Users/me/AppData/Local/Temp/paseo-attachments/${HASH}.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
     );
     expect(isProviderImageMarkdown(markdown)).toBe(true);
   });
@@ -53,20 +54,24 @@ describe("isProviderImageMarkdown", () => {
     const markdown = renderImageMarkdown("/home/user/Projects/Project With Spaces/screenshot.png");
 
     expect(markdown).toBe(
-      "![Image](file:///home/user/Projects/Project%20With%20Spaces/screenshot.png)",
+      `![Image](file:///home/user/Projects/Project%20With%20Spaces/screenshot.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
     );
   });
 
   test("encodes URI-significant characters in POSIX file paths", () => {
     const markdown = renderImageMarkdown("/tmp/screenshot#1?draft.png");
 
-    expect(markdown).toBe("![Image](file:///tmp/screenshot%231%3Fdraft.png)");
+    expect(markdown).toBe(
+      `![Image](file:///tmp/screenshot%231%3Fdraft.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
+    );
   });
 
   test("preserves double-leading slashes in POSIX file paths", () => {
     const markdown = renderImageMarkdown("//tmp/screenshot#1.png");
 
-    expect(markdown).toBe("![Image](file:////tmp/screenshot%231.png)");
+    expect(markdown).toBe(
+      `![Image](file:////tmp/screenshot%231.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
+    );
   });
 
   test.each([
@@ -77,15 +82,27 @@ describe("isProviderImageMarkdown", () => {
       "file://server/share/shot%3Fdraft.png",
     ],
   ])("encodes %s image paths as file URIs", (_label, imagePath, expectedSource) => {
-    expect(renderImageMarkdown(imagePath)).toBe(`![Image](${expectedSource})`);
+    expect(renderImageMarkdown(imagePath)).toBe(
+      `![Image](${expectedSource})${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
+    );
   });
 
   test("rejects user-authored markdown that is not a materialized attachment", () => {
     // No content hash — a hand-written path, not something the writer produced.
     expect(isProviderImageMarkdown("![diagram](./paseo-attachments/notes.png)")).toBe(false);
     expect(isProviderImageMarkdown("![logo](https://example.com/logo.png)")).toBe(false);
+    expect(
+      isProviderImageMarkdown(
+        `![Image](https://example.com/signed-image.png)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
+      ),
+    ).toBe(true);
     // Image markdown that does not start the text.
     expect(isProviderImageMarkdown("see the chart: ![chart](x.png)")).toBe(false);
+    expect(
+      isProviderImageMarkdown(
+        `The chart is ready. ![chart \\] private](https://example.com/signed.png?token=secret)${PROVIDER_IMAGE_MARKDOWN_MARKER}`,
+      ),
+    ).toBe(false);
   });
 });
 

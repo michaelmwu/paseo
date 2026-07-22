@@ -2,6 +2,7 @@ import type {
   ChatHistoryContextAttachment,
   WorkspaceComposerAttachment,
 } from "@/attachments/types";
+import { areChatHistorySourcesEqual } from "@/attachments/chat-history-identity";
 
 /**
  * Returns a transcript only when the attachment belongs to this persisted New
@@ -21,8 +22,7 @@ export function findPersistedDraftTranscriptAttachment(input: {
     transcriptAttachments.find(
       (candidate) =>
         candidate.id === attachment.id &&
-        candidate.source.serverId === attachment.source.serverId &&
-        candidate.source.agentId === attachment.source.agentId,
+        areChatHistorySourcesEqual(candidate.source, attachment.source),
     ) ?? null
   );
 }

@@ -121,6 +121,7 @@ import {
   importProviderSession,
   listImportableProviderSessions,
   normalizeImportAgentRequest,
+  readEligibleImportableProviderSessionTimeline,
 } from "./agent/import-sessions.js";
 import {
   checkoutLiteFromGitSnapshot,
@@ -1754,6 +1755,8 @@ export class Session {
         return this.handleAgentForkContextRequest(msg);
       case "agent.transcript.export.request":
         return this.handleAgentTranscriptExportRequest(msg);
+      case "provider.session.transcript.export.request":
+        return this.handleProviderSessionTranscriptExportRequest(msg);
       default:
         return undefined;
     }
@@ -6078,6 +6081,66 @@ export class Session {
           byteCount: 0,
           truncated: false,
           capturedCursor: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private async handleProviderSessionTranscriptExportRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.session.transcript.export.request" }>,
+  ): Promise<void> {
+    try {
+      const source = await readEligibleImportableProviderSessionTimeline({
+        requestId: msg.requestId,
+        provider: msg.providerId,
+        providerHandleId: msg.providerHandleId,
+        cwd: msg.sourceCwd,
+        limit: AGENT_TRANSCRIPT_EXPORT_SCAN_LIMIT,
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        providerSnapshotManager: this.providerSnapshotManager,
+      });
+      const transcript = buildAgentTranscriptExportAttachment({
+        rows: source.rows,
+        hasOlderRows: source.hasOlderRows,
+        maxBytes: msg.maxBytes,
+        agentTitle: source.source.title,
+        cwd: source.source.cwd,
+      });
+
+      this.emit({
+        type: "provider.session.transcript.export.response",
+        payload: {
+          requestId: msg.requestId,
+          providerId: source.source.provider,
+          providerHandleId: source.source.providerHandleId,
+          sourceCwd: source.source.cwd,
+          attachment: transcript.attachment,
+          totalItemCount: transcript.totalItemCount,
+          includedItemCount: transcript.includedItemCount,
+          byteCount: transcript.byteCount,
+          truncated: transcript.truncated,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, provider: msg.providerId },
+        "Failed to handle provider.session.transcript.export.request",
+      );
+      this.emit({
+        type: "provider.session.transcript.export.response",
+        payload: {
+          requestId: msg.requestId,
+          providerId: msg.providerId,
+          providerHandleId: msg.providerHandleId,
+          sourceCwd: msg.sourceCwd,
+          attachment: null,
+          totalItemCount: 0,
+          includedItemCount: 0,
+          byteCount: 0,
+          truncated: false,
           error: error instanceof Error ? error.message : String(error),
         },
       });

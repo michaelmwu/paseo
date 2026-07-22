@@ -20,6 +20,7 @@ import { removeWorkspaceChatHistorySourceFromScopes } from "@/composer/attachmen
 import { selectEffectiveChatHistoryAttachments } from "@/composer/attachments/workspace-merge";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { findPersistedDraftTranscriptAttachment } from "@/composer/draft/transcript-preview";
+import type { ChatHistorySourceIdentity } from "@/attachments/chat-history-identity";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
 import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "@/composer/draft/create-flow";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -403,7 +404,7 @@ function DraftContextActions({
 function removePersistedTranscriptAttachment(input: {
   attachment: WorkspaceComposerAttachment;
   transcriptAttachments: readonly ChatHistoryContextAttachment[];
-  removeTranscriptAttachment: (source: { serverId: string; agentId: string }) => void;
+  removeTranscriptAttachment: (source: ChatHistorySourceIdentity) => void;
 }): boolean {
   const attachment = input.attachment;
   const persistedTranscript = findPersistedDraftTranscriptAttachment({
@@ -413,10 +414,7 @@ function removePersistedTranscriptAttachment(input: {
   if (!persistedTranscript) {
     return false;
   }
-  input.removeTranscriptAttachment({
-    serverId: persistedTranscript.source.serverId,
-    agentId: persistedTranscript.source.agentId,
-  });
+  input.removeTranscriptAttachment(persistedTranscript.source);
   return true;
 }
 
@@ -425,8 +423,8 @@ function useWorkspaceDraftAttachmentUi(input: {
   isPaneFocused: boolean;
   isCompactFormFactor: boolean;
   transcriptAttachments: readonly ChatHistoryContextAttachment[];
-  removeTranscriptAttachment: (source: { serverId: string; agentId: string }) => void;
-  removeScopedTranscriptAttachments: (source: { serverId: string; agentId: string }) => void;
+  removeTranscriptAttachment: (source: ChatHistorySourceIdentity) => void;
+  removeScopedTranscriptAttachments: (source: ChatHistorySourceIdentity) => void;
   openFileExplorerForCheckout: PanelState["openFileExplorerForCheckout"];
   setExplorerTabForCheckout: PanelState["setExplorerTabForCheckout"];
 }) {
@@ -684,7 +682,7 @@ export function WorkspaceDraftAgentTab({
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
   const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
   const removeScopedTranscriptAttachments = useCallback(
-    (source: { serverId: string; agentId: string }) => {
+    (source: ChatHistorySourceIdentity) => {
       removeWorkspaceChatHistorySourceFromScopes({ source, scopeKeys: attachmentScopeKeys });
     },
     [attachmentScopeKeys],

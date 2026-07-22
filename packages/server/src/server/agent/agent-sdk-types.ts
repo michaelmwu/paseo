@@ -524,6 +524,12 @@ export interface ImportableProviderSession {
   firstPromptPreview: string | null;
   lastPromptPreview: string | null;
   lastActivityAt: Date;
+  /**
+   * Internal-only identity for the provider-native session store. This must
+   * never cross a protocol or persistence boundary; AgentManager uses it only
+   * to coalesce profiles proven to read the same store.
+   */
+  sessionStoreFingerprint?: string;
 }
 
 export interface ImportProviderSessionInput {
@@ -540,6 +546,28 @@ export interface ImportProviderSessionContext {
 export interface ImportedTimelineEntry {
   item: AgentTimelineItem;
   timestamp?: string;
+}
+
+/**
+ * A read-only request for the history of a provider-native session that Paseo
+ * has not adopted. The daemon validates this handle and cwd against a fresh
+ * provider listing before calling an adapter.
+ */
+export interface ReadImportableSessionTimelineInput {
+  providerHandleId: string;
+  cwd: string;
+  /** Maximum normalized entries the provider should read. */
+  limit: number;
+}
+
+/**
+ * Provider-normalized history for a session that remains owned by the source
+ * provider. Implementations must not resume, register, or mutate the session.
+ */
+export interface ReadImportableSessionTimelineResult {
+  timeline: ImportedTimelineEntry[];
+  /** True when the provider retained additional older entries beyond `timeline`. */
+  hasOlderEntries: boolean;
 }
 
 export interface ImportedProviderSession {
@@ -708,6 +736,13 @@ export interface AgentClient {
     input: ImportProviderSessionInput,
     context: ImportProviderSessionContext,
   ): Promise<ImportedProviderSession>;
+  /**
+   * Read a provider-native session without taking ownership of it. This is
+   * used only for bounded transcript export from an importable session.
+   */
+  readImportableSessionTimeline?(
+    input: ReadImportableSessionTimelineInput,
+  ): Promise<ReadImportableSessionTimelineResult>;
   /**
    * Check if this provider is available (CLI binary is installed).
    * Returns true if available, false otherwise.

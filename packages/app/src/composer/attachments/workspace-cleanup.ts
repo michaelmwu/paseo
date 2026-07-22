@@ -1,5 +1,8 @@
 import type { ComposerAttachment, WorkspaceComposerAttachment } from "@/attachments/types";
-import { getChatHistorySourceKey } from "@/attachments/chat-history-identity";
+import {
+  getChatHistorySourceKey,
+  type ChatHistorySourceIdentity,
+} from "@/attachments/chat-history-identity";
 import { useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
 import { isPullRequestContextAttachment } from "@/attachments/workspace-attachment-utils";
 
@@ -55,7 +58,7 @@ export function removeWorkspaceAttachmentsMatching(selectedKey: string): void {
 }
 
 export function removeWorkspaceChatHistorySourceFromScopes(input: {
-  source: { serverId: string; agentId: string };
+  source: ChatHistorySourceIdentity;
   scopeKeys: readonly string[];
 }): void {
   const sourceKey = getChatHistorySourceKey(input.source);

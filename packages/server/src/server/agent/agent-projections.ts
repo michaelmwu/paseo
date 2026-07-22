@@ -264,7 +264,7 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
 }
 
 export function toRecentProviderSessionDescriptorPayload(
-  session: ImportableProviderSession & { provider: string },
+  session: ImportableProviderSession & { provider: string; supportsTranscriptExport?: boolean },
   options: RecentProviderSessionProjectionOptions,
 ): RecentProviderSessionDescriptorPayload {
   return {
@@ -272,6 +272,7 @@ export function toRecentProviderSessionDescriptorPayload(
     providerLabel: options.providerLabel,
     providerHandleId: session.providerHandleId,
     cwd: session.cwd,
+    ...(session.supportsTranscriptExport ? { supportsTranscriptExport: true } : {}),
     title: session.title,
     firstPromptPreview: session.firstPromptPreview,
     lastPromptPreview: session.lastPromptPreview,

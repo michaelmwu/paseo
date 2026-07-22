@@ -556,7 +556,7 @@ Right-sidebar client state splits on whether it is determined by the directory o
 }
 ```
 
-`transcriptAttachments` are immutable, source-addressed snapshots selected for a New Agent draft. They are keyed as `chat_history:<sourceServerId>:<sourceAgentId>` so re-adding a source refreshes its snapshot without changing selection order. They persist independently of ordinary user attachments, survive an app reload or source-host disconnect, and are cleared when the draft is sent or abandoned. The bounded body and its source title, directory, workspace label, and host label are user-selected conversation context; treat the store as sensitive local data. The complete runtime and privacy contract is in [transcript-context.md](transcript-context.md).
+`transcriptAttachments` are immutable, source-addressed snapshots selected for a New Agent draft. Paseo-agent sources are keyed as `chat_history:<sourceServerId>:<sourceAgentId>`; provider-native sources use an encoded `(serverId, providerId, providerHandleId, sourceCwd)` identity. Re-adding the same source refreshes its snapshot without changing selection order. They persist independently of ordinary user attachments, survive an app reload or source-host disconnect, and are cleared when the draft is sent or abandoned. The bounded body and its source title, directory, workspace label, and host label are user-selected conversation context; treat the store as sensitive local data. The complete runtime and privacy contract is in [transcript-context.md](transcript-context.md).
 
 ### Attachment Store (Web)
 

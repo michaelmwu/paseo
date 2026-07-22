@@ -31,6 +31,8 @@ import {
   type ImportProviderSessionContext,
   type ImportProviderSessionInput,
   type ListImportableSessionsOptions,
+  type ReadImportableSessionTimelineInput,
+  type ReadImportableSessionTimelineResult,
   type ProviderCatalog,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
@@ -85,6 +87,11 @@ import {
 } from "./provider-image-output.js";
 import { normalizeProviderReplayTimestamp } from "../provider-history-timestamps.js";
 import {
+  sanitizeProviderSessionLabel,
+  stripProviderInjectedSystemEnvelopePrefix,
+} from "../provider-history-privacy.js";
+import { createProviderSessionStoreFingerprint } from "../provider-session-store-fingerprint.js";
+import {
   formatProviderDiagnostic,
   formatProviderDiagnosticError,
   buildBinaryDiagnosticRows,
@@ -118,6 +125,14 @@ function isCodexAlreadyUnarchivedError(error: unknown, threadId: string): boolea
 const TURN_START_TIMEOUT_MS = 90 * 1000;
 const INTERRUPT_TIMEOUT_MS = 2_000;
 const CODEX_PROVIDER = "codex" as const;
+// `thread/list` defaults to interactive sources. Keep the terminal and VS Code
+// sources explicit while adding `appServer`, which is used by GUI/app-server
+// integrations and would otherwise be omitted.
+const CODEX_IMPORTABLE_THREAD_SOURCE_KINDS = ["cli", "vscode", "appServer"] as const;
+// A cwd filter is exact in Codex, while Paseo also accepts realpath-equivalent
+// workspaces. Bound cursor traversal so a stale store cannot make opening the
+// import picker scan an unbounded history.
+const CODEX_IMPORTABLE_THREAD_MAX_PAGES = 5;
 // Codex treats most app-server client names as the model-request originator.
 // This reserved Codex name is non-originating, so requests keep Codex's default
 // CLI identity instead of showing up as Paseo in provider usage logs.
@@ -126,6 +141,20 @@ const CODEX_NON_ORIGINATING_APP_SERVER_CLIENT_INFO = {
   title: "Codex App Server Daemon",
   version: "0.0.0",
 } as const;
+
+function resolveCodexSessionStoreFingerprint(
+  runtimeSettings: ProviderRuntimeSettings | undefined,
+): string | undefined {
+  const configuredHome = createProviderEnv({
+    baseEnv: process.env,
+    runtimeSettings,
+  }).CODEX_HOME;
+  const effectiveHome =
+    typeof configuredHome === "string" && configuredHome.trim().length > 0
+      ? configuredHome
+      : path.join(os.homedir(), ".codex");
+  return createProviderSessionStoreFingerprint(CODEX_PROVIDER, effectiveHome);
+}
 const ASSISTANT_MESSAGE_BOUNDARY_MARKDOWN = "\n\n---\n\n";
 const MAX_PENDING_SUB_AGENT_THREADS = 32;
 const MAX_PENDING_SUB_AGENT_NOTIFICATIONS_PER_THREAD = 128;
@@ -222,9 +251,14 @@ const CODEX_MODES: AgentMode[] = [
 ];
 
 const DEFAULT_CODEX_MODE_ID = "auto";
+// Temporary app-server processes used for discovery and read-only transcript
+// export must not inherit the multi-day turn timeout used by live sessions.
+// Their callers hold a global export slot, so a bounded request also guarantees
+// the child is disposed by the surrounding finally block.
+const CODEX_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS = 10_000;
 
 interface CodexAppServerClientLike {
-  request(method: string, params?: unknown): Promise<unknown>;
+  request(method: string, params?: unknown, timeoutMs?: number): Promise<unknown>;
   forkThread?(params: CodexThreadForkParams): Promise<CodexThreadForkResponse>;
   rollbackThread?(params: CodexThreadRollbackParams): Promise<CodexThreadRollbackResponse>;
   notify(method: string, params?: unknown): void;
@@ -1562,11 +1596,18 @@ function mapCodexThreadReasoningItem(
 function mapCodexThreadUserMessageItem(
   normalizedItem: Record<string, unknown>,
   includeUserMessage: boolean,
+  excludeInjectedSystemMessages = false,
 ): AgentTimelineItem | null {
   if (!includeUserMessage) {
     return null;
   }
-  const text = extractUserText(normalizedItem.content) ?? "";
+  const rawText = extractUserText(normalizedItem.content) ?? "";
+  const text = excludeInjectedSystemMessages
+    ? stripProviderInjectedSystemEnvelopePrefix(rawText).trim()
+    : rawText;
+  if (excludeInjectedSystemMessages && !text) {
+    return null;
+  }
   const messageId = nonEmptyString(normalizedItem.id);
   return {
     type: "user_message",
@@ -1753,23 +1794,53 @@ function mapCodexThreadImageItem(
   );
 }
 
+interface CodexThreadTimelineOptions {
+  includeUserMessage?: boolean;
+  cwd?: string | null;
+  includeProviderImages?: boolean;
+  excludeInjectedSystemMessages?: boolean;
+}
+
+function normalizeCodexThreadTimelineItem(item: unknown): {
+  normalizedType: string | null;
+  normalizedItem: Record<string, unknown>;
+} | null {
+  const itemRecord = toObjectRecord(item);
+  if (!itemRecord) {
+    return null;
+  }
+  const normalizedType =
+    normalizeCodexThreadItemType(
+      typeof itemRecord.type === "string" ? itemRecord.type : undefined,
+    ) ?? null;
+  return {
+    normalizedType,
+    normalizedItem:
+      normalizedType && normalizedType !== itemRecord.type
+        ? { ...itemRecord, type: normalizedType }
+        : itemRecord,
+  };
+}
+
+function isCodexImageThreadItem(
+  normalizedType: string | null,
+): normalizedType is "imageView" | "imageGeneration" {
+  return normalizedType === "imageView" || normalizedType === "imageGeneration";
+}
+
 export function threadItemToTimeline(
   item: unknown,
-  options?: { includeUserMessage?: boolean; cwd?: string | null },
+  options?: CodexThreadTimelineOptions,
 ): AgentTimelineItem | null {
-  const itemRecord = toObjectRecord(item);
-  if (!itemRecord) return null;
+  const normalized = normalizeCodexThreadTimelineItem(item);
+  if (!normalized) {
+    return null;
+  }
+  const { normalizedType, normalizedItem } = normalized;
   const includeUserMessage = options?.includeUserMessage ?? true;
   const cwd = options?.cwd ?? null;
-  const normalizedType = normalizeCodexThreadItemType(
-    typeof itemRecord.type === "string" ? itemRecord.type : undefined,
-  );
-  const normalizedItem: Record<string, unknown> =
-    normalizedType && normalizedType !== itemRecord.type
-      ? { ...itemRecord, type: normalizedType }
-      : itemRecord;
 
-  if (normalizedType === "imageView" || normalizedType === "imageGeneration") {
+  if (isCodexImageThreadItem(normalizedType) && options?.includeProviderImages !== false) {
     return mapCodexThreadImageItem(normalizedType, normalizedItem);
   }
   if (normalizedType && CODEX_TOOL_THREAD_ITEM_TYPES.has(normalizedType)) {
@@ -1778,7 +1849,11 @@ export function threadItemToTimeline(
 
   switch (normalizedType) {
     case "userMessage":
-      return mapCodexThreadUserMessageItem(normalizedItem, includeUserMessage);
+      return mapCodexThreadUserMessageItem(
+        normalizedItem,
+        includeUserMessage,
+        options?.excludeInjectedSystemMessages,
+      );
     case "agentMessage": {
       const messageId = nonEmptyString(normalizedItem.id);
       return {
@@ -1825,13 +1900,16 @@ function mcpToolResultImagesToTimeline(item: unknown): AgentTimelineItem[] {
 
 function threadItemToTimelineEntries(
   item: unknown,
-  options?: { includeUserMessage?: boolean; cwd?: string | null },
+  options?: CodexThreadTimelineOptions,
 ): AgentTimelineItem[] {
   const timelineItem = threadItemToTimeline(item, options);
   if (!timelineItem) {
     return [];
   }
-  return [timelineItem, ...mcpToolResultImagesToTimeline(item)];
+  return [
+    timelineItem,
+    ...(options?.includeProviderImages === false ? [] : mcpToolResultImagesToTimeline(item)),
+  ];
 }
 
 const CodexThreadReadResponseSchema = z
@@ -1868,6 +1946,10 @@ async function loadCodexThreadHistoryTimeline(params: {
   threadId: string;
   cwd: string | null;
   requestThread: CodexThreadReadRequest;
+  /** Transcript reads omit image payloads because rendering can materialize files. */
+  includeProviderImages?: boolean;
+  /** Transcript reads omit known integration-owned system envelopes. */
+  excludeInjectedSystemMessages?: boolean;
 }): Promise<CodexThreadHistoryProjection> {
   const response = await requestCodexThreadHistory(params.requestThread, params.threadId);
   const timeline: PersistedTimelineEntry[] = [];
@@ -1880,7 +1962,11 @@ async function loadCodexThreadHistoryTimeline(params: {
           historicalSubAgentActivity.agentThreadId,
         );
         if (existingIndex !== undefined) {
-          const activityTimelineItem = threadItemToTimeline(item, { cwd: params.cwd });
+          const activityTimelineItem = threadItemToTimeline(item, {
+            cwd: params.cwd,
+            includeProviderImages: params.includeProviderImages,
+            excludeInjectedSystemMessages: params.excludeInjectedSystemMessages,
+          });
           updateHistoricalSubAgentActivity(
             timeline,
             existingIndex,
@@ -1893,7 +1979,11 @@ async function loadCodexThreadHistoryTimeline(params: {
           continue;
         }
       }
-      for (const timelineItem of threadItemToTimelineEntries(item, { cwd: params.cwd })) {
+      for (const timelineItem of threadItemToTimelineEntries(item, {
+        cwd: params.cwd,
+        includeProviderImages: params.includeProviderImages,
+        excludeInjectedSystemMessages: params.excludeInjectedSystemMessages,
+      })) {
         const timestamp =
           readCodexHistoryTimestamp(item) ?? readCodexTurnHistoryTimestamp(turn, timelineItem);
         const settledTimelineItem =
@@ -1921,11 +2011,19 @@ async function loadCodexThreadHistoryTimeline(params: {
   return { timeline, subAgentRoutes };
 }
 
-function readCodexThread(client: CodexAppServerClientLike, threadId: string): Promise<unknown> {
-  return client.request("thread/read", {
-    threadId,
-    includeTurns: true,
-  });
+function readCodexThread(
+  client: CodexAppServerClientLike,
+  threadId: string,
+  timeoutMs?: number,
+): Promise<unknown> {
+  return client.request(
+    "thread/read",
+    {
+      threadId,
+      includeTurns: true,
+    },
+    timeoutMs,
+  );
 }
 
 export async function forkCodexThread(
@@ -6329,7 +6427,11 @@ export class CodexAppServerAgentClient implements AgentClient {
       new CodexAppServerClient(child, this.logger);
 
     try {
-      await client.request("initialize", buildCodexAppServerInitializeParams());
+      await client.request(
+        "initialize",
+        buildCodexAppServerInitializeParams(),
+        CODEX_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+      );
       client.notify("initialized", {});
 
       const limit = options?.limit ?? 20;
@@ -6337,21 +6439,47 @@ export class CodexAppServerAgentClient implements AgentClient {
       // filtering since most threads will be from other cwds, then keep the
       // local realpath-aware filter for symlink-equivalent workspace paths.
       const listLimit = options?.cwd ? Math.max(limit, 50) : limit;
-      const response = toObjectRecord(
-        await client.request("thread/list", {
-          limit: listLimit,
-          ...(options?.cwd ? { cwd: options.cwd } : {}),
-        }),
-      );
-      const allThreads = Array.isArray(response?.data) ? response.data.filter(isRecord) : [];
-      const threads = filterCodexThreadsByCwd(allThreads, options?.cwd);
+      const threads: Array<Record<string, unknown>> = [];
+      let cursor: string | undefined;
+
+      for (let page = 0; page < CODEX_IMPORTABLE_THREAD_MAX_PAGES; page += 1) {
+        const response = toObjectRecord(
+          await client.request(
+            "thread/list",
+            {
+              limit: listLimit,
+              sortKey: "updated_at",
+              sourceKinds: CODEX_IMPORTABLE_THREAD_SOURCE_KINDS,
+              ...(options?.cwd ? { cwd: options.cwd } : {}),
+              ...(cursor ? { cursor } : {}),
+            },
+            CODEX_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+          ),
+        );
+        const pageThreads = Array.isArray(response?.data) ? response.data.filter(isRecord) : [];
+        threads.push(...filterCodexThreadsByCwd(pageThreads, options?.cwd));
+
+        if (threads.length >= limit) {
+          break;
+        }
+        cursor = nonEmptyString(response?.nextCursor);
+        if (!cursor) {
+          break;
+        }
+      }
+
+      const sessionStoreFingerprint = resolveCodexSessionStoreFingerprint(this.runtimeSettings);
       return threads.slice(0, limit).map((thread) => {
         const threadId = typeof thread.id === "string" ? thread.id : "";
         const cwd = typeof thread.cwd === "string" ? thread.cwd : process.cwd();
-        const preview = typeof thread.preview === "string" ? thread.preview : null;
-        const title = typeof thread.name === "string" && thread.name.trim() ? thread.name : preview;
+        const previewCandidate = typeof thread.preview === "string" ? thread.preview : null;
+        const preview = previewCandidate ? sanitizeProviderSessionLabel(previewCandidate) : null;
+        const titleCandidate =
+          typeof thread.name === "string" && thread.name.trim() ? thread.name : null;
+        const explicitTitle = titleCandidate ? sanitizeProviderSessionLabel(titleCandidate) : null;
+        const title = explicitTitle ?? preview;
 
-        return {
+        const session: ImportableProviderSession = {
           providerHandleId: threadId,
           cwd,
           title,
@@ -6363,6 +6491,10 @@ export class CodexAppServerAgentClient implements AgentClient {
               0) * 1000,
           ),
         };
+        if (sessionStoreFingerprint) {
+          session.sessionStoreFingerprint = sessionStoreFingerprint;
+        }
+        return session;
       });
     } finally {
       await client.dispose();
@@ -6376,6 +6508,42 @@ export class CodexAppServerAgentClient implements AgentClient {
       context,
       resumeSession: this.resumeSession.bind(this),
     });
+  }
+
+  async readImportableSessionTimeline(
+    input: ReadImportableSessionTimelineInput,
+  ): Promise<ReadImportableSessionTimelineResult> {
+    const child = await this.spawnAppServer();
+    const client =
+      this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
+      new CodexAppServerClient(child, this.logger);
+
+    try {
+      await client.request(
+        "initialize",
+        buildCodexAppServerInitializeParams(),
+        CODEX_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS,
+      );
+      client.notify("initialized", {});
+
+      // thread/read reads retained history only. It does not resume the thread,
+      // start a turn, or attach Paseo to the GUI/terminal-owned session.
+      const history = await loadCodexThreadHistoryTimeline({
+        threadId: input.providerHandleId,
+        cwd: input.cwd,
+        requestThread: (threadId) =>
+          readCodexThread(client, threadId, CODEX_IMPORTABLE_SESSION_REQUEST_TIMEOUT_MS),
+        includeProviderImages: false,
+        excludeInjectedSystemMessages: true,
+      });
+      const hasOlderEntries = history.timeline.length > input.limit;
+      return {
+        timeline: hasOlderEntries ? history.timeline.slice(-input.limit) : history.timeline,
+        hasOlderEntries,
+      };
+    } finally {
+      await client.dispose();
+    }
   }
 
   async fetchCatalog(_options: FetchCatalogOptions): Promise<ProviderCatalog> {

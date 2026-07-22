@@ -7,6 +7,8 @@ import {
   AgentForkContextResponseMessageSchema,
   AgentTranscriptExportRequestMessageSchema,
   AgentTranscriptExportResponseMessageSchema,
+  ProviderSessionTranscriptExportRequestMessageSchema,
+  ProviderSessionTranscriptExportResponseMessageSchema,
   CreateAgentRequestMessageSchema,
   CreatePaseoWorktreeRequestSchema,
   SendAgentMessageRequestSchema,
@@ -116,6 +118,51 @@ describe("shared messages attachments", () => {
         requestId: "invalid-zero",
       }),
     ).toThrow();
+  });
+
+  it("validates bounded importable provider-session transcript export messages", () => {
+    const request = ProviderSessionTranscriptExportRequestMessageSchema.parse({
+      type: "provider.session.transcript.export.request",
+      providerId: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/tmp/repo",
+      maxBytes: 4096,
+      requestId: "provider-transcript-1",
+    });
+    const response = ProviderSessionTranscriptExportResponseMessageSchema.parse({
+      type: "provider.session.transcript.export.response",
+      payload: {
+        requestId: "provider-transcript-1",
+        providerId: "codex",
+        providerHandleId: "thread-1",
+        sourceCwd: "/tmp/repo",
+        attachment: {
+          type: "text",
+          mimeType: "text/plain",
+          contextKind: "chat_history",
+          title: "Chat history",
+          text: "<chat-history-summary>\nsummary\n</chat-history-summary>",
+        },
+        totalItemCount: 8,
+        includedItemCount: 3,
+        byteCount: 512,
+        truncated: true,
+        error: null,
+      },
+    });
+
+    expect(request).toMatchObject({
+      providerId: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/tmp/repo",
+      maxBytes: 4096,
+    });
+    expect(response.payload).toMatchObject({
+      providerId: "codex",
+      providerHandleId: "thread-1",
+      sourceCwd: "/tmp/repo",
+      attachment: { contextKind: "chat_history" },
+    });
   });
 
   it("keeps valid review attachments", () => {

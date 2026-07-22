@@ -144,7 +144,7 @@ function imageMessages(items: AgentTimelineItem[]): string[] {
 }
 
 function markdownImageSource(markdown: string): string {
-  const match = markdown.match(/^!\[[^\]]*]\((.*)\)$/);
+  const match = markdown.match(/^!\[[^\]]*]\((.*?)\)(?:<!-- paseo-provider-image -->)?$/);
   if (!match) {
     throw new Error(`Expected markdown image, got: ${markdown}`);
   }
