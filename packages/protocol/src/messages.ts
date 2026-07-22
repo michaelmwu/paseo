@@ -894,6 +894,13 @@ export const RecentProviderSessionDescriptorPayloadSchema = z.object({
   firstPromptPreview: z.string().nullable(),
   lastPromptPreview: z.string().nullable(),
   lastActivityAt: z.string(),
+  // COMPAT(providerSessionContinue): added in v0.2.1, remove optional parsing after 2027-01-22.
+  // The daemon determines this from the provider adapter; clients never infer
+  // native fork support from a provider ID.
+  canContinueHere: z.boolean().optional(),
+  // COMPAT(providerSessionContinue): added in v0.2.1, remove optional parsing after 2027-01-22.
+  // Only present when the listing is scoped to a target workspace.
+  isTargetCwd: z.boolean().optional(),
 });
 
 export type RecentProviderSessionDescriptorPayload = z.infer<
@@ -1378,6 +1385,10 @@ export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
   type: z.literal("fetch_recent_provider_sessions_request"),
   requestId: z.string(),
   cwd: z.string().optional(),
+  // COMPAT(providerSessionContinue): added in v0.2.1, remove optional parsing after 2027-01-22.
+  // A target workspace cwd asks the daemon to return source sessions that can
+  // safely be continued in that workspace's local Git working copy.
+  targetCwd: z.string().optional(),
   providers: z.array(z.string()).optional(),
   since: z.string().optional(),
   limit: z.number().int().positive().max(200).optional(),
@@ -1745,6 +1756,15 @@ export const ImportAgentRequestMessageSchema = z.object({
   workspaceId: z.string().optional(),
   labels: z.record(z.string(), z.string()).optional(),
   requestId: z.string(),
+});
+
+export const ProviderSessionContinueRequestMessageSchema = z.object({
+  type: z.literal("provider.session.continue.request"),
+  requestId: z.string(),
+  providerId: z.string(),
+  providerHandleId: z.string(),
+  sourceCwd: z.string(),
+  workspaceId: z.string(),
 });
 
 export const RefreshAgentRequestMessageSchema = z.object({
@@ -3094,6 +3114,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderUsageListRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
+  ProviderSessionContinueRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
   CancelAgentRequestMessageSchema,
   ShutdownServerRequestMessageSchema,
@@ -3491,6 +3512,9 @@ export const ServerInfoStatusPayloadSchema = z
         providerRemoval: z.boolean().optional(),
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: z.boolean().optional(),
+        // COMPAT(providerSessionContinue): added in v0.7.0-beta.2, remove gate after
+        // 2027-02-28 once the supported daemon floor includes this capability.
+        providerSessionContinue: z.boolean().optional(),
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after
         // 2027-01-17 once the supported daemon floor is >= v0.2.0.
         // Daemon advertises pluggable non-GitHub forge support (the forge registry);
@@ -3967,6 +3991,14 @@ export const FetchRecentProviderSessionsResponseMessageSchema = z.object({
     requestId: z.string(),
     entries: z.array(RecentProviderSessionDescriptorPayloadSchema),
     filteredAlreadyImportedCount: z.number().int().nonnegative().optional(),
+  }),
+});
+
+export const ProviderSessionContinueResponseMessageSchema = z.object({
+  type: z.literal("provider.session.continue.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agent: AgentSnapshotPayloadSchema,
   }),
 });
 
@@ -6380,6 +6412,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   FetchAgentsResponseMessageSchema,
   FetchAgentHistoryResponseMessageSchema,
   FetchRecentProviderSessionsResponseMessageSchema,
+  ProviderSessionContinueResponseMessageSchema,
   FetchWorkspacesResponseMessageSchema,
   ProjectAddResponseSchema,
   ProjectCreateDirectoryResponseSchema,
@@ -6573,6 +6606,9 @@ export type FetchAgentHistoryResponseMessage = z.infer<
 export type FetchRecentProviderSessionsResponseMessage = z.infer<
   typeof FetchRecentProviderSessionsResponseMessageSchema
 >;
+export type ProviderSessionContinueResponseMessage = z.infer<
+  typeof ProviderSessionContinueResponseMessageSchema
+>;
 export type FetchWorkspacesResponseMessage = z.infer<typeof FetchWorkspacesResponseMessageSchema>;
 export type ProjectAddResponse = z.infer<typeof ProjectAddResponseSchema>;
 export type ProjectCreateDirectoryResponse = z.infer<typeof ProjectCreateDirectoryResponseSchema>;
@@ -6712,6 +6748,9 @@ export type FetchAgentsRequestMessage = z.infer<typeof FetchAgentsRequestMessage
 export type FetchAgentHistoryRequestMessage = z.infer<typeof FetchAgentHistoryRequestMessageSchema>;
 export type FetchRecentProviderSessionsRequestMessage = z.infer<
   typeof FetchRecentProviderSessionsRequestMessageSchema
+>;
+export type ProviderSessionContinueRequestMessage = z.infer<
+  typeof ProviderSessionContinueRequestMessageSchema
 >;
 export type FetchWorkspacesRequestMessage = z.infer<typeof FetchWorkspacesRequestMessageSchema>;
 export type ProjectListRequestMessage = z.infer<typeof ProjectListRequestMessageSchema>;

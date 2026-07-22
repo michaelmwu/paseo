@@ -378,6 +378,8 @@ export const fr: TranslationResources = {
     },
     actions: {
       refresh: "Sessions de rafraîchissement",
+      resumeOriginal: "Reprendre l'originale",
+      continueHere: "Continuer ici",
     },
     preview: {
       untitledSession: "Séance sans titre",
@@ -390,6 +392,9 @@ export const fr: TranslationResources = {
     },
     row: {
       importing: "Importation...",
+      continuing: "Continuation...",
+      continueHint:
+        "Crée une nouvelle conversation ici. Les fichiers et modifications restent dans le worktree source.",
     },
   },
   workspace: {
