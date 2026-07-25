@@ -46,6 +46,7 @@ import { createExternalProcessEnv } from "../server/paseo-env.js";
 import { parseGitRevParsePath, resolveGitRevParsePath } from "./git-rev-parse-path.js";
 import { expandTilde, getRealpathAwareRelativePath, isPathInsideRoot } from "./path.js";
 import { terminateWithTreeKill } from "./tree-kill.js";
+import { materializeWorktreeIncludePlan, readWorktreeIncludePlan } from "./worktree-include.js";
 
 export { slugify, validateBranchSlug } from "@getpaseo/protocol/branch-slug";
 
@@ -1263,7 +1264,12 @@ export const createWorktree = async ({
   worktreesRoot,
 }: CreateWorktreeOptions): Promise<WorktreeConfig> => {
   const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
-  let worktreePath = join(await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot), worktreeSlug);
+  const paseoWorktreesRoot = await getPaseoWorktreesRoot(cwd, paseoHome, worktreesRoot);
+  const worktreeIncludePlan = await readWorktreeIncludePlan({
+    sourceRoot: cwd,
+    excludedSourceRoots: [paseoWorktreesRoot],
+  });
+  let worktreePath = join(paseoWorktreesRoot, worktreeSlug);
   mkdirSync(dirname(worktreePath), { recursive: true });
 
   // Also handle worktree path collision
@@ -1305,6 +1311,23 @@ export const createWorktree = async ({
   });
 
   await seedPaseoConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
+  try {
+    await materializeWorktreeIncludePlan({
+      plan: worktreeIncludePlan,
+      worktreeRoot: worktreePath,
+    });
+  } catch (error) {
+    await rollbackCreatedPaseoWorktree(
+      {
+        cwd,
+        worktreePath,
+        teardownCwds: [],
+        paseoHome,
+        worktreesBaseRoot: worktreesRoot,
+      },
+      error,
+    );
+  }
 
   if (runSetup) {
     await runWorktreeSetupCommands({
