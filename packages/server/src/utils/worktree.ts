@@ -1190,13 +1190,22 @@ export async function deletePaseoWorktree({
   }
 }
 
+export interface RollbackCreatedPaseoWorktreeOptions extends DeletePaseoWorktreeOptions {
+  createdBranchName?: string;
+}
+
 export async function rollbackCreatedPaseoWorktree(
-  options: DeletePaseoWorktreeOptions,
+  options: RollbackCreatedPaseoWorktreeOptions,
   cause: unknown,
 ): Promise<never> {
   let cleanupError: unknown;
   try {
     await deletePaseoWorktree(options);
+    if (options.createdBranchName && options.cwd) {
+      await runGitCommand(["branch", "--delete", "--force", options.createdBranchName], {
+        cwd: options.cwd,
+      });
+    }
   } catch (error) {
     cleanupError = error;
   }
@@ -1324,6 +1333,7 @@ export const createWorktree = async ({
         teardownCwds: [],
         paseoHome,
         worktreesBaseRoot: worktreesRoot,
+        createdBranchName: sourcePlan.createdBranchName,
       },
       error,
     );
@@ -1351,6 +1361,7 @@ interface ResolveWorktreeSourcePlanOptions {
 
 interface WorktreeSourcePlan {
   branchName: string;
+  createdBranchName?: string;
   // Display name and exact ref are two different facts. The name cannot round-trip to a
   // commit — "main" resolves local-first even when the worktree was cut from a fork's
   // upstream — so comparisons and actions read the ref and the UI reads the name.
@@ -1388,6 +1399,7 @@ async function resolveWorktreeSourcePlan({
 
       return {
         branchName: newBranchName,
+        createdBranchName: newBranchName,
         metadataBaseRefName: normalizedBaseBranch,
         metadataBaseRef: resolvedBaseBranch,
         changeRequestLookupTarget: createPaseoWorktreeChangeRequestHint({
