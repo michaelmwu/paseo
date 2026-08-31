@@ -6727,6 +6727,7 @@ export class Session {
     return {
       workspaceId: workspace.workspaceId,
       workspaceDirectory: workspace.cwd,
+      projectConfigDirectory: project?.rootPath ?? workspace.cwd,
       projectSlug: project
         ? deriveProjectServiceSlug(project)
         : deriveProjectSlug(workspace.cwd, snapshot?.git.isGit ? snapshot.git.remoteUrl : null),
