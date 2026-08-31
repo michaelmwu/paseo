@@ -6,10 +6,36 @@ import {
   SessionOutboundMessageSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceDescriptorPayloadSchema,
+  WorkspaceLaunchEndpointPayloadSchema,
   WorkspaceScriptPayloadSchema,
 } from "./messages.js";
 
 describe("workspace message schemas", () => {
+  test("parses legacy HTTP and current TCP launch listeners", () => {
+    const legacyHttp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p0",
+      port: 4100,
+      hostname: "launch-dev-p0--project.localhost",
+      localProxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      publicProxyUrl: null,
+      proxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      health: null,
+    });
+    const tcp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p1",
+      port: 4101,
+      hostname: "127.0.0.1",
+      protocol: "tcp",
+      localProxyUrl: null,
+      publicProxyUrl: null,
+      proxyUrl: null,
+      health: null,
+    });
+
+    expect(legacyHttp.protocol).toBeUndefined();
+    expect(tcp.protocol).toBe("tcp");
+  });
+
   test("parses fetch_workspaces_request", () => {
     const parsed = SessionInboundMessageSchema.parse({
       type: "fetch_workspaces_request",
