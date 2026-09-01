@@ -1414,6 +1414,14 @@ export class VoiceAssistantWebSocketServer {
           ),
         );
       },
+      emitWorkspaceUpdatesForExternalWorkspaceIds: async (workspaceIds) => {
+        const workspaceIdList = Array.from(workspaceIds);
+        await Promise.all(
+          this.listTrustedSessions().map((activeSession) =>
+            activeSession.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
+          ),
+        );
+      },
       downloadTokenStore: this.downloadTokenStore,
       pushNotifications: this.pushNotifications,
       paseoHome: this.paseoHome,
