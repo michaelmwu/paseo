@@ -717,7 +717,8 @@ export interface SpawnWorkspaceScriptOptions {
   runtimeStore: WorkspaceScriptRuntimeStore;
   terminalManager: TerminalManager;
   globalServicePorts?: PaseoServicePortAllocation;
-  workspaceRuntimeEnvironment?: Pick<WorkspaceRuntimeEnvironmentService, "ensure">;
+  workspaceRuntimeEnvironment?: Pick<WorkspaceRuntimeEnvironmentService, "ensure"> &
+    Partial<Pick<WorkspaceRuntimeEnvironmentService, "getReservedPorts">>;
   logger?: Logger;
   onLifecycleChanged?: () => void;
 }
@@ -742,7 +743,7 @@ async function setupServiceScriptRoute(params: {
   existingRuntimeEntry: ReturnType<WorkspaceScriptRuntimeStore["get"]>;
   serviceProxy: ServiceProxySubsystem;
   servicePortAllocation: PaseoServicePortAllocation | undefined;
-  reservedPorts?: ReadonlySet<number>;
+  getReservedPorts?: () => ReadonlySet<number>;
 }): Promise<ServiceScriptSetupResult> {
   const {
     scriptConfigs,
@@ -758,7 +759,7 @@ async function setupServiceScriptRoute(params: {
     existingRuntimeEntry,
     serviceProxy,
     servicePortAllocation,
-    reservedPorts: workspaceReservedPorts,
+    getReservedPorts,
   } = params;
 
   const serviceDeclarations: Array<{ scriptName: string; port?: number }> = [];
@@ -784,7 +785,7 @@ async function setupServiceScriptRoute(params: {
         scriptName: serviceScriptName,
         workspaceId,
         branchName,
-        reservedPorts: new Set([...reservedPorts, ...(workspaceReservedPorts ?? [])]),
+        reservedPorts: new Set([...reservedPorts, ...(getReservedPorts?.() ?? [])]),
       }),
   });
   const port =
@@ -799,7 +800,7 @@ async function setupServiceScriptRoute(params: {
               scriptName: serviceScriptName,
               workspaceId,
               branchName,
-              reservedPorts: new Set([...reservedPorts, ...(workspaceReservedPorts ?? [])]),
+              reservedPorts: new Set([...reservedPorts, ...(getReservedPorts?.() ?? [])]),
             }),
         })
       : requirePlannedWorkspaceServicePort(plannedPorts, scriptName);
@@ -1056,7 +1057,13 @@ export async function spawnWorkspaceScript(
         existingRuntimeEntry,
         serviceProxy,
         servicePortAllocation,
-        reservedPorts: workspaceRuntime?.reservedPorts,
+        getReservedPorts: () => {
+          const ports = new Set(workspaceRuntime?.reservedPorts);
+          for (const reservedPort of workspaceRuntimeEnvironment?.getReservedPorts?.() ?? []) {
+            ports.add(reservedPort);
+          }
+          return ports;
+        },
       });
       hostname = serviceSetup.hostname;
       port = serviceSetup.port;
