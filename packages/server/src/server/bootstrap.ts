@@ -191,6 +191,7 @@ import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js
 import { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
 import { WorkspaceLaunchManager } from "./workspace-launch-manager.js";
 import { createWorkspaceScriptsService } from "./session/workspace-scripts/workspace-scripts-service.js";
+import { assertWorkspaceAutomationAllowedForWorkspace } from "./workspace-automation-gate.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import {
   createManagedProcessRegistry,
@@ -1166,6 +1167,8 @@ export async function createPaseoDaemon(
         cacheWorkspaceSetupSnapshot: () => {},
         startWorkspaceSetup: (workspaceId, operation) =>
           workspaceSetupRuntime.start(workspaceId, operation),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         emit: emitExternalSessionMessage,
         sessionLogger: logger,
         terminalManager,
@@ -1214,6 +1217,8 @@ export async function createPaseoDaemon(
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceIdToKill),
         stopWorkspaceSetup: (workspaceIdToStop) => workspaceSetupRuntime.stop(workspaceIdToStop),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         sessionLogger: logger,
       },
       { scope: { kind: "workspace", workspaceId }, requestId },
@@ -1339,6 +1344,8 @@ export async function createPaseoDaemon(
             workspaceIdToKill,
           ),
         stopWorkspaceSetup: (workspaceIdToStop) => workspaceSetupRuntime.stop(workspaceIdToStop),
+        assertWorkspaceAutomationAllowed: (guardedWorkspaceId) =>
+          assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, guardedWorkspaceId),
         sessionLogger: logger,
       },
       {
@@ -1420,6 +1427,8 @@ export async function createPaseoDaemon(
       // status updates fan out to every connected client.
       emit: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
       spawnWorkspaceScript,
+      assertAutomationAllowed: (workspaceId) =>
+        assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, workspaceId),
       globalServicePorts: loadPersistedConfig(config.paseoHome).worktrees?.servicePorts,
       workspaceRuntimeEnvironment,
     }),
