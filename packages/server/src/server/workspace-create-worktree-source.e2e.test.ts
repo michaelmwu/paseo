@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
@@ -141,7 +141,7 @@ test("workspace.create materializes .worktreeinclude copies and symlinks", async
   try {
     writeFileSync(
       path.join(repoDir, ".worktreeinclude"),
-      ["copy.env", "# @symlink", "linked.txt", ""].join("\n"),
+      ["copy.env", "symlink linked.txt", ""].join("\n"),
     );
     writeFileSync(path.join(repoDir, "copy.env"), "copy-v1\n");
     writeFileSync(path.join(repoDir, "linked.txt"), "linked-v1\n");
