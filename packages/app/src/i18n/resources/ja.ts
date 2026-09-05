@@ -805,7 +805,7 @@ export const ja: TranslationResources = {
         view: "ターミナルを表示",
       },
       accessibility: {
-        trigger: "ワークスペーススクリプト",
+        trigger: "ワークスペースのコマンドを実行",
         openService: "{{scriptName}}サービスを表示",
         viewTerminal: "{{scriptName}}ターミナルを表示",
         runScript: "{{scriptName}}スクリプトを実行",
@@ -829,12 +829,14 @@ export const ja: TranslationResources = {
     launches: {
       title: "起動",
       actions: {
+        switch: "切り替え",
         start: "起動",
         stop: "停止",
-        view: "ターミナルを表示",
+        view: "出力",
         openService: "サービスを表示",
       },
       accessibility: {
+        switchLaunch: "{{activeLaunchName}} を停止して {{launchName}} を起動",
         trigger: "ワークスペースの起動",
         launch: "{{launchName}} 起動",
         startLaunch: "{{launchName}} を起動",
@@ -843,6 +845,10 @@ export const ja: TranslationResources = {
         openService: "{{hostname}} サービスを表示",
       },
       states: {
+        running: "実行中",
+        stopped: "停止中",
+        stopping: "停止しています…",
+        noListeners: "待ち受けポートはまだ検出されていません",
         startFailed: "{{launchName}} の起動に失敗しました",
         stopFailed: "{{launchName}} の停止に失敗しました",
         portRange: "ポート {{base}}–{{end}}",

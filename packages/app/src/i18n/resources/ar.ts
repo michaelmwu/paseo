@@ -797,7 +797,7 @@ export const ar: TranslationResources = {
         view: "عرض الوحدة الطرفية",
       },
       accessibility: {
-        trigger: "البرامج النصية Workspace",
+        trigger: "تشغيل أوامر مساحة العمل",
         openService: "عرض خدمة {{scriptName}}",
         viewTerminal: "عرض محطة{{scriptName}}",
         runScript: "قم بتشغيل البرنامج النصي{{scriptName}}",
@@ -821,12 +821,14 @@ export const ar: TranslationResources = {
     launches: {
       title: "عمليات التشغيل",
       actions: {
+        switch: "تبديل",
         start: "بدء",
         stop: "إيقاف",
-        view: "عرض الوحدة الطرفية",
+        view: "المخرجات",
         openService: "عرض الخدمة",
       },
       accessibility: {
+        switchLaunch: "إيقاف {{activeLaunchName}} وتشغيل {{launchName}}",
         trigger: "عمليات تشغيل مساحة العمل",
         launch: "تشغيل {{launchName}}",
         startLaunch: "بدء {{launchName}}",
@@ -835,6 +837,10 @@ export const ar: TranslationResources = {
         openService: "عرض خدمة {{hostname}}",
       },
       states: {
+        running: "قيد التشغيل",
+        stopped: "متوقف",
+        stopping: "جارٍ الإيقاف…",
+        noListeners: "لم يتم اكتشاف منافذ استماع بعد",
         startFailed: "تعذر بدء {{launchName}}",
         stopFailed: "تعذر إيقاف {{launchName}}",
         portRange: "المنافذ {{base}}–{{end}}",
