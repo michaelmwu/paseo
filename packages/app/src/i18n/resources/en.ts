@@ -1974,8 +1974,10 @@ export const en = {
     labels: {
       session: "Session",
       weekly: "Weekly",
+      monthly: "Monthly",
       codeReview: "Code review",
       credits: "Credits",
+      monthlyCredits: "Monthly credits",
     },
     duration: {
       days: "{{value}}d",
