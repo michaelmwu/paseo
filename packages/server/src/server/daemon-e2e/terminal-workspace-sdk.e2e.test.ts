@@ -1,3 +1,4 @@
+import { resolveDaemonVersion } from "../daemon-version.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,7 +25,7 @@ afterEach(async () => {
   await client.close();
   await sdk.close();
   await daemon.close();
-  await rm(cwd, { recursive: true, force: true });
+  await rm(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 });
 
 test("SDK and workspace handles preserve ownership and actual process directories", async () => {
@@ -114,7 +115,10 @@ test("plugin handlers operate terminals through their host-owned Paseo API", asy
   await mkdir(pluginDirectory);
   await writeFile(
     path.join(pluginDirectory, "paseo-plugin.json"),
-    JSON.stringify({ id: "terminal-sdk" }),
+    JSON.stringify({
+      id: "terminal-sdk",
+      requirements: { paseo: `>=${resolveDaemonVersion(import.meta.url)}` },
+    }),
   );
   await writeFile(
     path.join(pluginDirectory, "index.server.ts"),

@@ -81,6 +81,11 @@ vi.mock("react-native", () => {
   };
 });
 
+vi.mock("react-native-gesture-handler", () => ({
+  GestureHandlerRootView: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("div", { "data-testid": "gesture-handler-root" }, children),
+}));
+
 vi.mock("lucide-react-native", () => {
   const icon = (name: string) => {
     const Icon = () => React.createElement("span", { "data-icon": name });
@@ -114,19 +119,6 @@ vi.mock("@/navigation/settings-navigation", async () => {
       push(buildProjectSettingsRoute(serverId, projectId)),
   };
 });
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: Record<string, string>) => {
-      if (key === "sidebar.project.empty.title") return "No projects yet";
-      if (key === "settings.projectList.hostLoadFailed") {
-        return `Couldn't load projects from host ${values?.hostName}: ${values?.message}`;
-      }
-      if (key === "settings.projectList.editProject") return `Edit ${values?.projectName}`;
-      return key;
-    },
-  }),
-}));
 
 vi.mock("react-native-reanimated", () => ({
   default: { View: "div" },
@@ -220,6 +212,7 @@ vi.mock("@/projects/icons", () => ({
   useProjectIcons: () => new Map(),
 }));
 
+import { i18n } from "@/i18n/i18next";
 import ProjectsScreen from "./projects-screen";
 
 function workspaceSummary(overrides: Partial<WorkspaceSummary> = {}): WorkspaceSummary {
@@ -287,7 +280,8 @@ describe("ProjectsScreen", () => {
   let container: HTMLElement | null = null;
   let root: Root | null = null;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
     vi.stubGlobal("React", React);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     container = document.createElement("div");

@@ -1,35 +1,30 @@
+import { PluginHookHandlers } from "./lifecycle/index.js";
 import {
   PluginProcessRequestSchema,
   type PluginProcessMessage,
   type PluginProcessRequest,
 } from "./plugin-process-protocol.js";
 import { createRequire } from "node:module";
-import {
-  defineSettings,
-  type SettingsDefinition,
-  defineAttachmentSource,
-  defineRpc,
-  type PluginRpcContract,
-} from "@getpaseo/plugin";
+import * as pluginSharedRuntime from "@getpaseo/plugin";
+import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
+import * as pluginAcpRuntime from "@getpaseo/plugin/server/acp";
+import type { SettingsDefinition, PluginRpcContract } from "@getpaseo/plugin";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import type { ZodType } from "zod";
 import {
   ProviderEventSchema,
   type ProviderConnection,
   type ProviderRegistration,
-} from "@getpaseo/plugin/provider";
-import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+} from "@getpaseo/plugin/server/provider";
 import { createPaseoApi, type PaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createPluginDaemonTransportFactory } from "./daemon-transport.js";
-import {
-  isPluginClientOnlySdkSpecifier,
-  isPluginSdkSpecifier,
-  isPluginServerTypesSdkSpecifier,
-} from "./plugin-sdk-specifiers.js";
+import { isPluginClientOnlySdkSpecifier } from "./plugin-sdk-specifiers.js";
 import { createPluginClientId } from "./plugin-session-identity.js";
 
 import { PluginSettingsStore } from "./settings/index.js";
 let settingsStore: PluginSettingsStore | null = null;
-function registerSettings(definition: SettingsDefinition) {
+function registerSettings<Schema extends ZodType>(definition: SettingsDefinition<Schema>) {
   if (!settingsStore) throw new Error("Plugin settings storage is unavailable");
   const handlers = settingsStore.register(definition);
   register(handlers.read.contract, handlers.read.handle);
@@ -39,6 +34,7 @@ function registerSettings(definition: SettingsDefinition) {
   register(handlers.reset.contract, (input) =>
     handlers.reset.handle(handlers.reset.contract.input.parse(input)),
   );
+  return handlers.settings;
 }
 
 type RpcHandler = (input: unknown, context: PluginHandlerContext) => unknown | Promise<unknown>;
@@ -48,6 +44,9 @@ interface RegisteredRpc {
   handler: RpcHandler;
 }
 
+const hooks = new PluginHookHandlers(() => {
+  send({ type: "hooks.changed", hooks: hooks.catalog() });
+});
 const handlers = new Map<string, RegisteredRpc>();
 const providers = new Map<string, ProviderRegistration>();
 const providerConnections = new Map<
@@ -211,21 +210,16 @@ async function closeProviderConnection(connectionId: string): Promise<void> {
   send({ type: "provider.closed", connectionId });
 }
 
-const pluginAuthorRuntime = {
-  defineAttachmentSource,
-  defineSettings,
-  defineRpc,
-  Icon() {
-    throw new Error("Icon is available only in plugin client code");
-  },
-};
-
 function runtimeRequire(name: string): unknown {
   if (isPluginClientOnlySdkSpecifier(name)) {
     throw new Error(`${name} is available only in plugin client code`);
   }
-  if (isPluginServerTypesSdkSpecifier(name)) return {};
-  if (isPluginSdkSpecifier(name)) return pluginAuthorRuntime;
+  if (name === "@getpaseo/plugin") return pluginSharedRuntime;
+  if (name === "@getpaseo/plugin/server") return {};
+  if (name === "@getpaseo/plugin/server/provider") return pluginProviderRuntime;
+  if (name === "@getpaseo/plugin/server/acp") return pluginAcpRuntime;
+  if (name === "@getpaseo/plugin/client/host")
+    throw new Error(`${name} is private to the app host`);
   return nodeRequire(name);
 }
 
@@ -239,7 +233,13 @@ function evaluateBundle(bundle: string): void {
   if (typeof setup !== "function") {
     throw new Error("Plugin server bundle must default export a function");
   }
-  const contributedCleanup = setup({ handle: register, registerProvider, registerSettings });
+  const contributedCleanup = setup({
+    handle: register,
+    registerProvider,
+    registerSettings,
+    on: hooks.on,
+    before: hooks.before,
+  });
   if (typeof contributedCleanup !== "function") {
     throw new Error("Plugin contribution must return a cleanup function");
   }
@@ -260,7 +260,8 @@ async function initialize(message: Extract<PluginProcessRequest, { type: "initia
     clientId: createPluginClientId(message.pluginId),
     clientType: "cli",
     appVersion: message.appVersion,
-    reconnect: { enabled: false },
+    // The runtime re-attaches a session when the daemon drops this socket.
+    reconnect: { enabled: true },
     transportFactory,
   });
   paseo = createPaseoApi(daemonClient);
@@ -274,6 +275,7 @@ async function initialize(message: Extract<PluginProcessRequest, { type: "initia
   send({
     type: "ready",
     methods: [...handlers.keys()].sort(),
+    hooks: hooks.catalog(),
     providers: [...providers.values()]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map(providerMetadata),
@@ -283,6 +285,10 @@ async function initialize(message: Extract<PluginProcessRequest, { type: "initia
 async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  const releaseApi = paseo
+    ?.dispose()
+    .catch((error) => console.error("Plugin API cleanup failed", error));
+  hooks.close();
   for (const pending of pendingProviderConnections.values()) pending.tombstoned = true;
   const currentCleanup = cleanup;
   cleanup = null;
@@ -292,6 +298,7 @@ async function shutdown(): Promise<void> {
     console.error("Plugin cleanup failed", error);
   }
   await Promise.all([...providerConnections.keys()].map(closeProviderConnection));
+  await releaseApi;
   await daemonClient?.close().catch(() => undefined);
   await sendAndWait({ type: "paseo_close" });
   daemonClient = null;
@@ -321,6 +328,9 @@ process.on("message", (rawMessage: unknown) => {
   if (message.type === "initialize") {
     void initialize(message).catch(async (error) => {
       send({ type: "fatal", error: describeError(error) });
+      await paseo
+        ?.dispose()
+        .catch((failure) => console.error("Plugin API cleanup failed", failure));
       await daemonClient?.close().catch(() => undefined);
     });
     return;
@@ -397,6 +407,10 @@ process.on("message", (rawMessage: unknown) => {
     return;
   }
   if (message.type === "paseo_frame" || message.type === "paseo_close") return;
+  if (isHookMessage(message)) {
+    handleHookMessage(message);
+    return;
+  }
   const registered = handlers.get(message.method);
   if (!registered) {
     send({
@@ -418,3 +432,37 @@ process.on("message", (rawMessage: unknown) => {
       (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
     );
 });
+
+function handleHookMessage(
+  message: Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" }>,
+): void {
+  if (message.type === "hook.cancel") {
+    hooks.cancel(message.requestId);
+    return;
+  }
+  if (message.type === "hook") {
+    if (!paseo) {
+      send({
+        type: "error",
+        requestId: message.requestId,
+        error: "Plugin Paseo API is unavailable",
+      });
+      return;
+    }
+    void hooks.invoke(message.requestId, message.kind, message.name, message.input, paseo).then(
+      (output) => {
+        return send({ type: "result", requestId: message.requestId, output });
+      },
+      (error) => {
+        return send({ type: "error", requestId: message.requestId, error: describeError(error) });
+      },
+    );
+    return;
+  }
+}
+
+function isHookMessage(
+  message: PluginProcessRequest,
+): message is Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" }> {
+  return message.type === "hook" || message.type === "hook.cancel";
+}

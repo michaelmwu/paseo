@@ -1,3 +1,5 @@
+import type { PluginBeforeRequests, PluginLifecycleEvents } from "@getpaseo/plugin/server";
+import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.js";
 import { fork } from "node:child_process";
 import { stat } from "node:fs/promises";
 import path from "node:path";
@@ -12,10 +14,12 @@ import {
   type ProviderConnection,
   type ProviderEvent,
   type ProviderInput,
-} from "@getpaseo/plugin/provider";
+} from "@getpaseo/plugin/server/provider";
 import type { PluginLogEntry } from "@getpaseo/protocol/messages";
 import { compilePlugin } from "./compiler.js";
 import { readPluginManifest } from "./manifest.js";
+import type { PluginRequirements } from "@getpaseo/protocol/messages";
+import { assertPluginCompatibility } from "@getpaseo/protocol/plugin-requirements";
 import type {
   PluginProcessMessage,
   PluginProcessRequest,
@@ -56,8 +60,10 @@ interface PendingInvocation {
 
 interface LoadedPlugin {
   id: string;
+  requirements: PluginRequirements | undefined;
   clientBundle: string;
   methods: ReadonlySet<string>;
+  hooks: { events: string[]; before: string[] };
   providers: readonly PluginProviderMetadata[];
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
@@ -66,6 +72,22 @@ interface LoadedPlugin {
   providerConnectionTombstones: Set<string>;
   sessionSocket: PluginSessionSocket | null;
   sessionClosed: Promise<void> | null;
+}
+
+/** The session socket a loaded plugin currently speaks through. */
+interface PluginSessionBinding {
+  socket: PluginSessionSocket;
+  reattaching: boolean;
+  plugin: LoadedPlugin | null;
+}
+
+interface PluginFrameInput {
+  session: PluginSessionBinding;
+  pluginId: string;
+  child: PluginChild;
+  sessionHost: PluginPaseoSessionHost;
+  frame: string | Uint8Array;
+  isBinary: boolean;
 }
 
 interface PendingProviderSend {
@@ -254,7 +276,7 @@ async function resolveEntryPaths(directory: string): Promise<{
   const legacyEntry = await findEntry(directory, ["index.ts", "index.tsx"]);
   if (legacyEntry) {
     throw new Error(
-      "This plugin was made for an older version of Paseo and cannot run on Paseo v0.8. Ask its author to update it. Plugin authors can follow the migration guide: https://paseo.sh/docs/plugins/v0.8/migration",
+      "This plugin was made for an older version of Paseo and cannot run on Paseo v0.8. Ask its author to update it. Plugin authors can follow the migration guide: https://paseo.sh/docs/plugins/migration",
     );
   }
   throw new Error(
@@ -312,7 +334,8 @@ export class PluginRuntime {
 
   async validatePlugin(configuredPath: string): Promise<void> {
     const directory = path.resolve(configuredPath);
-    await readPluginManifest(directory);
+    const manifest = await readPluginManifest(directory);
+    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
     const entryPaths = await resolveEntryPaths(directory);
     await compilePlugin(entryPaths);
   }
@@ -326,9 +349,9 @@ export class PluginRuntime {
     return true;
   }
 
-  catalog(): Array<{ id: string; clientBundle: string }> {
+  catalog(): Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }> {
     return [...this.plugins.values()]
-      .map(({ id, clientBundle }) => ({ id, clientBundle }))
+      .map(({ id, clientBundle, requirements }) => ({ id, clientBundle, requirements }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -419,6 +442,60 @@ export class PluginRuntime {
     return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
   }
 
+  emit<Name extends keyof PluginLifecycleEvents>(
+    name: Name,
+    event: PluginLifecycleEvents[Name],
+  ): void {
+    for (const loaded of this.plugins.values()) {
+      if (!loaded.hooks.events.includes(name)) {
+        continue;
+      }
+      void this.request(loaded, {
+        type: "hook",
+        requestId: randomUUID(),
+        kind: "event",
+        name,
+        input: event,
+      }).catch((error) => {
+        this.appendLog(
+          loaded.id,
+          "stderr",
+          `Lifecycle hook ${name} failed: ${describeError(error)}`,
+        );
+      });
+    }
+  }
+
+  async before<Name extends keyof PluginBeforeRequests>(
+    name: Name,
+    input: PluginBeforeRequests[Name],
+  ): Promise<PluginBeforeRequests[Name]> {
+    let request = validateBeforeRequest(name, input);
+    const plugins = [...this.plugins.values()].sort((left, right) => {
+      return left.id.localeCompare(right.id);
+    });
+    for (const loaded of plugins) {
+      if (!loaded.hooks.before.includes(name)) {
+        continue;
+      }
+      try {
+        const output = await this.request(loaded, {
+          type: "hook",
+          requestId: randomUUID(),
+          kind: "before",
+          name,
+          input: request,
+        });
+        request = validateBeforeResult(name, request, output);
+      } catch (error) {
+        throw new Error(`Plugin ${loaded.id} before ${name} failed: ${describeError(error)}`, {
+          cause: error,
+        });
+      }
+    }
+    return request;
+  }
+
   async getProviderCatalogCacheKey(
     pluginId: string,
     providerId: string,
@@ -448,6 +525,9 @@ export class PluginRuntime {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         loaded.pending.delete(requestId);
+        if (message.type === "hook") {
+          void send(child, { type: "hook.cancel", requestId }).catch(() => {});
+        }
         reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
       }, REQUEST_TIMEOUT_MS);
       loaded.pending.set(requestId, { resolve, reject, timeout });
@@ -473,7 +553,8 @@ export class PluginRuntime {
     configuredPath: string,
   ): Promise<LoadedPlugin> {
     const directory = path.resolve(configuredPath);
-    await readPluginManifest(directory);
+    const manifest = await readPluginManifest(directory);
+    assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
     const entryPaths = await resolveEntryPaths(directory);
     const bundles = await compilePlugin(entryPaths);
     const serverBundle = bundles.serverBundle;
@@ -481,7 +562,9 @@ export class PluginRuntime {
       return {
         id: pluginId,
         clientBundle: bundles.clientBundle ?? "",
+        requirements: manifest.requirements,
         methods: new Set(),
+        hooks: { events: [], before: [] },
         providers: [],
         child: null,
         outputCapture: null,
@@ -498,10 +581,14 @@ export class PluginRuntime {
     const outputCapture = new PluginOutputCapture(child, (stream, message) => {
       this.appendLog(pluginId, stream, message);
     });
-    const sessionSocket = new PluginSessionSocket(child);
+    const session: PluginSessionBinding = {
+      socket: new PluginSessionSocket(child),
+      reattaching: false,
+      plugin: null,
+    };
     const pending = new Map<string, PendingInvocation>();
     const sessionAttachment = await sessionHost
-      .attachPluginSocket(pluginId, sessionSocket)
+      .attachPluginSocket(pluginId, session.socket)
       .catch((error) => {
         terminatePluginChild(child);
         throw error;
@@ -534,9 +621,16 @@ export class PluginRuntime {
             }
             const message = parsed.data;
             if (message.type === "paseo_frame") {
-              sessionSocket.receive(message.data, message.isBinary);
+              this.routePluginFrame({
+                session,
+                pluginId,
+                child,
+                sessionHost,
+                frame: message.data,
+                isBinary: message.isBinary,
+              });
             } else if (message.type === "paseo_close") {
-              sessionSocket.peerClosed();
+              session.socket.peerClosed();
             } else if (message.type === "ready") {
               if (settled) return;
               settled = true;
@@ -549,7 +643,7 @@ export class PluginRuntime {
             }
           });
           child.on("close", () => {
-            sessionSocket.peerClosed();
+            session.socket.peerClosed();
             if (!loaded) {
               fail(new Error(`Plugin ${pluginId} exited during initialization`));
               return;
@@ -568,7 +662,7 @@ export class PluginRuntime {
         },
       );
     } catch (error) {
-      sessionSocket.close();
+      session.socket.close();
       await sessionAttachment.closed;
       terminatePluginChild(child);
       throw error;
@@ -576,16 +670,19 @@ export class PluginRuntime {
     loaded = {
       id: pluginId,
       clientBundle: bundles.clientBundle ?? "",
+      requirements: manifest.requirements,
       methods: new Set(ready.methods),
+      hooks: ready.hooks ?? { events: [], before: [] },
       providers: ready.providers ?? [],
       child,
       outputCapture,
       pending,
       providerConnections: new Map(),
       providerConnectionTombstones: new Set(),
-      sessionSocket,
+      sessionSocket: session.socket,
       sessionClosed: sessionAttachment.closed,
     };
+    session.plugin = loaded;
     this.logger.info(
       { pluginId, methods: ready.methods, providers: ready.providers },
       "Loaded plugin",
@@ -593,7 +690,70 @@ export class PluginRuntime {
     return loaded;
   }
 
+  /**
+   * Frames still in flight belong to the closed session; only a fresh hello
+   * means the child redialled and wants a new one. Attaching on the close
+   * instead would leave a socket nobody speaks to until the host's hello
+   * timeout closed it, and that close would attach another.
+   */
+  private routePluginFrame(input: PluginFrameInput): void {
+    const { session, frame, isBinary } = input;
+    if (session.socket.readyState === 1) {
+      session.socket.receive(frame, isBinary);
+      return;
+    }
+    if (session.reattaching || !isSessionHelloFrame({ frame, isBinary })) return;
+    if (!this.canReattachPluginSession(input)) return;
+    session.reattaching = true;
+    void this.reattachPluginSession(input).finally(() => {
+      session.reattaching = false;
+    });
+  }
+
+  private async reattachPluginSession(input: PluginFrameInput): Promise<void> {
+    const { session, pluginId, sessionHost, child, frame, isBinary } = input;
+    const replacement = new PluginSessionSocket(child);
+    try {
+      const attachment = await sessionHost.attachPluginSocket(pluginId, replacement);
+      if (!this.canReattachPluginSession(input)) {
+        replacement.close();
+        return;
+      }
+      session.socket = replacement;
+      if (session.plugin) {
+        session.plugin.sessionSocket = replacement;
+        session.plugin.sessionClosed = attachment.closed;
+      }
+      replacement.receive(frame, isBinary);
+      this.appendLog(pluginId, "stdout", "[paseo] Re-attached plugin session");
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.appendLog(pluginId, "stderr", `[paseo] Failed to re-attach plugin session: ${reason}`);
+      this.logger.warn({ pluginId, err: error }, "Failed to re-attach a plugin session");
+      this.notify(pluginId, `Plugin session could not be re-attached: ${pluginId}`);
+    }
+  }
+
+  /**
+   * A published plugin whose process is still up. Anything else is either still
+   * loading or being torn down, and must not get a new session.
+   */
+  private canReattachPluginSession(input: {
+    session: PluginSessionBinding;
+    pluginId: string;
+    child: PluginChild;
+  }): boolean {
+    const { session, pluginId, child } = input;
+    return (
+      session.plugin !== null && this.plugins.get(pluginId) === session.plugin && child.connected
+    );
+  }
+
   private handleChildMessage(loaded: LoadedPlugin, message: PluginProcessMessage): void {
+    if (message.type === "hooks.changed") {
+      loaded.hooks = message.hooks;
+      return;
+    }
     if (message.type === "settings.changed") {
       this.dependencies.onSettingsChanged?.(loaded.id, message.settingsId);
       return;
@@ -992,6 +1152,16 @@ export class PluginRuntime {
 
   private notify(pluginId: string, error?: string): void {
     for (const listener of this.listeners) listener(pluginId, error);
+  }
+}
+
+function isSessionHelloFrame(input: { frame: string | Uint8Array; isBinary: boolean }): boolean {
+  const { frame, isBinary } = input;
+  if (isBinary || typeof frame !== "string") return false;
+  try {
+    return (JSON.parse(frame) as { type?: unknown }).type === "hello";
+  } catch {
+    return false;
   }
 }
 

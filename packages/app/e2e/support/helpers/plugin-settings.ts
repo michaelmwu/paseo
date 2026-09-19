@@ -1,11 +1,10 @@
-import path from "node:path";
+import { copyPluginExample } from "./plugin-fixture";
 import { expect, test as base, type Page } from "../fixtures";
 import { gotoAppShell, openSettings } from "./app";
 import { goBackInSettings, openCompactSettings, openHostSection } from "./settings";
 import { getServerId } from "./server-id";
 import { connectNewWorkspaceDaemonClient } from "./new-workspace";
 
-const directory = path.resolve(__dirname, "../../../../../plugin-examples/settings");
 type SettingsClient = Awaited<ReturnType<typeof connectNewWorkspaceDaemonClient>>;
 
 export const test = base.extend<{ settingsPlugin: SettingsClient }>({
@@ -14,15 +13,17 @@ export const test = base.extend<{ settingsPlugin: SettingsClient }>({
       void e2eWorker;
       const client = await connectNewWorkspaceDaemonClient({ ownProjects: false });
       const previous = await client.getDaemonConfig();
+      const example = await copyPluginExample("settings");
       try {
         await client.patchDaemonConfig({ pluginsEnabled: true });
-        await client.installDirectoryPlugin(directory);
+        await client.installDirectoryPlugin(example.directory);
         await provide(client);
         await page.screenshot({ path: testInfo.outputPath("settings.png") });
       } finally {
         await client.removePlugin("settings-example");
         await client.patchDaemonConfig({ pluginsEnabled: previous.config.pluginsEnabled });
         await client.close();
+        await example.cleanup();
       }
     },
     { auto: true },
@@ -41,7 +42,8 @@ export async function openCompactDisplaySettings(page: Page) {
 }
 async function openPluginScreen(page: Page) {
   await openHostSection(page, getServerId(), "plugins");
-  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await page.getByRole("button", { name: "Actions for settings-example", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Display", exact: true }).click();
   await expect(page.getByRole("switch", { name: "Show metadata" })).toBeVisible();
 }
 export async function groupByWorkspace(page: Page) {
@@ -97,8 +99,10 @@ export async function discardTitle(page: Page) {
 }
 export async function returnAndReopenSettings(page: Page) {
   await goBackInSettings(page);
-  await expect(page.getByRole("button", { name: "Open", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Open", exact: true }).click();
+  const actions = page.getByRole("button", { name: "Actions for settings-example", exact: true });
+  await expect(actions).toBeVisible();
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Display", exact: true }).click();
   await expect(page.getByRole("switch", { name: "Show metadata" })).toBeVisible();
 }
 export async function expectSettingsUnavailable(page: Page) {
