@@ -20,8 +20,7 @@ const { projectsState, push } = vi.hoisted(() => ({
   push: vi.fn(),
 }));
 
-vi.mock("react-native", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("react-native")>();
+vi.mock("react-native", () => {
   const passthrough = ({
     children,
     testID,
@@ -68,7 +67,6 @@ vi.mock("react-native", async (importOriginal) => {
   };
 
   return {
-    ...actual,
     View: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
       React.createElement("div", { "data-testid": testID }, children),
     Text: ({ children }: { children?: React.ReactNode }) =>
@@ -83,26 +81,39 @@ vi.mock("react-native", async (importOriginal) => {
   };
 });
 
-vi.mock("lucide-react-native", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("lucide-react-native")>();
+vi.mock("lucide-react-native", () => {
   const icon = (name: string) => {
     const Icon = () => React.createElement("span", { "data-icon": name });
     Icon.displayName = name;
     return Icon;
   };
   return {
-    ...actual,
     ChevronRight: icon("ChevronRight"),
     MoreVertical: icon("MoreVertical"),
     ExternalLink: icon("ExternalLink"),
     Pencil: icon("Pencil"),
     FolderGit2: icon("FolderGit2"),
+    Info: icon("Info"),
+    CheckCircle2: icon("CheckCircle2"),
+    AlertTriangle: icon("AlertTriangle"),
+    ArrowLeft: icon("ArrowLeft"),
+    Search: icon("Search"),
+    X: icon("X"),
+    XCircle: icon("XCircle"),
   };
 });
 
 vi.mock("expo-router", () => ({
   router: { push },
 }));
+
+vi.mock("@/navigation/settings-navigation", async () => {
+  const { buildProjectSettingsRoute } = await import("@/utils/host-routes");
+  return {
+    openProjectSettings: (serverId: string, projectId: string) =>
+      push(buildProjectSettingsRoute(serverId, projectId)),
+  };
+});
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -117,33 +128,37 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("react-native-reanimated", () => ({
+  default: { View: "div" },
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+}));
+
+vi.mock("@react-native-async-storage/async-storage", () => ({
+  default: {
+    getItem: async () => null,
+    setItem: async () => undefined,
+    removeItem: async () => undefined,
+  },
+}));
+
+vi.mock("react-native-unistyles", async () => import("../../test-stubs/react-native-unistyles"));
+
+vi.mock("@gorhom/bottom-sheet", async () => import("../../test-stubs/gorhom-bottom-sheet"));
+
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+
+vi.mock("@/contexts/toast-context", () => ({
+  useToast: () => ({ show: vi.fn(), error: vi.fn() }),
+}));
+
 vi.mock("@/components/ui/loading-spinner", () => ({
   LoadingSpinner: ({ size }: { size?: string | number }) =>
     React.createElement("span", {
       "data-testid": "projects-loading-spinner",
       "data-size": size,
     }),
-}));
-
-// This legacy DOM suite cannot load the native sheet implementation. Browser coverage exercises
-// the real dialog; the stub keeps these existing project-list assertions focused on list state.
-vi.mock("@/components/project-links-sheet", () => ({
-  ProjectLinksSheet: () => null,
-}));
-
-vi.mock("@/components/ui/alert", () => ({
-  Alert: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("div", null, children),
-}));
-
-vi.mock("@/components/ui/button", () => ({
-  Button: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("button", { type: "button" }, children),
-}));
-
-vi.mock("@/projects/local-project-links-store", () => ({
-  useLocalProjectLinksStore: (selector: (state: { links: [] }) => unknown) =>
-    selector({ links: [] }),
 }));
 
 vi.mock("@/components/ui/dropdown-menu", () => ({
