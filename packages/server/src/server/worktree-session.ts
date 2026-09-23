@@ -1,3 +1,4 @@
+import { materializeLocalFiles } from "./local-files/files.js";
 import type { Logger } from "pino";
 import { basename } from "node:path";
 
@@ -25,9 +26,10 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import type { CheckoutExistingBranchResult } from "../utils/checkout-git.js";
-import { expandTilde } from "../utils/path.js";
+import { expandTilde, getRealpathAwareRelativePath } from "../utils/path.js";
 import {
   getWorktreeSetupCommands,
+  mapWorkspaceRelativeCwdToWorktree,
   resolveWorktreeRuntimeEnv,
   runWorktreeSetupCommands,
   slugify,
@@ -170,6 +172,7 @@ interface HandleWorkspaceSetupStatusRequestDependencies {
 
 interface HandleWorkspaceSetupRunRequestDependencies extends CreatePaseoWorktreeInBackgroundDependencies {
   getWorkspace: (workspaceId: string) => Promise<PersistedWorkspaceRecord | null>;
+  getProjectRoot: (projectId: string) => Promise<string | null>;
   clearAutomationBlock: (workspaceId: string) => Promise<boolean>;
   startWorkspaceSetup: (workspaceId: string, operation: WorkspaceSetupOperation) => void;
 }
@@ -685,6 +688,7 @@ export async function createPaseoWorktreeWorkflow(
           dependencies,
           {
             requestCwd: input.cwd,
+            skipMissingLocalFiles: input.skipMissingLocalFiles,
             repoRoot: createdWorktree.repoRoot,
             workspaceId: workspace.workspaceId,
             worktree: createdWorktree.worktree,
@@ -714,6 +718,8 @@ export async function createPaseoWorktreeWorkflow(
             workspaceId: workspace.workspaceId,
             worktree: createdWorktree.worktree,
             workspaceCwd: workspace.cwd,
+            sourceProjectRoot: input.cwd,
+            skipMissingLocalFiles: input.skipMissingLocalFiles,
             shouldBootstrap: createdWorktree.created,
             terminalManager: setupContinuation.terminalManager,
             appendTimelineItem: (item) => setupContinuation.appendTimelineItem({ agentId, item }),
@@ -772,20 +778,34 @@ export async function handleWorkspaceSetupRunRequest(
     if (!workspace || workspace.archivedAt) {
       throw new Error(`Workspace not found: ${request.workspaceId}`);
     }
+    const projectRoot = await dependencies.getProjectRoot(workspace.projectId);
+    if (!projectRoot) throw new Error("Project no longer exists");
+    const worktreeRoot = workspace.worktreeRoot ?? workspace.cwd;
+    const relativeWorkspaceCwd = getRealpathAwareRelativePath(worktreeRoot, workspace.cwd);
+    if (relativeWorkspaceCwd === null) {
+      throw new Error(`Workspace cwd is outside its worktree: ${workspace.cwd}`);
+    }
+    const sourceCwd = workspace.mainRepoRoot
+      ? mapWorkspaceRelativeCwdToWorktree({
+          relativeWorkspaceCwd,
+          targetWorktreePath: workspace.mainRepoRoot,
+        })
+      : projectRoot;
     const started = await dependencies.clearAutomationBlock(request.workspaceId);
     if (started) {
       const worktree: WorktreeConfig = {
-        worktreePath: workspace.worktreeRoot ?? workspace.cwd,
+        worktreePath: worktreeRoot,
         branchName: workspace.branch ?? "",
       };
       dependencies.startWorkspaceSetup(request.workspaceId, (signal) =>
         runWorktreeSetupInBackground(
           dependencies,
           {
-            requestCwd: workspace.cwd,
+            requestCwd: sourceCwd,
             repoRoot: workspace.mainRepoRoot ?? workspace.cwd,
             workspaceId: workspace.workspaceId,
             worktree,
+            skipMissingLocalFiles: workspace.skipMissingLocalFiles,
             shouldBootstrap: true,
             slug: basename(worktree.worktreePath),
             worktreePath: worktree.worktreePath,
@@ -823,6 +843,7 @@ export async function runWorktreeSetupInBackground(
   dependencies: CreatePaseoWorktreeInBackgroundDependencies,
   options: {
     requestCwd: string;
+    skipMissingLocalFiles?: boolean;
     repoRoot: string;
     workspaceId: string;
     worktree: WorktreeConfig;
@@ -872,6 +893,11 @@ export async function runWorktreeSetupInBackground(
       } else {
         const workspaceCwd = options.workspaceCwd ?? worktree.worktreePath;
         const setupCommands = getWorktreeSetupCommands(workspaceCwd);
+        await materializeLocalFiles(
+          options.requestCwd,
+          workspaceCwd,
+          options.skipMissingLocalFiles,
+        );
         if (setupCommands.length === 0) {
           setupStarted = true;
           emitSetupProgress("completed", null);

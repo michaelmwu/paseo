@@ -32,6 +32,7 @@ import type { WorktreeIncludeSummary } from "../utils/worktree-include.js";
 
 export interface CreatePaseoWorktreeInput extends CreateWorktreeCoreInput {
   workspaceId?: string;
+  skipMissingLocalFiles?: boolean;
   projectId?: string;
   title?: string;
 }
@@ -103,6 +104,7 @@ async function createPaseoWorktreeWithPriority(
       baseBranch: createdWorktree.worktree.comparisonBaseRef,
       title: input.title?.trim() || resolveFirstAgentPromptTitle(input.firstAgentContext),
       expectsInitialAgent: Boolean(input.firstAgentContext),
+      skipMissingLocalFiles: input.skipMissingLocalFiles,
       ...(createdWorktree.intent.kind === "checkout-change-request" &&
       createdWorktree.intent.headRepository
         ? {
