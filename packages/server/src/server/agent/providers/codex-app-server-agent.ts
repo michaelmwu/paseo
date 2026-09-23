@@ -6,6 +6,7 @@ import {
   type AgentCreateSessionOptions,
   type AgentFeature,
   type AgentLaunchContext,
+  type AgentResumePurpose,
   type AgentResumeSessionOptions,
   type AgentMode,
   type AgentModelDefinition,
@@ -3385,6 +3386,19 @@ interface ConsumedRootCompaction {
   itemId?: string;
 }
 
+interface CodexAppServerSessionOptions {
+  config: AgentSessionConfig;
+  resumeHandle: Pick<AgentPersistenceHandle, "sessionId" | "metadata"> | null;
+  logger: Logger;
+  spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>;
+  deps?: CodexAppServerAgentDeps;
+  ephemeral?: boolean;
+  goalsEnabled?: boolean;
+  autoReviewEnabled?: boolean;
+  agentId?: string;
+  initialResumePurpose?: AgentResumePurpose;
+}
+
 export class CodexAppServerAgentSession implements AgentSession {
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
@@ -3396,6 +3410,14 @@ export class CodexAppServerAgentSession implements AgentSession {
   private readonly logger: Logger;
   private readonly config: AgentSessionConfig;
   private readonly asyncQuestions: CodexAsyncQuestions;
+  private readonly resumeHandle: CodexAppServerSessionOptions["resumeHandle"];
+  private readonly spawnAppServer: CodexAppServerSessionOptions["spawnAppServer"];
+  private readonly deps: CodexAppServerAgentDeps;
+  private readonly ephemeral: boolean;
+  private readonly goalsEnabled: boolean;
+  private readonly autoReviewEnabled: boolean;
+  private readonly agentId: string | undefined;
+  private readonly initialResumePurpose: AgentResumePurpose;
   private currentMode: string;
   private hasWorkflowModeOverride: boolean;
   private readonly providerOptions: CodexProviderOptions;
@@ -3491,18 +3513,26 @@ export class CodexAppServerAgentSession implements AgentSession {
   } | null = null;
   private cachedSkills: Array<{ name: string; description: string; path: string }> | null = null;
 
-  constructor(
-    config: AgentSessionConfig,
-    private readonly resumeHandle: { sessionId: string; metadata?: Record<string, unknown> } | null,
-    logger: Logger,
-    private readonly spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>,
-    private readonly deps: CodexAppServerAgentDeps = {},
-    private readonly ephemeral: boolean = false,
-    private readonly goalsEnabled: boolean = false,
-    private readonly autoReviewEnabled: boolean = false,
-    private readonly agentId?: string,
-    private readonly initialResumePurpose: "interactive" | "history" = "interactive",
-  ) {
+  constructor({
+    config,
+    resumeHandle,
+    logger,
+    spawnAppServer,
+    deps = {},
+    ephemeral = false,
+    goalsEnabled = false,
+    autoReviewEnabled = false,
+    agentId,
+    initialResumePurpose = "interactive",
+  }: CodexAppServerSessionOptions) {
+    this.resumeHandle = resumeHandle;
+    this.spawnAppServer = spawnAppServer;
+    this.deps = deps;
+    this.ephemeral = ephemeral;
+    this.goalsEnabled = goalsEnabled;
+    this.autoReviewEnabled = autoReviewEnabled;
+    this.agentId = agentId;
+    this.initialResumePurpose = initialResumePurpose;
     this.logger = logger.child({
       module: "agent",
       provider: CODEX_PROVIDER,
@@ -7337,17 +7367,17 @@ export class CodexAppServerAgentClient implements AgentClient {
       goalsEnabled,
       agentId: launchContext?.agentId,
     });
-    const session = new CodexAppServerAgentSession(
-      sessionConfig,
-      null,
-      this.logger,
-      async () => spawn(),
-      this.sessionDeps(launchContext?.env),
-      options?.persistSession === false,
+    const session = new CodexAppServerAgentSession({
+      config: sessionConfig,
+      resumeHandle: null,
+      logger: this.logger,
+      spawnAppServer: async () => spawn(),
+      deps: this.sessionDeps(launchContext?.env),
+      ephemeral: options?.persistSession === false,
       goalsEnabled,
       autoReviewEnabled,
-      launchContext?.agentId,
-    );
+      agentId: launchContext?.agentId,
+    });
     await session.connect();
     return session;
   }
@@ -7372,18 +7402,18 @@ export class CodexAppServerAgentClient implements AgentClient {
       goalsEnabled,
       agentId: launchContext?.agentId,
     });
-    const session = new CodexAppServerAgentSession(
-      merged,
-      handle,
-      this.logger,
-      async () => spawn(),
-      this.sessionDeps(launchContext?.env),
-      false,
+    const session = new CodexAppServerAgentSession({
+      config: merged,
+      resumeHandle: handle,
+      logger: this.logger,
+      spawnAppServer: async () => spawn(),
+      deps: this.sessionDeps(launchContext?.env),
+      ephemeral: false,
       goalsEnabled,
       autoReviewEnabled,
-      launchContext?.agentId,
-      options?.purpose ?? "interactive",
-    );
+      agentId: launchContext?.agentId,
+      initialResumePurpose: options?.purpose ?? "interactive",
+    });
     await session.connect();
     return session;
   }
