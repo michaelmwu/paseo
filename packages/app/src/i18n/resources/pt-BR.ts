@@ -429,6 +429,9 @@ export const ptBR: TranslationResources = {
     },
     row: {
       importing: "Importando...",
+      continuing: "Continuando...",
+      continueHint:
+        "Cria uma nova conversa aqui. Os arquivos e alterações de origem permanecem na worktree de origem.",
     },
   },
   workspace: {

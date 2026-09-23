@@ -1660,6 +1660,9 @@ export function HostAgents({ theme }: Pick<PluginSurfaceProps, "theme">): ReactE
 `useHosts(): readonly PluginHostSummary[]` includes offline hosts and updates when hosts,
 labels, or statuses change.
 
+`listHosts(): readonly PluginHostSummary[]` returns the same current snapshot for callbacks and
+other non-React code.
+
 | Summary field | Type or values                                               | Meaning                                                      |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | `serverId`    | `string`                                                     | ID to pass to `getPaseoClient`.                              |
@@ -1798,7 +1801,9 @@ daemon log persists it.
 
 ## Add a composer attachment source
 
-An attachment source searches external resources and returns a stable text snapshot for an agent prompt. Keep credentials and vendor calls in the backend handler.
+An attachment source searches external resources and returns a stable text snapshot for an agent
+prompt. Use a plugin RPC for credentials, vendor calls, and daemon-local work. Use a client callback
+for normal Paseo SDK operations, including searches across connected hosts.
 
 `shared/issues.ts`:
 
@@ -1873,13 +1878,18 @@ export default function contribute(server: PluginServerContext) {
 
 Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward.
 
+For a client-backed source, pass an async function as `search`. Paseo validates its result against
+the same attachment schema used for RPC-backed sources. The agent-context example uses `listHosts()`
+and `getPaseoClient()` to search connected hosts.
+
 The complete examples cover both common backend shapes: [Linear](https://github.com/getpaseo/paseo/tree/main/plugin-examples/linear) snapshots a vendor resource, while [agent context](https://github.com/getpaseo/paseo/tree/main/plugin-examples/agent-context) uses `context.paseo` to snapshot a retained agent timeline.
 
 ## Hosts and lifecycle
 
 Plugins are installed per daemon. When the same contribution exists on several connected hosts, Paseo shows one sidebar item and adds a host picker. The selected host supplies the bundle, Paseo API, RPC transport, and query cache. Calls never fall through to another host when the selected host is offline.
 
-Attachment sources remain scoped to each composer's host.
+Attachment source registrations remain scoped to each composer's host. Client-backed searches may
+target other connected hosts explicitly.
 
 Workspace panels and Command Center items stay scoped to the active host and exact cached context.
 Reload replaces their registrations. Disable, removal, host disconnect, and evaluation failure

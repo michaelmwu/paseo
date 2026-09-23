@@ -106,4 +106,36 @@ describe("plugin attachment sources", () => {
       searchPluginAttachments(source, async () => ({ items: [{ id: "issue-1" }] }), "issue"),
     ).rejects.toBeInstanceOf(z.ZodError);
   });
+
+  it("searches through a client callback and validates the standard result", async () => {
+    const source = defineAttachmentSource({
+      id: "agents",
+      title: "Agent",
+      icon: "MessageSquare",
+      pickerTitle: "Attach agent",
+      searchPlaceholder: "Search",
+      search: async ({ query }: { query: string }) => ({
+        items: [
+          {
+            id: "agent-1",
+            identifier: "agent-1",
+            title: query,
+            url: "https://example.com/agents/1",
+            text: "Transcript snapshot",
+            resourceType: "agent transcript",
+          },
+        ],
+      }),
+    });
+
+    const payload = await searchPluginAttachments(
+      source,
+      async () => {
+        throw new Error("client searches do not invoke an RPC");
+      },
+      "Portability",
+    );
+
+    expect(payload.items[0]?.title).toBe("Portability");
+  });
 });

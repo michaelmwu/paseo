@@ -30,6 +30,7 @@ import {
   type ToolCallTimelineItem,
   type AgentUsage,
   type FetchCatalogOptions,
+  type ForkImportableProviderSessionInput,
   type ImportableProviderSession,
   type ImportProviderSessionContext,
   type ImportProviderSessionInput,
@@ -150,6 +151,8 @@ const CODEX_NON_ORIGINATING_APP_SERVER_CLIENT_INFO = {
 const ASSISTANT_MESSAGE_BOUNDARY_MARKDOWN = "\n\n---\n\n";
 const MAX_PENDING_SUB_AGENT_THREADS = 32;
 const MAX_PENDING_SUB_AGENT_NOTIFICATIONS_PER_THREAD = 128;
+const CODEX_IMPORT_SESSION_SOURCE_KINDS = ["cli", "vscode", "appServer"] as const;
+const MAX_CODEX_IMPORT_SESSION_PAGES = 5;
 // COMPAT(codexLegacyCollabAgentToolCall): Codex <0.143 emits this shape. Added in
 // Paseo v0.1.105; remove after 2027-01-09 once the supported Codex floor is >=0.143.
 const CODEX_TOOL_THREAD_ITEM_TYPES = new Set([
@@ -936,6 +939,7 @@ async function readCodexThreadWindow(
     const response = toObjectRecord(
       await client.request("thread/list", {
         limit: window.limit - threads.size,
+        sourceKinds: CODEX_IMPORT_SESSION_SOURCE_KINDS,
         // Rank the window by last use. Codex pages by creation time by default,
         // which drops an old conversation that is still being worked in.
         // Older Codex builds ignore the unknown key and keep that order.
@@ -7233,6 +7237,56 @@ export class CodexAppServerAgentClient implements AgentClient {
       context,
       resumeSession: this.resumeSession.bind(this),
     });
+  }
+
+  async forkImportableSession(
+    input: ForkImportableProviderSessionInput,
+    context: ImportProviderSessionContext,
+  ) {
+    const child = await this.spawnAppServer();
+    const client =
+      this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
+      new CodexAppServerClient(child, this.logger);
+
+    try {
+      await client.request("initialize", buildCodexAppServerInitializeParams());
+      client.notify("initialized", {});
+      const forked = await forkCodexThread(client, {
+        threadId: input.providerHandleId,
+        cwd: input.destinationCwd,
+      });
+      const forkedThreadId = forked.thread.id;
+      if (forked.thread.forkedFromId && forked.thread.forkedFromId !== input.providerHandleId) {
+        throw new Error(
+          "Codex fork returned a source thread that does not match the selected session",
+        );
+      }
+      const config = {
+        ...context.storedConfig,
+        provider: CODEX_PROVIDER,
+        cwd: input.destinationCwd,
+      } satisfies AgentSessionConfig;
+      return await importSessionFromPersistence({
+        provider: CODEX_PROVIDER,
+        request: { providerHandleId: forkedThreadId, cwd: input.destinationCwd },
+        context,
+        resumeSession: this.resumeSession.bind(this),
+        persistence: {
+          provider: CODEX_PROVIDER,
+          sessionId: forkedThreadId,
+          nativeHandle: forkedThreadId,
+          metadata: {
+            ...config,
+            continuationSource: {
+              providerHandleId: input.providerHandleId,
+              cwd: input.sourceCwd,
+            },
+          },
+        },
+      });
+    } finally {
+      await client.dispose();
+    }
   }
 
   async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {

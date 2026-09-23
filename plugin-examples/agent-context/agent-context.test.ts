@@ -1,8 +1,5 @@
-import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
-import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { describe, expect, it } from "vitest";
-import contribute from "./index.server";
-import { searchAgentTranscriptsRpc } from "./shared/agent-context";
+import { searchAgentTranscripts } from "./shared/transcript";
 
 const MAX_EXPECTED_TRANSCRIPT_BYTES = 128 * 1024;
 interface TimelinePage {
@@ -42,12 +39,6 @@ type FetchTimeline = (
   agentId: string,
   options: Parameters<TimelineRefetch>[0],
 ) => Promise<TimelinePage>;
-type SearchHandler = (
-  input: RpcInput<typeof searchAgentTranscriptsRpc>,
-  context: SearchContext,
-) =>
-  | RpcOutput<typeof searchAgentTranscriptsRpc>
-  | Promise<RpcOutput<typeof searchAgentTranscriptsRpc>>;
 
 function entry(
   id: string,
@@ -119,26 +110,8 @@ function dependencies(input: {
   };
 }
 
-function registeredSearchHandler(): SearchHandler {
-  let search: SearchHandler | undefined;
-  contribute({
-    handle(contract, handler) {
-      if (contract.name !== searchAgentTranscriptsRpc.name) {
-        throw new Error(`Unexpected RPC registration: ${contract.name}`);
-      }
-      search = handler as unknown as SearchHandler;
-    },
-  } as PluginServerContext);
-  if (!search) throw new Error("Agent transcript search handler was not registered");
-  return search;
-}
-
-const searchAgentTranscripts = registeredSearchHandler();
-
 async function invokeSearch(source: ReturnType<typeof dependencies>, query: string) {
-  const input = searchAgentTranscriptsRpc.input.parse({ query });
-  const output = await searchAgentTranscripts(input, source.context);
-  return searchAgentTranscriptsRpc.output.parse(output);
+  return searchAgentTranscripts({ query }, source.context);
 }
 
 describe("agent transcript attachment source", () => {
@@ -191,6 +164,27 @@ describe("agent transcript attachment source", () => {
     expect(result.items[0]?.text).not.toContain("printenv SECRET");
     expect(result.items[0]?.text).not.toContain("token-value");
     expect(result.items[0]?.text).not.toContain("private child log");
+  });
+
+  it("qualifies cross-host snapshots and identifies their source", async () => {
+    const source = dependencies({
+      entries: [entry("agent-1", { title: "Remote review" })],
+      timeline: [{ type: "assistant_message", text: "Remote context." }],
+    });
+
+    const result = await searchAgentTranscripts(
+      { query: "remote" },
+      {
+        ...source.context,
+        sourceHost: { serverId: "host-2", label: "Build machine" },
+      },
+    );
+
+    expect(result.items[0]).toMatchObject({
+      id: "host-2:agent-1",
+      subtitle: "Build machine · main · Paseo · codex",
+    });
+    expect(result.items[0]?.text).toContain("Source host: Build machine");
   });
 
   it("pages backward to build one chronological snapshot", async () => {

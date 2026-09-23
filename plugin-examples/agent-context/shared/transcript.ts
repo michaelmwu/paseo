@@ -1,5 +1,4 @@
-import type { PluginAttachmentSearchPayload, RpcInput } from "@getpaseo/plugin";
-import { searchAgentTranscriptsRpc } from "../shared/agent-context";
+import type { PluginAttachmentSearchPayload } from "@getpaseo/plugin";
 
 const DIRECTORY_PAGE_SIZE = 200;
 const MAX_AGENTS_SCANNED = 1_000;
@@ -72,6 +71,7 @@ interface TranscriptMetadata {
   agent: AgentSummary;
   project: ProjectPlacement;
   capturedAt: Date;
+  sourceHost?: { serverId: string; label: string };
 }
 
 interface TranscriptChunk {
@@ -293,6 +293,7 @@ function transcriptHeader(metadata: TranscriptMetadata, truncated: boolean): str
     `Source agent ID: ${singleLine(metadata.agent.id) ?? "Unknown"}`,
     `Source provider: ${singleLine(metadata.agent.provider) ?? "Unknown"}`,
   ];
+  if (metadata.sourceHost) lines.push(`Source host: ${metadata.sourceHost.label}`);
   const workspace = singleLine(metadata.project.workspaceName);
   const project = singleLine(metadata.project.projectName);
   const cwd = singleLine(metadata.agent.cwd);
@@ -395,8 +396,12 @@ function shortAgentId(agentId: string): string {
   return withoutPrefix.slice(0, 8) || agentId;
 }
 
-function subtitle(entry: AgentDirectoryEntry): string | undefined {
+function subtitle(
+  entry: AgentDirectoryEntry,
+  sourceHost?: { serverId: string; label: string },
+): string | undefined {
   const values = [
+    singleLine(sourceHost?.label, 80),
     singleLine(entry.project.workspaceName, 80),
     singleLine(entry.project.projectName, 80),
     singleLine(entry.agent.provider, 80),
@@ -431,10 +436,11 @@ async function mapWithConcurrency<Input, Output>(
   });
 }
 
-function createAgentTranscriptSearch(dependencies: AgentContextSearchDependencies) {
-  return async ({
-    query,
-  }: RpcInput<typeof searchAgentTranscriptsRpc>): Promise<PluginAttachmentSearchPayload> => {
+function createAgentTranscriptSearch(
+  dependencies: AgentContextSearchDependencies,
+  sourceHost?: { serverId: string; label: string },
+) {
+  return async ({ query }: { query: string }): Promise<PluginAttachmentSearchPayload> => {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) return { items: [] };
     const candidates = await findAgents(dependencies, normalizedQuery);
@@ -442,16 +448,16 @@ function createAgentTranscriptSearch(dependencies: AgentContextSearchDependencie
     const snapshots = await mapWithConcurrency(candidates, 2, async (entry) => {
       const timeline = await readTimelineSnapshot(dependencies, entry.agent.id);
       const title = singleLine(entry.agent.title, 160) ?? `Agent ${shortAgentId(entry.agent.id)}`;
-      const sourceSubtitle = subtitle(entry);
+      const sourceSubtitle = subtitle(entry, sourceHost);
       return {
-        id: entry.agent.id,
+        id: sourceHost ? `${sourceHost.serverId}:${entry.agent.id}` : entry.agent.id,
         identifier: shortAgentId(entry.agent.id),
         title,
         ...(sourceSubtitle ? { subtitle: sourceSubtitle } : {}),
         url: PLUGIN_DOCUMENTATION_URL,
         text: buildTranscriptSnapshot({
           items: timeline.items,
-          metadata: { ...entry, capturedAt },
+          metadata: { ...entry, capturedAt, ...(sourceHost ? { sourceHost } : {}) },
           olderItemsOmitted: timeline.olderItemsOmitted,
         }),
         resourceType: "agent transcript",
@@ -471,7 +477,7 @@ function createAgentTranscriptSearch(dependencies: AgentContextSearchDependencie
   };
 }
 
-interface AgentContextHandlerContext {
+export interface AgentContextHandlerContext {
   paseo: {
     agents: {
       list: AgentContextSearchDependencies["listAgents"];
@@ -487,13 +493,21 @@ interface AgentContextHandlerContext {
 }
 
 export async function searchAgentTranscripts(
-  input: RpcInput<typeof searchAgentTranscriptsRpc>,
-  { paseo }: AgentContextHandlerContext,
+  input: { query: string },
+  {
+    paseo,
+    sourceHost,
+  }: AgentContextHandlerContext & {
+    sourceHost?: { serverId: string; label: string };
+  },
 ): Promise<PluginAttachmentSearchPayload> {
-  const search = createAgentTranscriptSearch({
-    listAgents: (options) => paseo.agents.list(options),
-    fetchTimeline: (agentId, options) => paseo.agents.ref(agentId).timeline.refetch(options),
-    now: () => new Date(),
-  });
+  const search = createAgentTranscriptSearch(
+    {
+      listAgents: (options) => paseo.agents.list(options),
+      fetchTimeline: (agentId, options) => paseo.agents.ref(agentId).timeline.refetch(options),
+      now: () => new Date(),
+    },
+    sourceHost,
+  );
   return search(input);
 }

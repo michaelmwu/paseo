@@ -425,6 +425,8 @@ export const zhCN: TranslationResources = {
     },
     row: {
       importing: "正在导入...",
+      continuing: "正在继续...",
+      continueHint: "将在此创建新的对话。源文件和更改会保留在源 worktree 中。",
     },
   },
   workspace: {

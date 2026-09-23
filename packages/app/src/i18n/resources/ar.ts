@@ -425,6 +425,8 @@ export const ar: TranslationResources = {
     },
     row: {
       importing: "جارٍ الاستيراد...",
+      continuing: "جارٍ المتابعة...",
+      continueHint: "ينشئ محادثة جديدة هنا. تبقى ملفات المصدر وتغييراته في شجرة العمل المصدرية.",
     },
   },
   workspace: {

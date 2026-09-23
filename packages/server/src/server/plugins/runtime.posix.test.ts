@@ -1417,14 +1417,14 @@ export default function contribute(server: { registerProvider(provider: Provider
       path.dirname(fileURLToPath(import.meta.url)),
       "../../../../../plugin-examples/agent-context",
     );
-    const runtime = createTestRuntime({}, undefined, "0.8.0");
+    const runtime = createTestRuntime({}, undefined, "0.9.1");
 
     await runtime.startPlugin("agent-context", directory);
 
     expect(runtime.catalog().map((plugin) => plugin.id)).toEqual(["agent-context"]);
     expect(runtime.catalog()[0]?.clientBundle).toContain("Attach agent transcript");
-    expect(runtime.catalog()[0]?.clientBundle).not.toContain("Chat history snapshot");
-    expect(runtime.catalog()[0]?.clientBundle).not.toContain("paseo.parent-agent-id");
+    expect(runtime.catalog()[0]?.clientBundle).toContain("Chat history snapshot");
+    expect(runtime.catalog()[0]?.clientBundle).toContain("Source host");
     await runtime.stopAll();
   });
 
