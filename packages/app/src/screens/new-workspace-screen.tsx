@@ -5,6 +5,11 @@ import type {
 import type { AgentSnapshotPayload, CreationSnapshot } from "@getpaseo/protocol/messages";
 import { encodeImages } from "@/utils/encode-images";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import {
+  NewWorkspaceLocalFiles,
+  LocalFilesCreationCanceled,
+  confirmMissingLocalFiles,
+} from "@/projects/local-files/creation";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement, ReactNode, RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -804,6 +809,7 @@ async function createMultiplicityWorkspace(input: {
   worktreeSlug: string;
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   isolation: "local" | "worktree";
+  skipMissingLocalFiles?: boolean;
   project: HostProjectListItem;
   sourceDirectory: string;
   checkoutRequest: PickerCheckoutRequest | undefined;
@@ -834,6 +840,7 @@ async function createMultiplicityWorkspace(input: {
       ? {
           kind: "worktree",
           cwd: input.sourceDirectory,
+          skipMissingLocalFiles: input.skipMissingLocalFiles,
           projectId,
           worktreeSlug: input.worktreeSlug,
           ...input.checkoutRequest,
@@ -1665,6 +1672,7 @@ export function NewWorkspaceScreen({
     draftId: draftId ?? generateDraftId(),
     worktreeSlug: createNameId(),
   }));
+  const supportsLocalFiles = useHostFeature(selectedServerId, "projectLocalFiles");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [creationResult, setCreationResult] = useState<
     WorkspaceCreationResult | { workspace: null }
@@ -2053,6 +2061,16 @@ export function NewWorkspaceScreen({
       }
       const connectedClient = withConnectedClient();
       const createsWorktree = !supportsWorkspaceMultiplicity || effectiveIsolation === "worktree";
+      const localFilesProjectId = getHostProjectId(selectedProject, selectedServerId);
+      const skipMissingLocalFiles =
+        createsWorktree && supportsLocalFiles && localFilesProjectId
+          ? await confirmMissingLocalFiles(
+              connectedClient,
+              localFilesProjectId,
+              selectedSourceDirectory,
+              t,
+            )
+          : false;
       const checkoutStatusForCreate = createsWorktree
         ? await ensureCheckoutStatus({
             queryClient,
@@ -2071,6 +2089,7 @@ export function NewWorkspaceScreen({
         worktreeSlug: creationIdentity.worktreeSlug,
         client: connectedClient,
         isolation: createsWorktree ? "worktree" : "local",
+        skipMissingLocalFiles,
         project: selectedProject,
         sourceDirectory: selectedSourceDirectory,
         checkoutRequest,
@@ -2097,6 +2116,7 @@ export function NewWorkspaceScreen({
       selectedServerId,
       selectedSourceDirectory,
       supportsWorkspaceMultiplicity,
+      supportsLocalFiles,
       t,
       withConnectedClient,
     ],
@@ -2154,8 +2174,9 @@ export function NewWorkspaceScreen({
           setPendingAction(null);
         }
       } catch (error) {
-        const message = toErrorMessage(error);
         setPendingAction(null);
+        if (error instanceof LocalFilesCreationCanceled) return;
+        const message = toErrorMessage(error);
         setErrorMessage(message);
         toast.error(message);
       }
@@ -2233,8 +2254,9 @@ export function NewWorkspaceScreen({
         setPendingAction(null);
       }
     } catch (error) {
-      const message = toErrorMessage(error);
       setPendingAction(null);
+      if (error instanceof LocalFilesCreationCanceled) return;
+      const message = toErrorMessage(error);
       setErrorMessage(message);
       toast.error(message);
     }
@@ -2436,6 +2458,13 @@ export function NewWorkspaceScreen({
           title={t("newWorkspace.title")}
           formStack={formStack}
         >
+          <NewWorkspaceLocalFiles
+            client={client}
+            serverId={selectedServerId}
+            project={selectedProject}
+            isolation={effectiveIsolation}
+            supported={supportsLocalFiles}
+          />
           {composer}
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </NewWorkspaceLayout>

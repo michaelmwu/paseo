@@ -462,12 +462,20 @@ describe("create-agent worktree setup boundary", () => {
       path.join(repoDir, "paseo.json"),
       JSON.stringify({
         worktree: {
+          localFiles: [".env"],
           setup: [`node -e "require('fs').writeFileSync('${setupMarker}', 'ran')"`],
           terminals: [{ command: "unsafe-terminal" }],
         },
       }),
     );
 
+    writeFileSync(path.join(repoDir, ".gitignore"), ".env\n");
+    writeFileSync(path.join(repoDir, ".env"), "withheld-fixture");
+    execFileSync("git", ["add", "paseo.json", ".gitignore"], { cwd: repoDir, stdio: "ignore" });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "configure local files"], {
+      cwd: repoDir,
+      stdio: "ignore",
+    });
     try {
       const result = await createPaseoWorktreeWorkflow(
         {
@@ -509,6 +517,7 @@ describe("create-agent worktree setup boundary", () => {
       expect(result.setupContinuation?.kind).toBe("agent");
       result.setupContinuation?.startAfterAgentCreate({ agentId: "agent-fork" });
       expect(existsSync(setupMarker)).toBe(false);
+      expect(existsSync(path.join(result.workspace.cwd, ".env"))).toBe(false);
       expect(emitted).toContainEqual(
         expect.objectContaining({
           type: "workspace_setup_progress",
@@ -1384,34 +1393,46 @@ describe("runWorktreeSetupInBackground", () => {
     });
   });
 
-  test("run setup clears the block and starts the existing setup runtime once", async () => {
+  test("deferred setup preserves the source subdirectory and missing-file approval", async () => {
     const tempDir = mkdtempSync(path.join(tmpdir(), "workspace-setup-run-"));
     cleanupPaths.push(tempDir);
-    execFileSync("git", ["init", "-b", "fork-branch"], { cwd: tempDir, stdio: "ignore" });
-    const setupMarker = path.join(tempDir, "setup-ran");
-    writeFileSync(
-      path.join(tempDir, "paseo.json"),
-      JSON.stringify({
-        worktree: {
-          setup: [`node -e "require('fs').writeFileSync('setup-ran', 'ran')"`],
-          terminals: [{ command: "start-preview" }],
-        },
-      }),
-    );
+    const sourceRoot = path.join(tempDir, "source");
+    const worktreeRoot = path.join(tempDir, "worktree");
+    const sourceDir = path.join(sourceRoot, "packages", "app");
+    const workspaceCwd = path.join(worktreeRoot, "packages", "app");
+    mkdirSync(sourceDir, { recursive: true });
+    mkdirSync(workspaceCwd, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: sourceRoot, stdio: "ignore" });
+    execFileSync("git", ["init", "-b", "fork-branch"], { cwd: worktreeRoot, stdio: "ignore" });
+    writeFileSync(path.join(sourceRoot, ".gitignore"), ".env*\n");
+    writeFileSync(path.join(worktreeRoot, ".gitignore"), ".env*\n");
+    writeFileSync(path.join(sourceDir, ".env.local"), "DEFERRED_SECRET=available\n");
+    const setupMarker = path.join(workspaceCwd, "setup-ran");
+    const config = JSON.stringify({
+      worktree: {
+        localFiles: [".env.local", ".env.missing"],
+        setup: [`node -e "require('fs').writeFileSync('setup-ran', 'ran')"`],
+        terminals: [{ command: "start-preview" }],
+      },
+    });
+    writeFileSync(path.join(sourceDir, "paseo.json"), config);
+    writeFileSync(path.join(workspaceCwd, "paseo.json"), config);
     const emitted: SessionOutboundMessage[] = [];
     let blocked = true;
     const operations: Array<(signal: AbortSignal) => Promise<void>> = [];
     const workspace = {
       workspaceId: "ws-fork",
-      cwd: tempDir,
-      worktreeRoot: tempDir,
+      cwd: workspaceCwd,
+      worktreeRoot,
       branch: "fork-branch",
-      mainRepoRoot: tempDir,
+      mainRepoRoot: sourceRoot,
       archivedAt: null,
+      skipMissingLocalFiles: true,
     } as PersistedWorkspaceRecord;
     const terminalManager = createTerminalManagerStub();
     const dependencies = {
       getWorkspace: async () => workspace,
+      getProjectRoot: async () => sourceRoot,
       clearAutomationBlock: async () => {
         if (!blocked) return false;
         blocked = false;
@@ -1447,6 +1468,10 @@ describe("runWorktreeSetupInBackground", () => {
 
     expect(operations).toHaveLength(1);
     await operations[0]!(new AbortController().signal);
+    expect(readFileSync(path.join(workspaceCwd, ".env.local"), "utf8")).toBe(
+      "DEFERRED_SECRET=available\n",
+    );
+    expect(existsSync(path.join(workspaceCwd, ".env.missing"))).toBe(false);
     expect(readFileSync(setupMarker, "utf8")).toBe("ran");
     expect(terminalManager.terminals[0]?.sent).toEqual(["start-preview\r"]);
     expect(emitted.filter((message) => message.type === "workspace.setup.run.response")).toEqual([
