@@ -425,6 +425,9 @@ export const ko: TranslationResources = {
     },
     row: {
       importing: "가져오는 중...",
+      continuing: "계속하는 중...",
+      continueHint:
+        "여기에 새 대화를 만듭니다. 소스 파일과 변경 사항은 원본 워크트리에 그대로 유지됩니다.",
     },
   },
   workspace: {

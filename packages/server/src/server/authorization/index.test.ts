@@ -74,6 +74,17 @@ describe("SessionAuthorization", () => {
     ).toBe(false);
   });
 
+  test("classifies native session continuation as workspace write authority", () => {
+    const authorization = new SessionAuthorization(["workspace.write"]);
+
+    expect(authorization.allowsInbound(inboundMessage("provider.session.continue.request"))).toBe(
+      true,
+    );
+    expect(
+      authorization.allowsOutbound(outboundMessage("provider.session.continue.response")),
+    ).toBe(true);
+  });
+
   test("Hub can operate ordinary agents and recover workspaces without daemon administration", () => {
     const authorization = new SessionAuthorization(["hub.execute"]);
     for (const type of [

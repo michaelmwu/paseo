@@ -430,6 +430,9 @@ export const fr: TranslationResources = {
     },
     row: {
       importing: "Importation...",
+      continuing: "Continuation...",
+      continueHint:
+        "Crée une nouvelle conversation ici. Les fichiers et modifications restent dans le worktree source.",
     },
   },
   workspace: {

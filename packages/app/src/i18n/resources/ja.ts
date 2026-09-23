@@ -429,6 +429,9 @@ export const ja: TranslationResources = {
     },
     row: {
       importing: "インポート中...",
+      continuing: "続行中...",
+      continueHint:
+        "ここに新しい会話を作成します。ソースのファイルと変更は元の worktree に残ります。",
     },
   },
   workspace: {

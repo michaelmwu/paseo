@@ -471,9 +471,10 @@ plugins. Plugin slash commands do not run when the composer has attachments.
 
 ## Contribute composer attachments
 
-Register a declarative attachment source backed by a plugin RPC. Paseo owns the attachment menu,
-search picker, drafts, selected pill, and submission. The plugin returns complete text snapshots;
-credentials and vendor API calls stay in the daemon handler.
+Register a declarative attachment source backed by a plugin RPC or a client search callback. Paseo
+owns the attachment menu, search picker, drafts, selected pill, and submission. The plugin returns
+complete text snapshots. Keep credentials and vendor API calls in a daemon handler; use a client
+callback for normal SDK operations across the app's connected Paseo hosts.
 
 ```ts
 // index.server.ts
@@ -498,8 +499,8 @@ export default function contribute(client: PluginClientContext) {
 }
 ```
 
-Attachment sources stay scoped to the composer's host. Unlike sidebar contributions, equal sources
-on several hosts are not coalesced. The selected snapshot submits as a text attachment with neutral
+Attachment source registrations stay scoped to the composer's host. A client-backed source can read
+other connected hosts with `listHosts()` and `getPaseoClient()`. The selected snapshot submits as a text attachment with neutral
 external-resource presentation, so it remains readable if the plugin is removed or an older peer
 drops the optional presentation fields.
 

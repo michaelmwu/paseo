@@ -428,6 +428,9 @@ export const ru: TranslationResources = {
     },
     row: {
       importing: "Импортируется...",
+      continuing: "Продолжение...",
+      continueHint:
+        "Здесь будет создан новый разговор. Исходные файлы и изменения останутся в исходном worktree.",
     },
   },
   workspace: {
