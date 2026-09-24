@@ -173,16 +173,23 @@ function createSession(
 }
 
 function createProviderWithFakeAppServer(appServer: FakeCodexAppServer): CodexAppServerAgentClient {
-  const provider = new CodexAppServerAgentClient(createTestLogger());
+  const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+    appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+  });
   const internals = castInternals<{
     goalsEnabledPromise: Promise<boolean> | null;
     autoReviewEnabledPromise: Promise<boolean> | null;
-    prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams>;
   }>(provider);
   internals.goalsEnabledPromise = Promise.resolve(false);
   internals.autoReviewEnabledPromise = Promise.resolve(false);
-  internals.prepareAppServerSpawn = async () => () => appServer.child;
   return provider;
+}
+
+function createFakeCodexAppServerProcess(spawn: () => ChildProcessWithoutNullStreams) {
+  return {
+    resolvePrefix: async () => ({ command: "codex", args: [] }),
+    spawn: () => spawn(),
+  };
 }
 
 async function startPublicSteeringSession(
@@ -1521,10 +1528,9 @@ describe("Codex app-server provider", () => {
         return { thread: { id: "native-thread-id" } };
       },
     });
-    const provider = new CodexAppServerAgentClient(createTestLogger());
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => appServer.child;
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
 
     await provider.unarchiveNativeSession({
       provider: "codex",
@@ -1546,10 +1552,9 @@ describe("Codex app-server provider", () => {
         return { thread: { id: "native-thread-id" } };
       },
     });
-    const provider = new CodexAppServerAgentClient(createTestLogger());
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => appServer.child;
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
 
     await provider.archiveNativeSession({
       provider: "codex",
@@ -1571,10 +1576,9 @@ describe("Codex app-server provider", () => {
         return { thread: { id: "persisted-thread-id" } };
       },
     });
-    const provider = new CodexAppServerAgentClient(createTestLogger());
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => appServer.child;
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
 
     await provider.unarchiveNativeSession({
       provider: "codex",
@@ -1603,10 +1607,9 @@ describe("Codex app-server provider", () => {
         return { thread: { id: "active-thread-id", turns: [] } };
       },
     });
-    const provider = new CodexAppServerAgentClient(createTestLogger());
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => appServer.child;
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
 
     await provider.unarchiveNativeSession({
       provider: "codex",
@@ -1636,10 +1639,9 @@ describe("Codex app-server provider", () => {
         return Promise.reject(new Error("thread not found"));
       },
     });
-    const provider = new CodexAppServerAgentClient(createTestLogger());
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => appServer.child;
+    const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
+    });
 
     await expect(
       provider.unarchiveNativeSession({
@@ -6000,6 +6002,10 @@ describe("Codex importable sessions", () => {
     let maxActiveInitializations = 0;
     let disposed = 0;
     const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+      appServerProcess: createFakeCodexAppServerProcess(() => {
+        spawned++;
+        return createCodexAppServerChildProcess();
+      }),
       _createCodexClient: () => ({
         request: async (method) => {
           if (method === "initialize") {
@@ -6021,12 +6027,6 @@ describe("Codex importable sessions", () => {
         },
       }),
     });
-    castInternals<{
-      prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams>;
-    }>(provider).prepareAppServerSpawn = async () => () => {
-      spawned++;
-      return createCodexAppServerChildProcess();
-    };
 
     const scans = Array.from({ length: 24 }, () => provider.listImportableSessions({ limit: 1 }));
     await firstEntered.promise;
@@ -6211,19 +6211,8 @@ describe("Codex importable sessions", () => {
 
     const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
       _createCodexClient: () => fakeClient,
+      appServerProcess: createFakeCodexAppServerProcess(createCodexAppServerChildProcess),
     });
-    castInternals<{ prepareAppServerSpawn: () => Promise<() => ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).prepareAppServerSpawn = async () => () => {
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      child.exitCode = 0;
-      child.signalCode = null;
-      child.stdin = new PassThrough();
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
-      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
-      return child;
-    };
 
     const sessions = await provider.listImportableSessions({ cwd: "/workspace/project-a" });
 
