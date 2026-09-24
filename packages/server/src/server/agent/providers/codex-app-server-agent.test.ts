@@ -6279,19 +6279,8 @@ describe("Codex importable sessions", () => {
     };
     const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
       _createCodexClient: () => fakeClient,
+      appServerProcess: createFakeCodexAppServerProcess(createCodexAppServerChildProcess),
     });
-    castInternals<{ spawnAppServer: () => Promise<ChildProcessWithoutNullStreams> }>(
-      provider,
-    ).spawnAppServer = async () => {
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      child.exitCode = 0;
-      child.signalCode = null;
-      child.stdin = new PassThrough();
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
-      child.kill = vi.fn(() => true) as ChildProcessWithoutNullStreams["kill"];
-      return child;
-    };
     const resumedFork = {
       async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
         yield* [];

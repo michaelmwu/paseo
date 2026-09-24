@@ -153,7 +153,6 @@ const ASSISTANT_MESSAGE_BOUNDARY_MARKDOWN = "\n\n---\n\n";
 const MAX_PENDING_SUB_AGENT_THREADS = 32;
 const MAX_PENDING_SUB_AGENT_NOTIFICATIONS_PER_THREAD = 128;
 const CODEX_IMPORT_SESSION_SOURCE_KINDS = ["cli", "vscode", "appServer"] as const;
-const MAX_CODEX_IMPORT_SESSION_PAGES = 5;
 // COMPAT(codexLegacyCollabAgentToolCall): Codex <0.143 emits this shape. Added in
 // Paseo v0.1.105; remove after 2027-01-09 once the supported Codex floor is >=0.143.
 const CODEX_TOOL_THREAD_ITEM_TYPES = new Set([
@@ -7321,14 +7320,18 @@ export class CodexAppServerAgentClient implements AgentClient {
     input: ForkImportableProviderSessionInput,
     context: ImportProviderSessionContext,
   ) {
-    const child = await this.spawnAppServer();
-    const client =
-      this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
-      new CodexAppServerClient(child, this.logger);
+    const spawn = await this.prepareAppServerSpawn();
+    const client = await codexAppServerStartup.start({
+      stateDirKey: codexStartupStateDirKey(this.runtimeSettings),
+      spawn,
+      createClient: (child) =>
+        this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
+        new CodexAppServerClient(child, this.logger),
+      initializeParams: buildCodexAppServerInitializeParams(),
+      logger: this.logger,
+    });
 
     try {
-      await client.request("initialize", buildCodexAppServerInitializeParams());
-      client.notify("initialized", {});
       const forked = await forkCodexThread(client, {
         threadId: input.providerHandleId,
         cwd: input.destinationCwd,
