@@ -6,6 +6,7 @@ import {
   SessionOutboundMessageSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceDescriptorPayloadSchema,
+  WorkspaceLaunchEndpointPayloadSchema,
   WorkspaceScriptPayloadSchema,
 } from "./messages.js";
 
@@ -90,6 +91,31 @@ describe("workspace message schemas", () => {
         },
       }),
     ).toMatchObject({ type: "workspace.setup.run.response", payload: { started: true } });
+  });
+
+  test("parses legacy HTTP and current TCP launch listeners", () => {
+    const legacyHttp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p0",
+      port: 4100,
+      hostname: "launch-dev-p0--project.localhost",
+      localProxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      publicProxyUrl: null,
+      proxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      health: null,
+    });
+    const tcp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p1",
+      port: 4101,
+      hostname: "127.0.0.1",
+      protocol: "tcp",
+      localProxyUrl: null,
+      publicProxyUrl: null,
+      proxyUrl: null,
+      health: null,
+    });
+
+    expect(legacyHttp.protocol).toBeUndefined();
+    expect(tcp.protocol).toBe("tcp");
   });
 
   test("parses fetch_workspaces_request", () => {
@@ -313,6 +339,46 @@ describe("workspace message schemas", () => {
       firstPromptPreview: "first prompt",
       lastPromptPreview: "last prompt",
       lastActivityAt: "2026-04-30T12:34:56.000Z",
+    });
+  });
+
+  test("parses target-scoped provider session listings and continue requests", () => {
+    const descriptor = RecentProviderSessionDescriptorPayloadSchema.parse({
+      providerId: "codex",
+      providerLabel: "Codex",
+      providerHandleId: "thread-source",
+      cwd: "/repo/source-worktree",
+      title: "Continue this",
+      firstPromptPreview: "first prompt",
+      lastPromptPreview: "last prompt",
+      lastActivityAt: "2026-04-30T12:34:56.000Z",
+      canContinueHere: true,
+      isTargetCwd: false,
+    });
+    const listing = SessionInboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_request",
+      requestId: "req-target-listing",
+      targetCwd: "/repo/destination-worktree",
+    });
+    const continueRequest = SessionInboundMessageSchema.parse({
+      type: "provider.session.continue.request",
+      requestId: "req-continue",
+      providerId: "codex",
+      providerHandleId: "thread-source",
+      sourceCwd: "/repo/source-worktree",
+      workspaceId: "workspace-destination",
+    });
+
+    expect(descriptor.canContinueHere).toBe(true);
+    expect(descriptor.isTargetCwd).toBe(false);
+    expect(listing).toMatchObject({ targetCwd: "/repo/destination-worktree" });
+    expect(continueRequest).toEqual({
+      type: "provider.session.continue.request",
+      requestId: "req-continue",
+      providerId: "codex",
+      providerHandleId: "thread-source",
+      sourceCwd: "/repo/source-worktree",
+      workspaceId: "workspace-destination",
     });
   });
 

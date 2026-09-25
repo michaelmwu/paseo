@@ -76,8 +76,12 @@ export interface PluginAttachmentSourceContribution {
   icon: string;
   pickerTitle: string;
   searchPlaceholder: string;
-  search: PluginRpcContract;
+  search: PluginRpcContract | PluginAttachmentSearchHandler;
 }
+
+export type PluginAttachmentSearchHandler = (input: {
+  query: string;
+}) => unknown | Promise<unknown>;
 
 export type PluginTimelineData = JsonValue;
 

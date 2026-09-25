@@ -26,6 +26,59 @@ export const ru: TranslationResources = {
     position: "{{current}} из {{total}}",
     total: "Совпадений: {{total}}",
   },
+  localFiles: {
+    updateHost: "Обновите этот хост для импорта локальных файлов.",
+    missingTitle: "Локальные файлы отсутствуют",
+    missingConfirm:
+      "В {{root}} отсутствуют {{files}}. Продолжить без этих файлов? Отмените, чтобы сначала импортировать их.",
+    continueWithout: "Продолжить без файлов",
+    unavailableForWorktree: "Проверьте эти локальные файлы перед созданием worktree: {{files}}",
+
+    title: "Локальные файлы",
+    info: "Импортируйте на этот хост файлы окружения и настройки, игнорируемые Git. Агенты и скрипты хоста смогут их читать.",
+    import: "Импортировать файлы…",
+    importTo: "Импорт на {{host}}",
+    thisDevice: "Это устройство",
+    fromDevice: "С этого устройства…",
+    fromHost: "С другого хоста…",
+    source: "Источник: {{source}}",
+    sourcePath: "Другой исходный файл (путь относительно проекта)",
+    inspect: "Проверить",
+    refresh: "Обновить",
+    total: "Выбрано: {{count}} · {{size}}",
+    include: "Включать в будущие рабочие деревья",
+    configPreview:
+      "Добавить эти пути в paseo.json. Появится незакоммиченное изменение настроек; файлы существующих рабочих деревьев не изменятся.",
+    complete: "Файлы импортированы. Существующие рабочие деревья не обновлялись.",
+    limits:
+      "Только отдельные файлы. До 10 MiB на файл, 25 MiB на импорт и 100 файлов. Обновление вручную.",
+    existing: "Уже существует · выберите для замены",
+    replace: "Заменить {{path}}",
+    status: {
+      ready: "Есть",
+      missing: "Отсутствует",
+      not_ignored: "Должен игнорироваться Git",
+      unsupported: "Неподдерживаемый файл или путь",
+      too_large: "Слишком большой",
+      unavailable: "Недоступен",
+      imported: "Импортирован",
+    },
+    errors: {
+      load_failed: "Не удалось проверить файлы. Проверьте подключение к хосту и повторите попытку.",
+      selection_invalid: "Выберите не более 100 файлов с разными именами.",
+      no_source_files: "Подходящих файлов нет. Введите путь к файлу, игнорируемому Git.",
+      changed:
+        "Файл изменился после предпросмотра. Выберите источник заново, чтобы проверить текущую копию.",
+      import_failed: "Ошибка импорта. Проверьте подключение и повторите попытку.",
+      partial_failure:
+        "Некоторые файлы не импортированы. Повторите выбранные ошибки или выберите источник заново.",
+      secure_connection_required:
+        "Используйте ретранслятор, TLS или локальное/SSH-подключение для передачи конфиденциальных файлов.",
+      config_failed:
+        "Файлы импортированы, но включение не сохранено. Обновите настройки, проверьте их и сохраните включение без повторной передачи файлов.",
+    },
+  },
+
   common: {
     back: "Назад",
     loading: "Загрузка...",
@@ -429,6 +482,9 @@ export const ru: TranslationResources = {
     },
     row: {
       importing: "Импортируется...",
+      continuing: "Продолжение...",
+      continueHint:
+        "Здесь будет создан новый разговор. Исходные файлы и изменения останутся в исходном worktree.",
     },
   },
   workspace: {
@@ -753,7 +809,7 @@ export const ru: TranslationResources = {
         view: "Открыть терминал",
       },
       accessibility: {
-        trigger: "Скрипты рабочего пространства",
+        trigger: "Запустить команды рабочего пространства",
         openService: "Открыть сервис {{scriptName}}",
         viewTerminal: "Открыть терминал скрипта {{scriptName}}",
         runScript: "Запустить скрипт {{scriptName}}",
@@ -772,6 +828,34 @@ export const ru: TranslationResources = {
         exitCode: "Код выхода: {{code}}",
         startFailed: "Не удалось запустить скрипт {{scriptName}}",
         stopFailed: "Не удалось остановить скрипт {{scriptName}}",
+      },
+    },
+    launches: {
+      title: "Запуски",
+      actions: {
+        switch: "Переключить",
+        start: "Запустить",
+        stop: "Остановить",
+        view: "Вывод",
+        openService: "Открыть сервис",
+      },
+      accessibility: {
+        switchLaunch: "Остановить {{activeLaunchName}} и запустить {{launchName}}",
+        trigger: "Запуски рабочего пространства",
+        launch: "Запуск {{launchName}}",
+        startLaunch: "Запустить {{launchName}}",
+        stopLaunch: "Остановить {{launchName}}",
+        viewTerminal: "Открыть терминал {{launchName}}",
+        openService: "Открыть сервис {{hostname}}",
+      },
+      states: {
+        running: "Выполняется",
+        stopped: "Остановлено",
+        stopping: "Остановка…",
+        noListeners: "Прослушиваемые порты пока не обнаружены",
+        startFailed: "Не удалось запустить {{launchName}}",
+        stopFailed: "Не удалось остановить {{launchName}}",
+        portRange: "порты {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1979,6 +2063,42 @@ export const ru: TranslationResources = {
       hostLoadFailed: "Не удалось загрузить проекты с хоста {{hostName}}: {{message}}",
       editProject: "Изменить {{projectName}}",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "Возможные связи проектов",
+        linkedTitle: "Связи проектов",
+        description:
+          "Просмотрите подтверждённые Git связи проектов, сохранённые на этом устройстве.",
+        review: "Просмотреть связи",
+      },
+      sheet: {
+        title: "Связи проектов",
+        deviceOnly:
+          "Связи хранятся только на этом устройстве. Они не перемещают рабочие пространства, настройки или файлы.",
+        matchesTitle: "Подтверждённые совпадения",
+        matchesDescription:
+          "У этих записей один и тот же удалённый Git-репозиторий и подкаталог проекта, но они всё ещё разделены.",
+        linkedTitle: "Связанные проекты",
+        noMatchesTitle: "Нет связей проектов для проверки",
+        noMatchesDescription:
+          "Откройте рабочее пространство на каждом хосте, чтобы Paseo мог проверить удалённый Git-репозиторий и подкаталог проекта.",
+        linkProjects: "Связать {{count}} проекта",
+        remote: "Удалённый Git-репозиторий",
+        subdirectory: "Подкаталог проекта",
+        path: "Путь",
+        needsReviewTitle: "Требуется проверка",
+        needsReviewDescription:
+          "Последние данные Git больше не подтверждают эту связь, поэтому Paseo сохраняет эти проекты раздельно.",
+        projectUnavailable: "Этот проект сейчас недоступен.",
+        saving: "Сохранение связи проекта…",
+        saveFailed: "Не удалось сохранить связь проекта. Повторите попытку.",
+        unlink: "Отвязать",
+      },
+      toasts: {
+        linked: "Проекты связаны на этом устройстве",
+        unlinked: "Связь проекта удалена",
+      },
+    },
     groupInfo: "О разделе «{{title}}»",
     sections: {
       general: "Основные",
@@ -2723,6 +2843,28 @@ export const ru: TranslationResources = {
           edit: "Редактировать",
           remove: "Удалить",
         },
+      },
+      launches: {
+        title: "Запуски",
+        info: "Конфигурации разработки, которые можно запустить из любого рабочего пространства этого проекта",
+        empty: "Запусков пока нет.",
+        untitled: "Запуск без названия",
+        menuAccessibility: "Открыть меню запуска",
+        removeTitle: "Удалить запуск?",
+        removeMessage: "Удалить {{name}}?",
+        removeFallbackName: "этот запуск",
+        name: "Имя",
+        command: "Команда",
+        nameAccessibility: "Имя запуска",
+        commandAccessibility: "Команда запуска",
+        nameRequired: "Укажите имя",
+        nameDuplicate: "У каждого запуска должно быть уникальное имя",
+        commandRequired: "Укажите команду",
+        newLaunch: "Новый запуск",
+        editLaunch: "Изменить {{name}}",
+        commandHint:
+          "Paseo запускает эту команду с блоком портов рабочего пространства и именем проекта Compose в окружении.",
+        actions: { add: "Добавить запуск", edit: "Изменить", remove: "Удалить" },
       },
       metadata: {
         title: "Генерация метаданных",

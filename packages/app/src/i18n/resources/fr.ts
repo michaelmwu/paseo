@@ -26,6 +26,61 @@ export const fr: TranslationResources = {
     position: "{{current}} sur {{total}}",
     total: "{{total}} résultats",
   },
+  localFiles: {
+    updateHost: "Mettez cet hôte à jour pour importer des fichiers locaux.",
+    missingTitle: "Fichiers locaux manquants",
+    missingConfirm:
+      "{{files}} sont absents de {{root}}. Continuer sans ces fichiers ? Annulez pour les importer.",
+    continueWithout: "Continuer sans les fichiers",
+    unavailableForWorktree: "Vérifiez ces fichiers locaux avant de créer un worktree : {{files}}",
+
+    title: "Fichiers locaux",
+    info: "Importez les fichiers d’environnement et de configuration ignorés par Git sur cet hôte. Ses agents et scripts peuvent les lire.",
+    import: "Importer des fichiers…",
+    importTo: "Importer sur {{host}}",
+    thisDevice: "Cet appareil",
+    fromDevice: "Depuis cet appareil…",
+    fromHost: "Depuis un autre hôte…",
+    source: "Source : {{source}}",
+    sourcePath: "Autre fichier source (chemin relatif au projet)",
+    inspect: "Vérifier",
+    refresh: "Actualiser",
+    total: "Sélection : {{count}} · {{size}}",
+    include: "Inclure dans les futurs worktrees",
+    configPreview:
+      "Ajouter ces chemins à paseo.json. Cela crée une modification de configuration non commitée ; les fichiers des worktrees existants restent inchangés.",
+    complete: "Fichiers importés. Les worktrees existants n’ont pas été mis à jour.",
+    limits:
+      "Fichiers individuels uniquement. Maximum : 10 MiB par fichier, 25 MiB par import et 100 fichiers. Mises à jour manuelles.",
+    existing: "Existe déjà · sélectionner pour remplacer",
+    replace: "Remplacer {{path}}",
+    status: {
+      ready: "Présent",
+      missing: "Manquant",
+      not_ignored: "Doit être ignoré par Git",
+      unsupported: "Fichier ou chemin non pris en charge",
+      too_large: "Trop volumineux",
+      unavailable: "Indisponible",
+      imported: "Importé",
+    },
+    errors: {
+      load_failed:
+        "Impossible de vérifier les fichiers. Vérifiez la connexion à l’hôte et réessayez.",
+      selection_invalid: "Sélectionnez au maximum 100 fichiers de noms distincts.",
+      no_source_files:
+        "Aucun fichier admissible trouvé. Saisissez le chemin d’un fichier ignoré par Git.",
+      changed:
+        "Le fichier a changé depuis l’aperçu. Sélectionnez à nouveau la source pour vérifier la dernière copie.",
+      import_failed: "Échec de l’import. Vérifiez la connexion et réessayez.",
+      partial_failure:
+        "Certains fichiers ont échoué. Réessayez les échecs sélectionnés ou sélectionnez à nouveau la source.",
+      secure_connection_required:
+        "Utilisez un relais, TLS ou une connexion locale/SSH pour transférer des fichiers sensibles.",
+      config_failed:
+        "Fichiers importés, mais inclusion non enregistrée. Actualisez pour vérifier la configuration, puis enregistrez l’inclusion sans retransférer les fichiers.",
+    },
+  },
+
   common: {
     back: "Dos",
     loading: "Chargement...",
@@ -431,6 +486,9 @@ export const fr: TranslationResources = {
     },
     row: {
       importing: "Importation...",
+      continuing: "Continuation...",
+      continueHint:
+        "Crée une nouvelle conversation ici. Les fichiers et modifications restent dans le worktree source.",
     },
   },
   workspace: {
@@ -753,7 +811,7 @@ export const fr: TranslationResources = {
         view: "Voir le terminal",
       },
       accessibility: {
-        trigger: "ScriptsWorkspace",
+        trigger: "Exécuter les commandes de l’espace de travail",
         openService: "Voir le service {{scriptName}}",
         viewTerminal: "Voir le terminal{{scriptName}}",
         runScript: "Exécuter le script{{scriptName}}",
@@ -772,6 +830,34 @@ export const fr: TranslationResources = {
         exitCode: "quitter{{code}}",
         startFailed: "Échec du démarrage de{{scriptName}}",
         stopFailed: "Échec de l'arrêt de{{scriptName}}",
+      },
+    },
+    launches: {
+      title: "Lancements",
+      actions: {
+        switch: "Basculer",
+        start: "Démarrer",
+        stop: "Arrêter",
+        view: "Sortie",
+        openService: "Voir le service",
+      },
+      accessibility: {
+        switchLaunch: "Arrêter {{activeLaunchName}} et démarrer {{launchName}}",
+        trigger: "Lancements de l’espace de travail",
+        launch: "Lancement {{launchName}}",
+        startLaunch: "Démarrer {{launchName}}",
+        stopLaunch: "Arrêter {{launchName}}",
+        viewTerminal: "Voir le terminal de {{launchName}}",
+        openService: "Voir le service {{hostname}}",
+      },
+      states: {
+        running: "En cours",
+        stopped: "Arrêté",
+        stopping: "Arrêt en cours…",
+        noListeners: "Aucun port en écoute détecté pour le moment",
+        startFailed: "Échec du démarrage de {{launchName}}",
+        stopFailed: "Échec de l’arrêt de {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1999,6 +2085,42 @@ export const fr: TranslationResources = {
       hostLoadFailed: "Impossible de charger les projets depuis l'hôte{{hostName}}:{{message}}",
       editProject: "Modifier{{projectName}}",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "Liens de projets possibles",
+        linkedTitle: "Liens de projets",
+        description:
+          "Examinez les liens de projets vérifiés par Git et enregistrés sur cet appareil.",
+        review: "Examiner les liens",
+      },
+      sheet: {
+        title: "Liens de projets",
+        deviceOnly:
+          "Les liens sont enregistrés uniquement sur cet appareil. Ils ne déplacent ni espaces de travail, ni réglages, ni fichiers.",
+        matchesTitle: "Correspondances vérifiées",
+        matchesDescription:
+          "Ces entrées ont le même dépôt distant Git et le même sous-répertoire de projet, mais restent séparées.",
+        linkedTitle: "Projets liés",
+        noMatchesTitle: "Aucun lien de projet à examiner",
+        noMatchesDescription:
+          "Ouvrez un espace de travail sur chaque hôte afin que Paseo puisse vérifier le dépôt distant Git et le sous-répertoire du projet.",
+        linkProjects: "Lier {{count}} projets",
+        remote: "Dépôt distant Git",
+        subdirectory: "Sous-répertoire du projet",
+        path: "Chemin",
+        needsReviewTitle: "À examiner",
+        needsReviewDescription:
+          "Les dernières informations Git ne confirment plus ce lien ; Paseo garde donc ces projets séparés.",
+        projectUnavailable: "Ce projet n'est pas disponible actuellement.",
+        saving: "Enregistrement du lien du projet…",
+        saveFailed: "Impossible d’enregistrer le lien du projet. Réessayez.",
+        unlink: "Délier",
+      },
+      toasts: {
+        linked: "Projets liés sur cet appareil",
+        unlinked: "Lien de projet supprimé",
+      },
+    },
     groupInfo: "À propos de{{title}}",
     sections: {
       general: "Général",
@@ -2739,6 +2861,28 @@ export const fr: TranslationResources = {
           edit: "Modifier",
           remove: "Retirer",
         },
+      },
+      launches: {
+        title: "Lancements",
+        info: "Configurations de développement que vous pouvez démarrer depuis n’importe quel espace de travail de ce projet",
+        empty: "Aucun lancement pour le moment.",
+        untitled: "Lancement sans titre",
+        menuAccessibility: "Ouvrir le menu de lancement",
+        removeTitle: "Supprimer le lancement ?",
+        removeMessage: "Supprimer {{name}} ?",
+        removeFallbackName: "ce lancement",
+        name: "Nom",
+        command: "Commande",
+        nameAccessibility: "Nom du lancement",
+        commandAccessibility: "Commande du lancement",
+        nameRequired: "Le nom est requis",
+        nameDuplicate: "Chaque lancement doit avoir un nom unique",
+        commandRequired: "La commande est requise",
+        newLaunch: "Nouveau lancement",
+        editLaunch: "Modifier {{name}}",
+        commandHint:
+          "Paseo exécute cette commande avec le bloc de ports de l’espace de travail et le nom du projet Compose dans son environnement.",
+        actions: { add: "Ajouter un lancement", edit: "Modifier", remove: "Supprimer" },
       },
       metadata: {
         title: "Génération de métadonnées",

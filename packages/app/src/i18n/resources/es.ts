@@ -26,6 +26,61 @@ export const es: TranslationResources = {
     position: "{{current}} de {{total}}",
     total: "{{total}} coincidencias",
   },
+  localFiles: {
+    updateHost: "Actualiza este host para importar archivos locales.",
+    missingTitle: "Faltan archivos locales",
+    missingConfirm:
+      "Faltan {{files}} en {{root}}. ¿Continuar sin estos archivos? Cancela para importarlos primero.",
+    continueWithout: "Continuar sin archivos",
+    unavailableForWorktree: "Revisa estos archivos locales antes de crear un worktree: {{files}}",
+
+    title: "Archivos locales",
+    info: "Importa en este host archivos de entorno y configuración ignorados por Git. Sus agentes y scripts pueden leerlos.",
+    import: "Importar archivos…",
+    importTo: "Importar a {{host}}",
+    thisDevice: "Este dispositivo",
+    fromDevice: "Desde este dispositivo…",
+    fromHost: "Desde otro host…",
+    source: "Origen: {{source}}",
+    sourcePath: "Otro archivo de origen (ruta relativa al proyecto)",
+    inspect: "Comprobar",
+    refresh: "Actualizar",
+    total: "Seleccionados: {{count}} · {{size}}",
+    include: "Incluir en futuros worktrees",
+    configPreview:
+      "Añadir estas rutas a paseo.json. Esto crea un cambio de configuración sin commit; los archivos de worktrees existentes no cambian.",
+    complete: "Archivos importados. Los worktrees existentes no se actualizaron.",
+    limits:
+      "Solo archivos individuales. Máximo 10 MiB por archivo, 25 MiB por importación y 100 archivos. Actualizaciones manuales.",
+    existing: "Ya existe · selecciona para reemplazar",
+    replace: "Reemplazar {{path}}",
+    status: {
+      ready: "Presente",
+      missing: "Falta",
+      not_ignored: "Git debe ignorarlo",
+      unsupported: "Archivo o ruta no compatible",
+      too_large: "Demasiado grande",
+      unavailable: "No disponible",
+      imported: "Importado",
+    },
+    errors: {
+      load_failed:
+        "No se pudieron comprobar los archivos. Revisa la conexión del host e inténtalo de nuevo.",
+      selection_invalid: "Selecciona hasta 100 archivos con nombres distintos.",
+      no_source_files:
+        "No se encontraron archivos aptos. Introduce la ruta de un archivo ignorado por Git.",
+      changed:
+        "El archivo cambió desde la vista previa. Vuelve a elegir el origen para revisar la copia actual.",
+      import_failed: "Error al importar. Revisa la conexión e inténtalo de nuevo.",
+      partial_failure:
+        "Fallaron algunos archivos. Reintenta los fallos seleccionados o vuelve a elegir el origen.",
+      secure_connection_required:
+        "Usa un relay, TLS o una conexión local/SSH para transferir archivos sensibles.",
+      config_failed:
+        "Archivos importados, pero inclusión no guardada. Actualiza para revisar la configuración y guardar la inclusión sin volver a transferir archivos.",
+    },
+  },
+
   common: {
     back: "Atrás",
     loading: "Cargando...",
@@ -430,6 +485,9 @@ export const es: TranslationResources = {
     },
     row: {
       importing: "Importador...",
+      continuing: "Continuando...",
+      continueHint:
+        "Crea una nueva conversación aquí. Los archivos y cambios de origen permanecen en el worktree de origen.",
     },
   },
   workspace: {
@@ -753,7 +811,7 @@ export const es: TranslationResources = {
         view: "Ver terminal",
       },
       accessibility: {
-        trigger: "GuionesWorkspace",
+        trigger: "Ejecutar comandos del espacio de trabajo",
         openService: "Ver servicio {{scriptName}}",
         viewTerminal: "Ver terminal{{scriptName}}",
         runScript: "Ejecute el script{{scriptName}}",
@@ -772,6 +830,34 @@ export const es: TranslationResources = {
         exitCode: "salir de{{code}}",
         startFailed: "No se pudo iniciar{{scriptName}}",
         stopFailed: "No se pudo detener{{scriptName}}",
+      },
+    },
+    launches: {
+      title: "Inicios",
+      actions: {
+        switch: "Cambiar",
+        start: "Iniciar",
+        stop: "Detener",
+        view: "Salida",
+        openService: "Ver servicio",
+      },
+      accessibility: {
+        switchLaunch: "Detener {{activeLaunchName}} e iniciar {{launchName}}",
+        trigger: "Inicios del espacio de trabajo",
+        launch: "Inicio {{launchName}}",
+        startLaunch: "Iniciar {{launchName}}",
+        stopLaunch: "Detener {{launchName}}",
+        viewTerminal: "Ver terminal de {{launchName}}",
+        openService: "Ver servicio {{hostname}}",
+      },
+      states: {
+        running: "En ejecución",
+        stopped: "Detenido",
+        stopping: "Deteniendo…",
+        noListeners: "Aún no se han detectado puertos en escucha",
+        startFailed: "No se pudo iniciar {{launchName}}",
+        stopFailed: "No se pudo detener {{launchName}}",
+        portRange: "puertos {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1994,6 +2080,42 @@ export const es: TranslationResources = {
       hostLoadFailed: "No se pudieron cargar proyectos desde el host{{hostName}}:{{message}}",
       editProject: "Editar{{projectName}}",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "Posibles enlaces de proyectos",
+        linkedTitle: "Enlaces de proyectos",
+        description:
+          "Revisa los enlaces de proyectos verificados por Git y guardados en este dispositivo.",
+        review: "Revisar enlaces",
+      },
+      sheet: {
+        title: "Enlaces de proyectos",
+        deviceOnly:
+          "Los enlaces se guardan solo en este dispositivo. No mueven espacios de trabajo, ajustes ni archivos.",
+        matchesTitle: "Coincidencias verificadas",
+        matchesDescription:
+          "Estas entradas tienen el mismo remoto de Git y subdirectorio del proyecto, pero aún están separadas.",
+        linkedTitle: "Proyectos enlazados",
+        noMatchesTitle: "No hay enlaces de proyectos para revisar",
+        noMatchesDescription:
+          "Abre un espacio de trabajo en cada host para que Paseo pueda verificar el remoto de Git y el subdirectorio del proyecto.",
+        linkProjects: "Enlazar {{count}} proyectos",
+        remote: "Remoto de Git",
+        subdirectory: "Subdirectorio del proyecto",
+        path: "Ruta",
+        needsReviewTitle: "Requiere revisión",
+        needsReviewDescription:
+          "Los datos de Git más recientes ya no confirman este enlace, así que Paseo mantiene estos proyectos separados.",
+        projectUnavailable: "Este proyecto no está disponible actualmente.",
+        saving: "Guardando el enlace del proyecto…",
+        saveFailed: "No se pudo guardar el enlace del proyecto. Inténtalo de nuevo.",
+        unlink: "Desenlazar",
+      },
+      toasts: {
+        linked: "Proyectos enlazados en este dispositivo",
+        unlinked: "Enlace de proyecto eliminado",
+      },
+    },
     groupInfo: "Acerca de{{title}}",
     sections: {
       general: "General",
@@ -2732,6 +2854,28 @@ export const es: TranslationResources = {
           edit: "Editar",
           remove: "Eliminar",
         },
+      },
+      launches: {
+        title: "Inicios",
+        info: "Configuraciones de desarrollo que puedes iniciar desde cualquier espacio de trabajo de este proyecto",
+        empty: "Aún no hay inicios.",
+        untitled: "Inicio sin título",
+        menuAccessibility: "Abrir menú de inicio",
+        removeTitle: "¿Quitar inicio?",
+        removeMessage: "¿Quitar {{name}}?",
+        removeFallbackName: "este inicio",
+        name: "Nombre",
+        command: "Comando",
+        nameAccessibility: "Nombre del inicio",
+        commandAccessibility: "Comando del inicio",
+        nameRequired: "El nombre es obligatorio",
+        nameDuplicate: "Cada inicio debe tener un nombre único",
+        commandRequired: "El comando es obligatorio",
+        newLaunch: "Nuevo inicio",
+        editLaunch: "Editar {{name}}",
+        commandHint:
+          "Paseo ejecuta este comando con el bloque de puertos del espacio de trabajo y el nombre del proyecto Compose en su entorno.",
+        actions: { add: "Agregar inicio", edit: "Editar", remove: "Quitar" },
       },
       metadata: {
         title: "Generación de metadatos",
