@@ -587,6 +587,10 @@ test("concurrent session APIs share one reconnect after an idle provider exit", 
     createFakeCodexAppServer(),
   ];
   let spawnCount = 0;
+  let markReconnectSpawned: (() => void) | undefined;
+  const reconnectSpawned = new Promise<void>((resolve) => {
+    markReconnectSpawned = resolve;
+  });
   let releaseReconnect: (() => void) | undefined;
   const reconnectGate = new Promise<void>((resolve) => {
     releaseReconnect = resolve;
@@ -602,6 +606,7 @@ test("concurrent session APIs share one reconnect after an idle provider exit", 
       }
       spawnCount += 1;
       if (spawnCount > 1) {
+        markReconnectSpawned?.();
         await reconnectGate;
       }
       return appServer.child;
@@ -614,6 +619,7 @@ test("concurrent session APIs share one reconnect after an idle provider exit", 
 
     const runtimeInfo = session.getRuntimeInfo();
     const turnStart = session.startTurn("continue after reconnect");
+    await reconnectSpawned;
     const reconnectSpawnCount = spawnCount - 1;
     releaseReconnect?.();
 
