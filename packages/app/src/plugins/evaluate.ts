@@ -288,6 +288,7 @@ export function runPluginClientBundle(
       const pickerTitle = contribution.pickerTitle.trim();
       const searchPlaceholder = contribution.searchPlaceholder.trim();
       const search = contribution.search;
+      const newAgentShortcut = contribution.newAgentShortcut;
       if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
       if (!icon) throw new Error(`Attachment source ${normalizedId} has no icon`);
       if (!pickerTitle) throw new Error(`Attachment source ${normalizedId} has no picker title`);
@@ -296,6 +297,9 @@ export function runPluginClientBundle(
       }
       if (typeof search !== "function" && !search.name.trim()) {
         throw new Error(`Attachment source ${normalizedId} has no search implementation`);
+      }
+      if (newAgentShortcut !== undefined && typeof newAgentShortcut !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid New Agent shortcut`);
       }
       resolvePluginIcon(icon);
       attachmentSourceIds.add(normalizedId);
@@ -307,6 +311,7 @@ export function runPluginClientBundle(
           icon,
           pickerTitle,
           searchPlaceholder,
+          ...(newAgentShortcut === true ? { newAgentShortcut: true } : {}),
           search: typeof search === "function" ? search : { ...search, name: search.name.trim() },
         },
         () => attachmentSourceIds.delete(normalizedId),
