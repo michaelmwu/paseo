@@ -54,6 +54,8 @@ export interface PluginHostSummary {
 }
 /** Live configured hosts. Supplied by the app's client bundle loader. */
 export declare function useHosts(): readonly PluginHostSummary[];
+/** Current configured hosts for callbacks and other non-React code. */
+export declare function listHosts(): readonly PluginHostSummary[];
 /** Borrow an online host's API under this installation's lifetime. */
 export declare function getPaseoClient(serverId: string): import("@getpaseo/client").PaseoApi;
 /** Open an absolute HTTP(S) URL using the client platform’s external opener. */

@@ -209,6 +209,13 @@ export type ImportAgentInput =
       sessionId: string;
     });
 
+export interface ContinueProviderSessionInput {
+  providerId: string;
+  providerHandleId: string;
+  sourceCwd: string;
+  workspaceId: string;
+}
+
 function normalizePassword(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -2335,6 +2342,7 @@ export class DaemonClient {
       type: "fetch_recent_provider_sessions_request",
       requestId: resolvedRequestId,
       ...(options?.cwd ? { cwd: options.cwd } : {}),
+      ...(options?.targetCwd ? { targetCwd: options.targetCwd } : {}),
       ...(options?.providers ? { providers: options.providers } : {}),
       ...(options?.since ? { since: options.since } : {}),
       ...(options?.limit ? { limit: options.limit } : {}),
@@ -2627,6 +2635,47 @@ export class DaemonClient {
       requestId,
       message: { type: "workspace.script.stop.request", workspaceId, scriptName },
       responseType: "workspace.script.stop.response",
+    });
+  }
+
+  async listWorkspaceLaunches(
+    workspaceId: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.list.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.list.request", workspaceId },
+      responseType: "workspace.launch.list.response",
+    });
+  }
+
+  async startWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.start.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.start.request", workspaceId, launchName },
+      responseType: "workspace.launch.start.response",
+    });
+  }
+
+  async stopWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.stop.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.stop.request", workspaceId, launchName },
+      responseType: "workspace.launch.stop.response",
     });
   }
 
@@ -3099,6 +3148,29 @@ export class DaemonClient {
     }
 
     return status.agent;
+  }
+
+  async continueProviderSession(
+    input: ContinueProviderSessionInput,
+  ): Promise<AgentSnapshotPayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "provider.session.continue.request",
+      requestId,
+      ...input,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) => {
+        if (msg.type !== "provider.session.continue.response") {
+          return null;
+        }
+        return msg.payload.requestId === requestId ? msg.payload : null;
+      },
+    });
+    return payload.agent;
   }
 
   async refreshAgent(agentId: string, requestId?: string): Promise<AgentRefreshedStatusPayload> {
@@ -5093,6 +5165,59 @@ export class DaemonClient {
 
   sendBrowserAutomationExecuteResponse(response: BrowserAutomationExecuteResponse): void {
     this.sendSessionMessageStrict(response);
+  }
+
+  private requireProtectedLocalFileTransport(): void {
+    const url = new URL(this.config.url);
+    const relay = isRelayClientWebSocketUrl(this.config.url);
+    if (relay) {
+      if (this.config.e2ee?.enabled === true) return;
+    } else if (
+      url.protocol === "paseo+desktop:" ||
+      url.protocol === "wss:" ||
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+    ) {
+      return;
+    }
+    throw new Error("secure_connection_required");
+  }
+
+  async inspectProjectLocalFiles(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "project.local_files.inspect.request" }>,
+      "type" | "requestId"
+    >,
+  ) {
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "project.local_files.inspect.request", ...input },
+      responseType: "project.local_files.inspect.response",
+    });
+  }
+
+  async readProjectLocalFile(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "project.local_files.read.request" }>,
+      "type" | "requestId"
+    >,
+  ) {
+    this.requireProtectedLocalFileTransport();
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "project.local_files.read.request", ...input },
+      responseType: "project.local_files.read.response",
+    });
+  }
+
+  async importProjectLocalFile(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "project.local_files.import.request" }>,
+      "type" | "requestId"
+    >,
+  ) {
+    this.requireProtectedLocalFileTransport();
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "project.local_files.import.request", ...input },
+      responseType: "project.local_files.import.response",
+    });
   }
 
   async readProjectConfig(repoRoot: string, requestId?: string): Promise<ReadProjectConfigPayload> {

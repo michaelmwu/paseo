@@ -26,6 +26,59 @@ export const ja: TranslationResources = {
     position: "{{current}} / {{total}}",
     total: "{{total}} 件の一致",
   },
+  localFiles: {
+    updateHost: "ローカルファイルをインポートするには、このホストを更新してください。",
+    missingTitle: "ローカルファイルがありません",
+    missingConfirm:
+      "{{root}} に {{files}} がありません。ファイルなしで続行しますか？先にインポートする場合はキャンセルしてください。",
+    continueWithout: "ファイルなしで続行",
+    unavailableForWorktree:
+      "worktree を作成する前に、次のローカルファイルを確認してください: {{files}}",
+
+    title: "ローカルファイル",
+    info: "Gitで無視される環境・設定ファイルをこのホストにインポートします。このホストのエージェントやスクリプトは内容を読み取れます。",
+    import: "ファイルをインポート…",
+    importTo: "{{host}} にインポート",
+    thisDevice: "このデバイス",
+    fromDevice: "このデバイスから…",
+    fromHost: "別のホストから…",
+    source: "コピー元: {{source}}",
+    sourcePath: "その他のコピー元ファイル（プロジェクトからの相対パス）",
+    inspect: "確認",
+    refresh: "更新",
+    total: "選択: {{count}} · {{size}}",
+    include: "今後のワークツリーに含める",
+    configPreview:
+      "これらのパスを paseo.json に追加します。未コミットの設定変更が作成されます。既存のワークツリーファイルは変更されません。",
+    complete: "インポートしました。既存のワークツリーは更新していません。",
+    limits: "個別ファイルのみ。1ファイル10 MiB、1回25 MiB、100ファイルまで。更新は手動です。",
+    existing: "既存ファイル · 置換には選択が必要",
+    replace: "{{path}} を置換",
+    status: {
+      ready: "あり",
+      missing: "なし",
+      not_ignored: "Gitで無視する必要があります",
+      unsupported: "非対応のファイルまたはパス",
+      too_large: "サイズ超過",
+      unavailable: "利用不可",
+      imported: "インポート済み",
+    },
+    errors: {
+      load_failed: "ファイルを確認できませんでした。ホスト接続を確認して再試行してください。",
+      selection_invalid: "名前が重複しないファイルを100個まで選択してください。",
+      no_source_files:
+        "対象ファイルがありません。Gitで無視されるファイルのパスを入力して確認してください。",
+      changed: "プレビュー後に変更されました。コピー元を再選択して最新の状態を確認してください。",
+      import_failed: "インポートに失敗しました。接続を確認して再試行してください。",
+      partial_failure:
+        "一部のファイルに失敗しました。選択した失敗分を再試行するか、コピー元を再選択して更新してください。",
+      secure_connection_required:
+        "機密ファイルの転送にはリレー、TLS、ローカルまたはSSH接続を使用してください。",
+      config_failed:
+        "ファイルはインポート済みですが、追加設定を保存できませんでした。更新して最新の設定を確認し、再転送せずに追加設定を保存してください。",
+    },
+  },
+
   common: {
     back: "戻る",
     loading: "読み込み中...",
@@ -430,6 +483,9 @@ export const ja: TranslationResources = {
     },
     row: {
       importing: "インポート中...",
+      continuing: "続行中...",
+      continueHint:
+        "ここに新しい会話を作成します。ソースのファイルと変更は元の worktree に残ります。",
     },
   },
   workspace: {
@@ -749,7 +805,7 @@ export const ja: TranslationResources = {
         view: "ターミナルを表示",
       },
       accessibility: {
-        trigger: "ワークスペーススクリプト",
+        trigger: "ワークスペースのコマンドを実行",
         openService: "{{scriptName}}サービスを表示",
         viewTerminal: "{{scriptName}}ターミナルを表示",
         runScript: "{{scriptName}}スクリプトを実行",
@@ -768,6 +824,34 @@ export const ja: TranslationResources = {
         exitCode: "終了コード: {{code}}",
         startFailed: "{{scriptName}}の起動に失敗しました",
         stopFailed: "{{scriptName}}の停止に失敗しました",
+      },
+    },
+    launches: {
+      title: "起動",
+      actions: {
+        switch: "切り替え",
+        start: "起動",
+        stop: "停止",
+        view: "出力",
+        openService: "サービスを表示",
+      },
+      accessibility: {
+        switchLaunch: "{{activeLaunchName}} を停止して {{launchName}} を起動",
+        trigger: "ワークスペースの起動",
+        launch: "{{launchName}} 起動",
+        startLaunch: "{{launchName}} を起動",
+        stopLaunch: "{{launchName}} を停止",
+        viewTerminal: "{{launchName}} のターミナルを表示",
+        openService: "{{hostname}} サービスを表示",
+      },
+      states: {
+        running: "実行中",
+        stopped: "停止中",
+        stopping: "停止しています…",
+        noListeners: "待ち受けポートはまだ検出されていません",
+        startFailed: "{{launchName}} の起動に失敗しました",
+        stopFailed: "{{launchName}} の停止に失敗しました",
+        portRange: "ポート {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1966,6 +2050,41 @@ export const ja: TranslationResources = {
       hostLoadFailed: "ホスト{{hostName}}からプロジェクトを読み込めませんでした: {{message}}",
       editProject: "{{projectName}}を編集",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "リンクできる可能性があるプロジェクト",
+        linkedTitle: "プロジェクトリンク",
+        description: "このデバイスに保存された、Git で確認済みのプロジェクトリンクを確認します。",
+        review: "リンクを確認",
+      },
+      sheet: {
+        title: "プロジェクトリンク",
+        deviceOnly:
+          "リンクはこのデバイスにのみ保存されます。ワークスペース、設定、ファイルは移動しません。",
+        matchesTitle: "確認済みの一致",
+        matchesDescription:
+          "これらのエントリは同じ Git リモートとプロジェクトサブディレクトリを持ちますが、まだ別々です。",
+        linkedTitle: "リンク済みプロジェクト",
+        noMatchesTitle: "確認するプロジェクトリンクはありません",
+        noMatchesDescription:
+          "各ホストでワークスペースを開くと、Paseo が Git リモートとプロジェクトサブディレクトリを確認できます。",
+        linkProjects: "{{count}} 個のプロジェクトをリンク",
+        remote: "Git リモート",
+        subdirectory: "プロジェクトサブディレクトリ",
+        path: "パス",
+        needsReviewTitle: "確認が必要",
+        needsReviewDescription:
+          "最新の Git 情報ではこのリンクを確認できないため、Paseo はこれらのプロジェクトを別々に保持します。",
+        projectUnavailable: "このプロジェクトは現在利用できません。",
+        saving: "プロジェクトリンクを保存しています…",
+        saveFailed: "プロジェクトリンクを保存できませんでした。もう一度お試しください。",
+        unlink: "リンクを解除",
+      },
+      toasts: {
+        linked: "このデバイスでプロジェクトをリンクしました",
+        unlinked: "プロジェクトリンクを削除しました",
+      },
+    },
     groupInfo: "{{title}}について",
     sections: {
       general: "一般",
@@ -2700,6 +2819,28 @@ export const ja: TranslationResources = {
           edit: "編集",
           remove: "削除",
         },
+      },
+      launches: {
+        title: "起動",
+        info: "このプロジェクトの任意のワークスペースから開始できる開発構成",
+        empty: "起動構成がまだありません。",
+        untitled: "無題の起動",
+        menuAccessibility: "起動メニューを開く",
+        removeTitle: "起動を削除しますか？",
+        removeMessage: "{{name}}を削除しますか？",
+        removeFallbackName: "この起動",
+        name: "名前",
+        command: "コマンド",
+        nameAccessibility: "起動名",
+        commandAccessibility: "起動コマンド",
+        nameRequired: "名前は必須です",
+        nameDuplicate: "各起動には一意の名前が必要です",
+        commandRequired: "コマンドは必須です",
+        newLaunch: "新しい起動",
+        editLaunch: "{{name}}を編集",
+        commandHint:
+          "Paseoは、ワークスペースのポートブロックとComposeプロジェクト名を環境変数としてこのコマンドを実行します。",
+        actions: { add: "起動を追加", edit: "編集", remove: "削除" },
       },
       metadata: {
         title: "メタデータ生成",
