@@ -480,6 +480,7 @@ type ActiveManagedAgent =
 interface AgentCloseOptions {
   agentId: string;
   shouldClose?: (agent: ActiveManagedAgent) => boolean;
+  beforeClose?: (agent: ActiveManagedAgent) => Promise<boolean>;
   onClose?: (agent: ActiveManagedAgent) => void;
 }
 
@@ -1754,9 +1755,18 @@ export class AgentManager {
     return this.closeAgentWhen({ agentId });
   }
 
-  private closeAgentWhen({ agentId, shouldClose, onClose }: AgentCloseOptions): Promise<void> {
+  private closeAgentWhen({
+    agentId,
+    shouldClose,
+    beforeClose,
+    onClose,
+  }: AgentCloseOptions): Promise<void> {
     const existing = this.inFlightAgentCloses.get(agentId);
     if (existing) {
+      // An explicit close must still run if an earlier conditional eviction skips closure.
+      if (!shouldClose) {
+        return existing.catch(() => undefined).then(() => this.closeAgentWhen({ agentId }));
+      }
       return existing;
     }
 
@@ -1764,7 +1774,7 @@ export class AgentManager {
       // A preceding reload or archive may already have closed the durable agent.
       const agent = this.agents.get(agentId);
       if (agent && (!shouldClose || shouldClose(agent))) {
-        await this.closeAgentRuntime({ agentId, shouldClose, onClose });
+        await this.closeAgentRuntime({ agentId, shouldClose, beforeClose, onClose });
       }
     });
     this.inFlightAgentCloses.set(agentId, close);
@@ -1831,6 +1841,12 @@ export class AgentManager {
         agentId: agent.id,
         shouldClose: (current) =>
           current.session === session && this.isIdleBackendEvictionCandidate(current),
+        beforeClose: () => {
+          if (!session.canEvictIdleBackend) {
+            throw new Error("Provider cannot verify background work before idle eviction");
+          }
+          return session.canEvictIdleBackend();
+        },
         onClose: (current) => {
           this.logger.info(
             { agentId: current.id, provider: current.provider, idleMs: Date.now() - idleSince },
@@ -1853,6 +1869,7 @@ export class AgentManager {
   private async closeAgentRuntime({
     agentId,
     shouldClose,
+    beforeClose,
     onClose,
   }: AgentCloseOptions): Promise<void> {
     const agent = this.requireAgent(agentId);
@@ -1869,6 +1886,8 @@ export class AgentManager {
       "agent.manager.close.start",
     );
     await this.drainSessionEvents(agentId);
+    if (shouldClose && !shouldClose(agent)) return;
+    if (beforeClose && !(await beforeClose(agent))) return;
     if (shouldClose && !shouldClose(agent)) return;
     onClose?.(agent);
     // Retain ownership until shutdown succeeds. A failed close may still own a
