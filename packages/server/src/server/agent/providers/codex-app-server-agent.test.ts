@@ -6309,6 +6309,9 @@ describe("Codex importable sessions", () => {
     const fakeClient = {
       request: async (method: string, params?: unknown) => {
         calls.push({ method, params });
+        if (method === "thread/read") {
+          return { thread: { id: "desktop-thread", cwd: "/workspace/source" } };
+        }
         if (method === "thread/fork") {
           return {
             thread: { id: "forked-thread", forkedFromId: "desktop-thread", turns: [] },
@@ -6375,6 +6378,10 @@ describe("Codex importable sessions", () => {
         },
       },
       {
+        method: "thread/read",
+        params: { threadId: "desktop-thread", includeTurns: false },
+      },
+      {
         method: "thread/fork",
         params: { threadId: "desktop-thread", cwd: "/workspace/destination" },
       },
@@ -6393,6 +6400,21 @@ describe("Codex importable sessions", () => {
         },
       },
     });
+
+    await expect(
+      provider.forkImportableSession!(
+        {
+          providerHandleId: "desktop-thread",
+          sourceCwd: "/workspace/unrelated",
+          destinationCwd: "/workspace/destination",
+        },
+        {
+          config: createConfig({ cwd: "/workspace/destination" }),
+          storedConfig: createConfig({ cwd: "/workspace/destination" }),
+        },
+      ),
+    ).rejects.toThrow("Codex source thread cwd does not match");
+    expect(calls.filter((call) => call.method === "thread/fork")).toHaveLength(1);
   });
 });
 

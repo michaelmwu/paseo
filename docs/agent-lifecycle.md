@@ -56,6 +56,12 @@ cross-repository or cross-host operation, and does not archive the source. Provi
 prove a native fork remain resume-only; users can instead create a fresh agent with transcript
 context when that feature is available.
 
+This prototype closes the same-host, same-repository placement gap for Codex: a session discovered
+in another worktree can either resume at its source directory or fork into the selected workspace.
+It does not discover sessions in other provider homes, coordinate with an active GUI/ADE writer, or
+export an unmanaged session's transcript as an attachment. Those source and ownership contracts are
+separate from native forking.
+
 ### Cancellation
 
 Provider interruption is idempotent at the `AgentSession` boundary. It resolves when the prior

@@ -8,12 +8,14 @@ export const ALL_FILTER_VALUE = "__all__";
 export type ImportSessionAction = "resume_original" | "continue_here";
 
 /** Use the daemon's typed capability flags instead of inferring support from a provider ID. */
-export function resolveImportSessionAction(
+export function resolveImportSessionActions(
   entry: FetchRecentProviderSessionEntry,
   hasTargetWorkspace: boolean,
-): ImportSessionAction | null {
-  if (!hasTargetWorkspace || entry.isTargetCwd === true) return "resume_original";
-  return entry.canContinueHere === true ? "continue_here" : null;
+): ImportSessionAction[] {
+  if (!hasTargetWorkspace || entry.isTargetCwd === true) return ["resume_original"];
+  return entry.canContinueHere === true
+    ? ["continue_here", "resume_original"]
+    : ["resume_original"];
 }
 
 /**

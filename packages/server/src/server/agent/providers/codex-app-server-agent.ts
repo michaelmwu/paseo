@@ -7244,6 +7244,19 @@ export class CodexAppServerAgentClient implements AgentClient {
     try {
       await client.request("initialize", buildCodexAppServerInitializeParams());
       client.notify("initialized", {});
+      const source = toObjectRecord(
+        await client.request("thread/read", {
+          threadId: input.providerHandleId,
+          includeTurns: false,
+        }),
+      );
+      const sourceThread = toObjectRecord(source?.thread);
+      if (
+        typeof sourceThread?.cwd !== "string" ||
+        !createPathEquivalenceMatcher(input.sourceCwd)(sourceThread.cwd)
+      ) {
+        throw new Error("Codex source thread cwd does not match the selected session");
+      }
       const forked = await forkCodexThread(client, {
         threadId: input.providerHandleId,
         cwd: input.destinationCwd,

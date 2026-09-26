@@ -13,7 +13,7 @@ import {
   nextPageLimit,
   PER_PROVIDER_LIMIT,
   resolveDirectoryLabel,
-  resolveImportSessionAction,
+  resolveImportSessionActions,
   resolveImportTarget,
   resolveProvidersToFetch,
   requiresImportSessionsHostUpgrade,
@@ -78,26 +78,26 @@ describe("resolveProvidersToFetch", () => {
   });
 });
 
-describe("resolveImportSessionAction", () => {
+describe("resolveImportSessionActions", () => {
   it("keeps Resume original available when no destination workspace is selected", () => {
     expect(
-      resolveImportSessionAction(entry({ canContinueHere: true, isTargetCwd: false }), false),
-    ).toBe("resume_original");
+      resolveImportSessionActions(entry({ canContinueHere: true, isTargetCwd: false }), false),
+    ).toEqual(["resume_original"]);
   });
 
   it("resumes a session already in the target cwd", () => {
     expect(
-      resolveImportSessionAction(entry({ canContinueHere: true, isTargetCwd: true }), true),
-    ).toBe("resume_original");
+      resolveImportSessionActions(entry({ canContinueHere: true, isTargetCwd: true }), true),
+    ).toEqual(["resume_original"]);
   });
 
   it("offers Continue here only when the daemon advertises native fork support", () => {
     expect(
-      resolveImportSessionAction(entry({ canContinueHere: true, isTargetCwd: false }), true),
-    ).toBe("continue_here");
+      resolveImportSessionActions(entry({ canContinueHere: true, isTargetCwd: false }), true),
+    ).toEqual(["continue_here", "resume_original"]);
     expect(
-      resolveImportSessionAction(entry({ canContinueHere: false, isTargetCwd: false }), true),
-    ).toBeNull();
+      resolveImportSessionActions(entry({ canContinueHere: false, isTargetCwd: false }), true),
+    ).toEqual(["resume_original"]);
   });
 });
 

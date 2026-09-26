@@ -33,7 +33,7 @@ import {
   getSessionTitle,
   hasMoreSessions,
   resolveDirectoryLabel,
-  resolveImportSessionAction,
+  resolveImportSessionActions,
   nextPageLimit,
   PER_PROVIDER_LIMIT,
   type ProviderErrorRow,
@@ -121,6 +121,18 @@ function hasProviderSessionContinueTarget(input: {
     input.supportsProviderSessionContinue &&
     !input.isShowingAllDirectories,
   );
+}
+
+function isImportRowScopedToWorkspace(
+  scopeCwd: string | null,
+  hasTargetWorkspace: boolean,
+  entry: FetchRecentProviderSessionEntry,
+): boolean {
+  return scopeCwd !== null && (!hasTargetWorkspace || entry.isTargetCwd === true);
+}
+
+function shouldShowSessionFolders(scopeCwd: string | null, hasTargetWorkspace: boolean): boolean {
+  return scopeCwd === null || hasTargetWorkspace;
 }
 
 async function importOrContinueSession(input: {
@@ -375,17 +387,19 @@ function SheetEmptyState({ title }: { title: string }) {
 function ImportSessionSheetRow({
   serverId,
   entry,
-  action,
+  actions,
   disabled,
   importing,
+  importingAction,
   folder,
   onImportSession,
 }: {
   serverId: string | null;
   entry: FetchRecentProviderSessionEntry;
-  action: ImportSessionAction;
+  actions: ImportSessionAction[];
   disabled: boolean;
   importing: boolean;
+  importingAction: ImportSessionAction | null;
   /** The row's directory, shown only when rows can come from more than one. */
   folder: string | null;
   onImportSession: (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => void;
@@ -400,10 +414,15 @@ function ImportSessionSheetRow({
     () => (disabled ? DISABLED_ACCESSIBILITY_STATE : undefined),
     [disabled],
   );
-  const isContinuingHere = action === "continue_here";
-  const handlePress = useCallback(() => {
-    onImportSession(entry, action);
-  }, [action, entry, onImportSession]);
+  const canContinueHere = actions.includes("continue_here");
+  const handleResumeOriginal = useCallback(
+    () => onImportSession(entry, "resume_original"),
+    [entry, onImportSession],
+  );
+  const handleContinueHere = useCallback(
+    () => onImportSession(entry, "continue_here"),
+    [entry, onImportSession],
+  );
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.rowAction,
@@ -428,7 +447,11 @@ function ImportSessionSheetRow({
           </Text>
           <Text style={styles.rowMeta}>
             {importing
-              ? t(isContinuingHere ? "importSession.row.continuing" : "importSession.row.importing")
+              ? t(
+                  importingAction === "continue_here"
+                    ? "importSession.row.continuing"
+                    : "importSession.row.importing",
+                )
               : lastActivity}
           </Text>
         </View>
@@ -444,25 +467,28 @@ function ImportSessionSheetRow({
             {folder}
           </Text>
         ) : null}
-        {isContinuingHere ? (
+        {canContinueHere ? (
           <Text style={styles.rowHint}>{t("importSession.row.continueHint")}</Text>
         ) : null}
-        <Pressable
-          disabled={disabled}
-          onPress={handlePress}
-          accessibilityRole="button"
-          accessibilityState={accessibilityState}
-          style={pressableStyle}
-          testID={`import-session-session-${entry.providerId}-${entry.providerHandleId}`}
-        >
-          <Text style={styles.rowActionText}>
-            {t(
-              isContinuingHere
-                ? "importSession.actions.continueHere"
-                : "importSession.actions.resumeOriginal",
-            )}
-          </Text>
-        </Pressable>
+        {actions.map((action, index) => (
+          <Pressable
+            key={action}
+            disabled={disabled}
+            onPress={action === "continue_here" ? handleContinueHere : handleResumeOriginal}
+            accessibilityRole="button"
+            accessibilityState={accessibilityState}
+            style={pressableStyle}
+            testID={`import-session-session-${entry.providerId}-${entry.providerHandleId}${index === 0 ? "" : `-${action}`}`}
+          >
+            <Text style={styles.rowActionText}>
+              {t(
+                action === "continue_here"
+                  ? "importSession.actions.continueHere"
+                  : "importSession.actions.resumeOriginal",
+              )}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
@@ -473,29 +499,32 @@ function SessionRows({
   entries,
   disabled,
   importingSessionKey,
+  importingAction,
   resolveFolder,
   onImportSession,
 }: {
   serverId: string | null;
   entries: ReadonlyArray<{
     entry: FetchRecentProviderSessionEntry;
-    action: ImportSessionAction;
+    actions: ImportSessionAction[];
   }>;
   disabled: boolean;
   importingSessionKey: string | null;
+  importingAction: ImportSessionAction | null;
   resolveFolder: (entry: FetchRecentProviderSessionEntry) => string | null;
   onImportSession: (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => void;
 }) {
   return (
     <View style={styles.list}>
-      {entries.map(({ entry, action }) => (
+      {entries.map(({ entry, actions }) => (
         <ImportSessionSheetRow
           key={`${entry.providerId}:${entry.providerHandleId}`}
           serverId={serverId}
           entry={entry}
-          action={action}
+          actions={actions}
           disabled={disabled}
           importing={importingSessionKey === `${entry.providerId}:${entry.providerHandleId}`}
+          importingAction={importingAction}
           folder={resolveFolder(entry)}
           onImportSession={onImportSession}
         />
@@ -613,10 +642,10 @@ export function ImportSessionSheet({
 
   const actionableEntries = useMemo(
     () =>
-      aggregatedEntries.flatMap((entry) => {
-        const action = resolveImportSessionAction(entry, hasTargetWorkspace);
-        return action ? [{ entry, action }] : [];
-      }),
+      aggregatedEntries.map((entry) => ({
+        entry,
+        actions: resolveImportSessionActions(entry, hasTargetWorkspace),
+      })),
     [aggregatedEntries, hasTargetWorkspace],
   );
 
@@ -636,8 +665,9 @@ export function ImportSessionSheet({
     [hostProjects],
   );
 
-  // A scoped sheet only lists one directory, so naming it on every row is noise.
-  const showRowFolders = scopeCwd === null;
+  // A destination-scoped listing can include other worktrees. Show their
+  // directory so Resume original has an unambiguous target.
+  const showRowFolders = shouldShowSessionFolders(scopeCwd, hasTargetWorkspace);
   const resolveFolder = useCallback(
     (entry: FetchRecentProviderSessionEntry) =>
       showRowFolders
@@ -721,7 +751,7 @@ export function ImportSessionSheet({
         action,
         workspaceCwd: cwd,
         workspaceId,
-        isScopedListing: scopeCwd !== null,
+        isScopedListing: isImportRowScopedToWorkspace(scopeCwd, hasTargetWorkspace, entry),
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
       }),
     onSuccess: ({ agent, target }) => {
@@ -742,6 +772,7 @@ export function ImportSessionSheet({
     importMutation.isPending && importMutation.variables
       ? `${importMutation.variables.entry.providerId}:${importMutation.variables.entry.providerHandleId}`
       : null;
+  const importingAction = importMutation.variables?.action ?? null;
 
   const handleImportSession = useCallback(
     (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => {
@@ -904,6 +935,7 @@ export function ImportSessionSheet({
           entries={visibleEntries}
           disabled={importMutation.isPending}
           importingSessionKey={importingSessionKey}
+          importingAction={importingAction}
           resolveFolder={resolveFolder}
           onImportSession={handleImportSession}
         />

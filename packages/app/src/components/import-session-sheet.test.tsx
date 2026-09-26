@@ -677,7 +677,11 @@ describe("ImportSessionSheet", () => {
     await screen.findByText(
       "Creates a new conversation here. Source files and changes stay in the source worktree.",
     );
-    expect(screen.queryByText("Claude task")).toBeNull();
+    expect(await screen.findByText("Claude task")).toBeTruthy();
+    expect(
+      screen.getByTestId("import-session-session-codex-desktop-thread-resume_original"),
+    ).toBeTruthy();
+    expect(screen.getByTestId("import-session-session-claude-claude-thread")).toBeTruthy();
 
     fireEvent.click(await screen.findByTestId("import-session-session-codex-desktop-thread"));
 
@@ -690,6 +694,51 @@ describe("ImportSessionSheet", () => {
       });
     });
     expect(importAgent).not.toHaveBeenCalled();
+  });
+
+  it("can resume a fork-capable session at its source worktree instead of forking it", async () => {
+    const fetchRecentProviderSessions = vi.fn(async () => ({
+      requestId: "recent-provider-sessions",
+      entries: [
+        createProviderSessionEntry({
+          providerId: "codex",
+          providerHandleId: "desktop-thread",
+          cwd: "/repo/another-worktree",
+          canContinueHere: true,
+          isTargetCwd: false,
+        }),
+      ],
+    }));
+    const importAgent = vi.fn(async () => createImportedAgentSnapshot("agent-resumed"));
+    const continueProviderSession = vi.fn();
+    const onImported = vi.fn();
+
+    renderSheet(
+      { fetchRecentProviderSessions, importAgent, continueProviderSession } as Pick<
+        DaemonClient,
+        "fetchRecentProviderSessions" | "importAgent" | "continueProviderSession"
+      >,
+      {
+        workspaceId: "ws-destination",
+        supportsProviderSessionContinue: true,
+        onImported,
+        snapshot: { supportsSnapshot: true, entries: [createSnapshotEntry("codex")] },
+      },
+    );
+
+    fireEvent.click(
+      await screen.findByTestId("import-session-session-codex-desktop-thread-resume_original"),
+    );
+
+    await waitFor(() => {
+      expect(importAgent).toHaveBeenCalledWith({
+        providerId: "codex",
+        providerHandleId: "desktop-thread",
+        cwd: "/repo/another-worktree",
+      });
+      expect(onImported).toHaveBeenCalled();
+    });
+    expect(continueProviderSession).not.toHaveBeenCalled();
   });
 
   it("shows an import error state without closing when selected session import fails", async () => {
