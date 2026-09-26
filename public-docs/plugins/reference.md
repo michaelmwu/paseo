@@ -1836,6 +1836,7 @@ export const issues = defineAttachmentSource({
   icon: "CircleDot",
   pickerTitle: "Attach Acme issue",
   searchPlaceholder: "Search by identifier or title",
+  newAgentShortcut: true,
   search: searchIssues,
 });
 ```
@@ -1876,7 +1877,7 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward.
+Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on New Agent drafts as well as in the attachment menu.
 
 For a client-backed source, pass an async function as `search`. Paseo validates its result against
 the same attachment schema used for RPC-backed sources. The agent-context example uses `listHosts()`
