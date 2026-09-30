@@ -432,6 +432,9 @@ export const fr: TranslationResources = {
     question: {
       responseFailed: "Impossible d’envoyer votre réponse. Réessayez.",
       submit: "Envoyer",
+      sendToChat: "Envoyer dans le chat",
+      chatDeliveryWarning:
+        "Votre réponse apparaîtra dans le chat. Ne saisissez pas de mot de passe ni d'information secrète.",
       next: "Suivant",
       answerPlaceholder: "Saisissez votre réponse…",
       otherPlaceholder: "Autre…",

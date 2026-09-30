@@ -428,6 +428,8 @@ export const ru: TranslationResources = {
     },
     question: {
       responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
+      sendToChat: "Отправить в чат",
+      chatDeliveryWarning: "Ваш ответ появится в чате. Не вводите пароли или секретные данные.",
       submit: "Отправить",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",

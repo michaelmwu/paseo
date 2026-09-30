@@ -431,6 +431,9 @@ export const es: TranslationResources = {
     },
     question: {
       responseFailed: "No se pudo enviar tu respuesta. Inténtalo de nuevo.",
+      sendToChat: "Enviar al chat",
+      chatDeliveryWarning:
+        "Tu respuesta aparecerá en el chat. No introduzcas contraseñas ni información secreta.",
       submit: "Entregar",
       next: "Siguiente",
       answerPlaceholder: "Escribe tu respuesta...",

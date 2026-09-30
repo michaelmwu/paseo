@@ -430,6 +430,9 @@ export const ptBR: TranslationResources = {
     },
     question: {
       responseFailed: "Não foi possível enviar sua resposta. Tente novamente.",
+      sendToChat: "Enviar para o chat",
+      chatDeliveryWarning:
+        "Sua resposta aparecerá no chat. Não digite senhas nem informações secretas.",
       submit: "Enviar",
       next: "Próximo",
       answerPlaceholder: "Digite sua resposta...",

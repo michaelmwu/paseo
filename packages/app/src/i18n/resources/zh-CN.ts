@@ -419,6 +419,8 @@ export const zhCN: TranslationResources = {
     },
     question: {
       responseFailed: "未能发送你的回复，请重试。",
+      sendToChat: "发送到聊天",
+      chatDeliveryWarning: "你的回答会显示在聊天中。请勿输入密码或其他秘密信息。",
       submit: "提交",
       next: "下一步",
       answerPlaceholder: "输入你的回答...",

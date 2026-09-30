@@ -421,6 +421,8 @@ export const ar: TranslationResources = {
     },
     question: {
       responseFailed: "تعذر إرسال ردك. حاول مرة أخرى.",
+      sendToChat: "إرسال إلى الدردشة",
+      chatDeliveryWarning: "ستظهر إجابتك في الدردشة. لا تُدخل كلمات مرور أو معلومات سرية.",
       submit: "يُقدِّم",
       next: "التالي",
       answerPlaceholder: "اكتب إجابتك...",
