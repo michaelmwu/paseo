@@ -316,6 +316,7 @@ describe("evaluatePluginClientBundle", () => {
           pickerTitle: "Attach Linear issue",
           searchPlaceholder: "Search by identifier or title",
           newAgentShortcut: true,
+          crossHost: true,
           search: { name: "issues.search", input: {}, output: {} },
         });
       `),
@@ -329,6 +330,7 @@ describe("evaluatePluginClientBundle", () => {
         pickerTitle: "Attach Linear issue",
         searchPlaceholder: "Search by identifier or title",
         newAgentShortcut: true,
+        crossHost: true,
         search: { name: "issues.search", input: {}, output: {} },
       },
     ]);
@@ -344,12 +346,14 @@ describe("evaluatePluginClientBundle", () => {
           icon: "MessageSquare",
           pickerTitle: "Attach agent",
           searchPlaceholder: "Search agents",
+          crossHost: true,
           search: async ({ query }) => ({ items: [{ id: query }] }),
         });
       `),
     );
 
     expect(plugin.attachmentSources[0]?.search).toBeTypeOf("function");
+    expect(plugin.attachmentSources[0]?.crossHost).toBe(true);
   });
 
   it("collects contextual workspace panels and Command Center items", () => {
