@@ -14,7 +14,10 @@ export async function searchPluginAttachments(
   invoke: (method: string, input: unknown) => Promise<unknown>,
   query: string,
 ) {
-  const output = await callPluginRpc(source.search, invoke, { query });
+  const output =
+    typeof source.search === "function"
+      ? await source.search({ query })
+      : await callPluginRpc(source.search, invoke, { query });
   return PluginAttachmentSearchPayloadSchema.parseAsync(output);
 }
 

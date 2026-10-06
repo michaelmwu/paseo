@@ -222,6 +222,7 @@ test("creates a worktree workspace at the selected project subdirectory", async 
       projectId: project.projectId,
       worktreeSlug: "selected-subdirectory",
       runSetup: false,
+      skipMissingLocalFiles: true,
       paseoHome: path.join(tempDir, ".paseo"),
     },
     deps,
@@ -232,6 +233,7 @@ test("creates a worktree workspace at the selected project subdirectory", async 
     cwd: path.join(result.worktree.worktreePath, "packages", "app"),
     worktreeRoot: result.worktree.worktreePath,
     kind: "worktree",
+    skipMissingLocalFiles: true,
   });
 });
 
