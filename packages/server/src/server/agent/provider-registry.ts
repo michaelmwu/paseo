@@ -490,6 +490,7 @@ function wrapClientProvider(
 ): AgentClient {
   const listImportableSessions = inner.listImportableSessions?.bind(inner);
   const importSession = inner.importSession?.bind(inner);
+  const forkImportableSession = inner.forkImportableSession?.bind(inner);
   const listFeatures = inner.listFeatures?.bind(inner);
   const archiveNativeSession = inner.archiveNativeSession?.bind(inner);
   const unarchiveNativeSession = inner.unarchiveNativeSession?.bind(inner);
@@ -605,6 +606,34 @@ function wrapClientProvider(
       : undefined,
     unarchiveNativeSession: unarchiveNativeSession
       ? async (handle) => await unarchiveNativeSession({ ...handle, provider: inner.provider })
+      : undefined,
+    forkImportableSession: forkImportableSession
+      ? async (input, context) => {
+          const imported = await forkImportableSession(input, {
+            ...context,
+            config: {
+              ...context.config,
+              provider: inner.provider,
+            },
+            storedConfig: {
+              ...context.storedConfig,
+              provider: inner.provider,
+            },
+          });
+          const persistence = mapPersistenceHandle(provider, imported.persistence);
+          if (!persistence) {
+            throw new Error(`Provider '${provider}' fork did not return persistence`);
+          }
+          return {
+            ...imported,
+            session: wrapSessionProvider(provider, imported.session),
+            config: {
+              ...imported.config,
+              provider,
+            },
+            persistence,
+          };
+        }
       : undefined,
     getCatalogCacheKey: inner.getCatalogCacheKey?.bind(inner),
     isAvailable: (signal, options) => inner.isAvailable(signal, options),

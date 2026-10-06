@@ -6,6 +6,7 @@ export type {
   PluginThemeColors,
   PluginThemeContribution,
   PluginAttachmentSourceContribution,
+  PluginAttachmentSearchHandler,
   PluginTimelineData,
   PluginTimelineItem,
   PluginTimelineTransformResult,
