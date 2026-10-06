@@ -1837,6 +1837,7 @@ export const issues = defineAttachmentSource({
   pickerTitle: "Attach Acme issue",
   searchPlaceholder: "Search by identifier or title",
   newAgentShortcut: true,
+  crossHost: true,
   search: searchIssues,
 });
 ```
@@ -1877,7 +1878,9 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on New Agent drafts as well as in the attachment menu.
+Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on same-host New Agent drafts as well as in the attachment menu.
+
+Set `crossHost` to `true` only when the source is safe to offer on other connected hosts. Paseo lists it under its source host in the attachment menu and asks for confirmation before searching. Search results, including readable `text`, are copied to the app. A selected snapshot is copied to the destination host on send. RPC-backed searches run on the source host; client-backed searches run in the app. Neither installs or invokes the plugin on the destination host. Remote sources do not get the New Agent shortcut. Keep search results bounded and redact secrets before returning them.
 
 For a client-backed source, pass an async function as `search`. Paseo validates its result against
 the same attachment schema used for RPC-backed sources. The agent-context example uses `listHosts()`
@@ -1889,8 +1892,9 @@ The complete examples cover both common backend shapes: [Linear](https://github.
 
 Plugins are installed per daemon. When the same contribution exists on several connected hosts, Paseo shows one sidebar item and adds a host picker. The selected host supplies the bundle, Paseo API, RPC transport, and query cache. Calls never fall through to another host when the selected host is offline.
 
-Attachment source registrations remain scoped to each composer's host. Client-backed searches may
-target other connected hosts explicitly.
+Attachment sources are available to their own host's composer. A source with `crossHost: true` is
+also available to other connected hosts' composers after consent. Client-backed searches may target
+other connected hosts explicitly.
 
 Workspace panels and Command Center items stay scoped to the active host and exact cached context.
 Reload replaces their registrations. Disable, removal, host disconnect, and evaluation failure
