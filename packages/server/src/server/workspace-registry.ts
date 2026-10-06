@@ -102,6 +102,9 @@ const PersistedWorkspaceRecordSchema = z.object({
     .transform((value) => value ?? null),
   labels: z.array(z.string()).optional(),
   untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
+  // Preserve the user's explicit missing-file acknowledgement while setup is
+  // deferred behind the untrusted-workspace automation gate.
+  skipMissingLocalFiles: z.boolean().optional(),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
@@ -684,6 +687,7 @@ export function createPersistedWorkspaceRecord(input: {
   pinnedAt?: string | null;
   labels?: string[];
   untrustedSource?: UntrustedWorkspaceSource;
+  skipMissingLocalFiles?: boolean;
 }): PersistedWorkspaceRecord {
   return PersistedWorkspaceRecordSchema.parse({
     ...input,

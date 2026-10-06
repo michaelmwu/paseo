@@ -33,6 +33,7 @@ import {
   getSessionTitle,
   hasMoreSessions,
   resolveDirectoryLabel,
+  resolveImportSessionAction,
   nextPageLimit,
   PER_PROVIDER_LIMIT,
   type ProviderErrorRow,
@@ -40,6 +41,7 @@ import {
   resolveProvidersToFetch,
   requiresImportSessionsHostUpgrade,
   sumFilteredAlreadyImportedCount,
+  type ImportSessionAction,
 } from "@/components/import-session-sheet-view-model";
 
 const IMPORT_SHEET_SNAP_POINTS = ["70%", "92%"];
@@ -50,7 +52,8 @@ const SEARCH_DEBOUNCE_MS = 200;
 type RecentProviderSessionsClient = Pick<
   DaemonClient,
   "fetchRecentProviderSessions" | "importAgent"
->;
+> &
+  Partial<Pick<DaemonClient, "continueProviderSession">>;
 
 type ImportedAgent = Awaited<ReturnType<RecentProviderSessionsClient["importAgent"]>>;
 
@@ -75,13 +78,15 @@ type SessionsQueryKey = ReadonlyArray<string | number | null>;
 
 function buildSessionsQueryKey(input: {
   cwd: string | null;
+  targetCwd?: string | null;
   query: string;
   limit: number;
   provider?: string;
 }): SessionsQueryKey {
   return [
     "recent-provider-sessions",
-    input.cwd,
+    input.targetCwd ? "target" : "source",
+    input.targetCwd ?? input.cwd,
     input.query,
     input.limit,
     ...(input.provider === undefined ? [] : [input.provider]),
@@ -99,20 +104,92 @@ interface SessionsQueryConfig {
   queryFn: () => Promise<RecentSessionsResponse>;
 }
 
+interface ImportSessionMutationInput {
+  entry: FetchRecentProviderSessionEntry;
+  action: ImportSessionAction;
+}
+
+function hasProviderSessionContinueTarget(input: {
+  workspaceId?: string | null;
+  cwd?: string | null;
+  supportsProviderSessionContinue: boolean;
+  isShowingAllDirectories: boolean;
+}): boolean {
+  return Boolean(
+    input.workspaceId &&
+    input.cwd &&
+    input.supportsProviderSessionContinue &&
+    !input.isShowingAllDirectories,
+  );
+}
+
+async function importOrContinueSession(input: {
+  client: RecentProviderSessionsClient | null;
+  entry: FetchRecentProviderSessionEntry;
+  action: ImportSessionAction;
+  workspaceCwd?: string | null;
+  workspaceId?: string | null;
+  isScopedListing: boolean;
+  hostDisconnectedMessage: string;
+}) {
+  const { client, entry, action, workspaceCwd, workspaceId } = input;
+  if (!client) {
+    throw new Error(input.hostDisconnectedMessage);
+  }
+  if (!entry.cwd) {
+    throw new Error("Session is missing a working directory");
+  }
+  if (action === "continue_here") {
+    if (!workspaceId || !client.continueProviderSession) {
+      throw new Error("Continue here is unavailable on this host");
+    }
+    const agent = await client.continueProviderSession({
+      providerId: entry.providerId,
+      providerHandleId: entry.providerHandleId,
+      sourceCwd: entry.cwd,
+      workspaceId,
+    });
+    return { agent, target: { crossWorkspace: false } };
+  }
+  const target = resolveImportTarget({
+    entryCwd: entry.cwd,
+    workspaceCwd,
+    workspaceId,
+    isScopedListing: input.isScopedListing,
+  });
+  const agent = await client.importAgent({
+    providerId: entry.providerId,
+    providerHandleId: entry.providerHandleId,
+    cwd: entry.cwd,
+    ...(target.workspaceId ? { workspaceId: target.workspaceId } : {}),
+  });
+  return { agent, target };
+}
+
 function buildSessionsQueriesConfig(args: {
   providersToFetch: AgentProvider[] | null;
   visible: boolean;
   client: RecentProviderSessionsClient | null;
   cwd: string | null;
+  targetCwd?: string | null;
   query: string;
   limit: number;
   hostDisconnectedMessage?: string;
 }): SessionsQueryConfig[] {
-  const { providersToFetch, visible, client, cwd, query, limit, hostDisconnectedMessage } = args;
+  const {
+    providersToFetch,
+    visible,
+    client,
+    cwd,
+    targetCwd,
+    query,
+    limit,
+    hostDisconnectedMessage,
+  } = args;
   if (providersToFetch === null) return [];
   const enabled = visible && Boolean(client);
   return providersToFetch.map((provider) => ({
-    queryKey: buildSessionsQueryKey({ cwd, query, limit, provider }),
+    queryKey: buildSessionsQueryKey({ cwd, targetCwd, query, limit, provider }),
     enabled,
     retry: false as const,
     placeholderData: keepPreviousData,
@@ -120,8 +197,14 @@ function buildSessionsQueriesConfig(args: {
       if (!client) {
         throw new Error(hostDisconnectedMessage ?? i18n.t("workspace.terminal.hostDisconnected"));
       }
+      let scope: { cwd?: string; targetCwd?: string } = {};
+      if (targetCwd) {
+        scope = { targetCwd };
+      } else if (cwd) {
+        scope = { cwd };
+      }
       return await client.fetchRecentProviderSessions({
-        ...(cwd ? { cwd } : {}),
+        ...scope,
         providers: [provider],
         limit,
         ...(query ? { query } : {}),
@@ -292,6 +375,7 @@ function SheetEmptyState({ title }: { title: string }) {
 function ImportSessionSheetRow({
   serverId,
   entry,
+  action,
   disabled,
   importing,
   folder,
@@ -299,11 +383,12 @@ function ImportSessionSheetRow({
 }: {
   serverId: string | null;
   entry: FetchRecentProviderSessionEntry;
+  action: ImportSessionAction;
   disabled: boolean;
   importing: boolean;
   /** The row's directory, shown only when rows can come from more than one. */
   folder: string | null;
-  onImportSession: (entry: FetchRecentProviderSessionEntry) => void;
+  onImportSession: (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => void;
 }) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -315,26 +400,23 @@ function ImportSessionSheetRow({
     () => (disabled ? DISABLED_ACCESSIBILITY_STATE : undefined),
     [disabled],
   );
+  const isContinuingHere = action === "continue_here";
   const handlePress = useCallback(() => {
-    onImportSession(entry);
-  }, [entry, onImportSession]);
+    onImportSession(entry, action);
+  }, [action, entry, onImportSession]);
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
-      styles.row,
-      Boolean(hovered) && styles.rowHovered,
-      pressed && styles.rowPressed,
+      styles.rowAction,
+      Boolean(hovered) && styles.rowActionHovered,
+      pressed && styles.rowActionPressed,
     ],
     [],
   );
 
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityState={accessibilityState}
-      style={pressableStyle}
-      testID={`import-session-session-${entry.providerId}-${entry.providerHandleId}`}
+    <View
+      style={styles.row}
+      testID={`import-session-row-${entry.providerId}-${entry.providerHandleId}`}
     >
       <View style={styles.rowIconWrap}>
         <ProviderIcon size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
@@ -345,7 +427,9 @@ function ImportSessionSheetRow({
             {title}
           </Text>
           <Text style={styles.rowMeta}>
-            {importing ? t("importSession.row.importing") : lastActivity}
+            {importing
+              ? t(isContinuingHere ? "importSession.row.continuing" : "importSession.row.importing")
+              : lastActivity}
           </Text>
         </View>
         <Text style={styles.rowPreview} numberOfLines={2}>
@@ -360,8 +444,27 @@ function ImportSessionSheetRow({
             {folder}
           </Text>
         ) : null}
+        {isContinuingHere ? (
+          <Text style={styles.rowHint}>{t("importSession.row.continueHint")}</Text>
+        ) : null}
+        <Pressable
+          disabled={disabled}
+          onPress={handlePress}
+          accessibilityRole="button"
+          accessibilityState={accessibilityState}
+          style={pressableStyle}
+          testID={`import-session-session-${entry.providerId}-${entry.providerHandleId}`}
+        >
+          <Text style={styles.rowActionText}>
+            {t(
+              isContinuingHere
+                ? "importSession.actions.continueHere"
+                : "importSession.actions.resumeOriginal",
+            )}
+          </Text>
+        </Pressable>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -374,19 +477,23 @@ function SessionRows({
   onImportSession,
 }: {
   serverId: string | null;
-  entries: ReadonlyArray<FetchRecentProviderSessionEntry>;
+  entries: ReadonlyArray<{
+    entry: FetchRecentProviderSessionEntry;
+    action: ImportSessionAction;
+  }>;
   disabled: boolean;
   importingSessionKey: string | null;
   resolveFolder: (entry: FetchRecentProviderSessionEntry) => string | null;
-  onImportSession: (entry: FetchRecentProviderSessionEntry) => void;
+  onImportSession: (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => void;
 }) {
   return (
     <View style={styles.list}>
-      {entries.map((entry) => (
+      {entries.map(({ entry, action }) => (
         <ImportSessionSheetRow
           key={`${entry.providerId}:${entry.providerHandleId}`}
           serverId={serverId}
           entry={entry}
+          action={action}
           disabled={disabled}
           importing={importingSessionKey === `${entry.providerId}:${entry.providerHandleId}`}
           folder={resolveFolder(entry)}
@@ -440,6 +547,7 @@ export function ImportSessionSheet({
     enabled: visible,
   });
   const supportsWorkspaceTarget = useHostFeature(serverId, "importSessionWorkspaceTarget");
+  const supportsProviderSessionContinue = useHostFeature(serverId, "providerSessionContinue");
   const requiresHostUpgrade = requiresImportSessionsHostUpgrade({
     supportsSnapshot,
     workspaceId,
@@ -455,8 +563,17 @@ export function ImportSessionSheet({
     () => buildProviderLabelMap(snapshotEntries),
     [snapshotEntries],
   );
+  const hasTargetWorkspace = hasProviderSessionContinueTarget({
+    workspaceId,
+    cwd,
+    supportsProviderSessionContinue,
+    isShowingAllDirectories,
+  });
 
-  const sessionsQueryRoot = useMemo(() => ["recent-provider-sessions", scopeCwd], [scopeCwd]);
+  const sessionsQueryRoot = useMemo(
+    () => ["recent-provider-sessions", hasTargetWorkspace ? "target" : "source"],
+    [hasTargetWorkspace],
+  );
 
   const queriesConfig = useMemo(
     () =>
@@ -464,12 +581,13 @@ export function ImportSessionSheet({
         providersToFetch,
         visible,
         client,
-        cwd: scopeCwd,
+        cwd: hasTargetWorkspace ? null : scopeCwd,
+        targetCwd: hasTargetWorkspace ? cwd : null,
         query,
         limit: pageLimit,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
       }),
-    [providersToFetch, visible, client, scopeCwd, query, pageLimit, t],
+    [providersToFetch, visible, client, scopeCwd, hasTargetWorkspace, cwd, query, pageLimit, t],
   );
 
   const queries = useQueries({ queries: queriesConfig });
@@ -493,10 +611,19 @@ export function ImportSessionSheet({
     }
   }, [visible, filterProviders, selectedProvider]);
 
+  const actionableEntries = useMemo(
+    () =>
+      aggregatedEntries.flatMap((entry) => {
+        const action = resolveImportSessionAction(entry, hasTargetWorkspace);
+        return action ? [{ entry, action }] : [];
+      }),
+    [aggregatedEntries, hasTargetWorkspace],
+  );
+
   const visibleEntries = useMemo(() => {
-    if (selectedProvider === ALL_FILTER_VALUE) return aggregatedEntries;
-    return aggregatedEntries.filter((entry) => entry.providerId === selectedProvider);
-  }, [aggregatedEntries, selectedProvider]);
+    if (selectedProvider === ALL_FILTER_VALUE) return actionableEntries;
+    return actionableEntries.filter(({ entry }) => entry.providerId === selectedProvider);
+  }, [actionableEntries, selectedProvider]);
 
   const projectServerIds = useMemo(() => (serverId ? [serverId] : []), [serverId]);
   const hostProjects = useHostProjects(projectServerIds);
@@ -587,27 +714,16 @@ export function ImportSessionSheet({
   );
 
   const importMutation = useMutation({
-    mutationFn: async (entry: FetchRecentProviderSessionEntry) => {
-      if (!client) {
-        throw new Error(t("workspace.terminal.hostDisconnected"));
-      }
-      if (!entry.cwd) {
-        throw new Error("Session is missing a working directory");
-      }
-      const target = resolveImportTarget({
-        entryCwd: entry.cwd,
+    mutationFn: ({ entry, action }: ImportSessionMutationInput) =>
+      importOrContinueSession({
+        client,
+        entry,
+        action,
         workspaceCwd: cwd,
         workspaceId,
         isScopedListing: scopeCwd !== null,
-      });
-      const agent = await client.importAgent({
-        providerId: entry.providerId,
-        providerHandleId: entry.providerHandleId,
-        cwd: entry.cwd,
-        ...(target.workspaceId ? { workspaceId: target.workspaceId } : {}),
-      });
-      return { agent, target };
-    },
+        hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
+      }),
     onSuccess: ({ agent, target }) => {
       onClose();
       if (target.crossWorkspace) {
@@ -624,12 +740,12 @@ export function ImportSessionSheet({
 
   const importingSessionKey =
     importMutation.isPending && importMutation.variables
-      ? `${importMutation.variables.providerId}:${importMutation.variables.providerHandleId}`
+      ? `${importMutation.variables.entry.providerId}:${importMutation.variables.entry.providerHandleId}`
       : null;
 
   const handleImportSession = useCallback(
-    (entry: FetchRecentProviderSessionEntry) => {
-      importMutation.mutate(entry);
+    (entry: FetchRecentProviderSessionEntry, action: ImportSessionAction) => {
+      importMutation.mutate({ entry, action });
     },
     [importMutation],
   );
@@ -649,10 +765,16 @@ export function ImportSessionSheet({
   const handleRetryProvider = useCallback(
     (provider: string) => {
       void queryClient.refetchQueries({
-        queryKey: buildSessionsQueryKey({ cwd: scopeCwd, query, limit: pageLimit, provider }),
+        queryKey: buildSessionsQueryKey({
+          cwd: hasTargetWorkspace ? null : scopeCwd,
+          targetCwd: hasTargetWorkspace ? cwd : null,
+          query,
+          limit: pageLimit,
+          provider,
+        }),
       });
     },
-    [pageLimit, query, queryClient, scopeCwd],
+    [cwd, hasTargetWorkspace, pageLimit, query, queryClient, scopeCwd],
   );
 
   const handleShowAll = useCallback(() => setIsShowingAllDirectories(true), []);
@@ -864,12 +986,6 @@ const styles = StyleSheet.create((theme) => ({
     marginHorizontal: -theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
   },
-  rowHovered: {
-    backgroundColor: theme.colors.surface1,
-  },
-  rowPressed: {
-    backgroundColor: theme.colors.surface2,
-  },
   rowIconWrap: {
     width: theme.iconSize.md,
     paddingTop: 2,
@@ -905,6 +1021,31 @@ const styles = StyleSheet.create((theme) => ({
   rowFolder: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
+  },
+  rowHint: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 16,
+  },
+  rowAction: {
+    alignSelf: "flex-start",
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+  },
+  rowActionHovered: {
+    backgroundColor: theme.colors.surface2,
+  },
+  rowActionPressed: {
+    backgroundColor: theme.colors.surface3,
+  },
+  rowActionText: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   statusRow: {
     flexDirection: "row",

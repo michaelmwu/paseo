@@ -113,6 +113,8 @@ OpenCode owns user message IDs. Do not pass Paseo-generated IDs to OpenCode prom
 
 Active-turn steering is an optional `AgentSession.steerActiveTurn` operation. The manager owns admission against its exact foreground turn, canonical user-message creation, echo reconciliation, and falls back to the normal interrupt-and-replace path only when the adapter reports `unavailable`. An adapter error leaves the steer's fate ambiguous and must surface without an interrupt or retry. Codex calls `turn/steer` with the native expected turn and Paseo client user-message ID. Claude pushes an admitted steer into the exact active SDK query input; isolated control commands remain unavailable. OpenCode calls `session/prompt_async` with an OpenCode-generated message ID; the server queues the prompt while busy and the next LLM call in the same Paseo turn includes it. Pi sends its native `steer` RPC, which queues the message for delivery after the in-flight assistant turn's tool calls. Slash-command inputs report `unavailable` because pi rejects extension commands on the steer path, and echo identity is correlated by message text because pi's steer RPC takes no message ID. A missing session reports `unavailable` and uses the normal interrupt fallback.
 
+Codex's completed `agentMessage` with `delivery: "async"` has no app-server reply callback. Paseo delivers an answer through `turn/steer` or a follow-up chat turn, so the question form must label that delivery before submission. The separate `item/tool/requestUserInput` request has a structured reply; its `isSecret` input must be masked, and Paseo must not echo that answer into its timeline or permission-resolution events. A structured reply still gives the answer to Codex, so credentials that must stay outside model context need a dedicated flow.
+
 A steering adapter also owes its interrupt: stopping a turn must discard the steers the provider has not read yet, or one of them resumes the turn the user just stopped. Codex clears pending input when it aborts a turn; Claude does not, so its adapter cancels the SDK messages it queued before calling `query.interrupt()`. Pi requires `clear_queue` before `abort`; older binaries without that RPC retain their native queue behavior until the pi compatibility floor reaches 0.84.4.
 
 `SteerActiveTurnOptions.clearPendingPermissions` makes permission release part of the provider contract. A provider that accepts such a steer queues it first, denies permissions blocking its delivery, and stops once the steer is read. Steers without the flag leave permissions open. A denied plan remains in the timeline because the pending card was the only other copy of its text.
@@ -125,7 +127,9 @@ Provider adapters must terminalize every transient timeline row before emitting 
 
 Draft metadata lookups should avoid creating provider sessions when the upstream provider has top-level APIs for that metadata. Prefer `AgentClient.fetchCatalog`, `listCommands`, or `listFeatures` over creating a scratch `AgentSession`; scratch sessions can show up as empty native sessions in provider import/history UIs. `fetchCatalog` is the single discovery API for models and modes — provider implementations may use one process, separate upstream calls, or static data internally, but callers outside the provider do not get separate runtime model/mode probes. Draft command listing and scratch-session feature listing require an explicit draft model. Do not resolve a default model through catalog discovery. A client-level `listFeatures` implementation may return features from an incomplete, model-less draft and owns which features are valid in that state.
 
-Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, and last activity. Import calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the Paseo agent only after it is ready.
+Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, last activity, and whether the adapter can natively fork that row. **Resume original** calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the Paseo agent only after it is ready.
+
+**Continue here** is deliberately a different operation. After the daemon verifies that source and destination are different worktrees of the same local Git working copy, it calls `forkImportableSession({ providerHandleId, sourceCwd, destinationCwd })`. The adapter must create and return a fresh native handle that executes in `destinationCwd`; it must not resume, close, mutate, or otherwise take ownership of the source handle. This operation transfers conversation context only. Source branch state, staged or unstaged changes, untracked files, tools, hooks, and runtime configuration stay at the source. A provider without a proven native fork implementation must omit the capability rather than approximating it by copying provider data files.
 
 ## Provider Helper Processes
 
@@ -487,6 +491,10 @@ interface AgentClient {
   ): Promise<ImportableProviderSession[]>;
   importSession(
     input: ImportProviderSessionInput,
+    context: ImportProviderSessionContext,
+  ): Promise<ImportedProviderSession>;
+  forkImportableSession?(
+    input: ForkImportableProviderSessionInput,
     context: ImportProviderSessionContext,
   ): Promise<ImportedProviderSession>;
   getDiagnostic?(): Promise<{ diagnostic: string }>;
