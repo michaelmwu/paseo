@@ -287,14 +287,16 @@ export function runPluginClientBundle(
       const icon = contribution.icon.trim();
       const pickerTitle = contribution.pickerTitle.trim();
       const searchPlaceholder = contribution.searchPlaceholder.trim();
-      const method = contribution.search.name.trim();
+      const search = contribution.search;
       if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
       if (!icon) throw new Error(`Attachment source ${normalizedId} has no icon`);
       if (!pickerTitle) throw new Error(`Attachment source ${normalizedId} has no picker title`);
       if (!searchPlaceholder) {
         throw new Error(`Attachment source ${normalizedId} has no search placeholder`);
       }
-      if (!method) throw new Error(`Attachment source ${normalizedId} has no search RPC`);
+      if (typeof search !== "function" && !search.name.trim()) {
+        throw new Error(`Attachment source ${normalizedId} has no search implementation`);
+      }
       resolvePluginIcon(icon);
       attachmentSourceIds.add(normalizedId);
       return register(
@@ -305,7 +307,7 @@ export function runPluginClientBundle(
           icon,
           pickerTitle,
           searchPlaceholder,
-          search: { ...contribution.search, name: method },
+          search: typeof search === "function" ? search : { ...search, name: search.name.trim() },
         },
         () => attachmentSourceIds.delete(normalizedId),
       );
@@ -382,6 +384,7 @@ export function runPluginClientBundle(
         useSettings,
         openExternalUrl,
         getPaseoClient: (serverId: string) => runtime.hosts.getPaseoClient(serverId),
+        listHosts: () => runtime.hosts.getSnapshot(),
         useHosts: () =>
           React.useSyncExternalStore(
             runtime.hosts.subscribe,

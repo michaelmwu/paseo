@@ -224,6 +224,24 @@ describe("evaluatePluginClientBundle", () => {
     ]);
   });
 
+  it("collects a client-backed attachment source", () => {
+    const plugin = evaluatePluginClientBundle(
+      "agents",
+      bundle(`
+        plugin.addAttachmentSource({
+          id: "agents",
+          title: "Agent",
+          icon: "MessageSquare",
+          pickerTitle: "Attach agent",
+          searchPlaceholder: "Search agents",
+          search: async ({ query }) => ({ items: [{ id: query }] }),
+        });
+      `),
+    );
+
+    expect(plugin.attachmentSources[0]?.search).toBeTypeOf("function");
+  });
+
   it("collects contextual workspace panels and Command Center items", () => {
     const plugin = evaluatePluginClientBundle(
       "review",
@@ -617,7 +635,8 @@ it("binds imported getters to each originating installation across delayed callb
     },
   });
   const source = bundle(`
-    const { getPaseoClient } = require("@getpaseo/plugin/client");
+    const { getPaseoClient, listHosts } = require("@getpaseo/plugin/client");
+    if (listHosts().length !== 0) throw new Error("unexpected hosts");
     getPaseoClient("entry-host");
     plugin.addCommandCenterItem({
       id: "read", title: "Read", icon: "Server", context: "global",

@@ -345,6 +345,21 @@ describe("agent detach RPC", () => {
     expect(parsed.features?.importSessionWorkspaceTarget).toBe(true);
   });
 
+  test("parses the provider session continuation feature gate", () => {
+    const parsed = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv-test",
+      features: {
+        providerSessionContinue: true,
+      },
+    });
+
+    if (!parsed) {
+      throw new Error("Expected server info payload to parse");
+    }
+    expect(parsed.features?.providerSessionContinue).toBe(true);
+  });
+
   test("parses the session import search feature gate", () => {
     const parsed = parseServerInfoStatusPayload({
       status: "server_info",
