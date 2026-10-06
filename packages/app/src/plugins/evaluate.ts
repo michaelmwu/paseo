@@ -355,6 +355,7 @@ export function runPluginClientBundle(
       const searchPlaceholder = contribution.searchPlaceholder.trim();
       const search = contribution.search;
       const newAgentShortcut = contribution.newAgentShortcut;
+      const crossHost = contribution.crossHost;
       if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
       if (!icon) throw new Error(`Attachment source ${normalizedId} has no icon`);
       if (!pickerTitle) throw new Error(`Attachment source ${normalizedId} has no picker title`);
@@ -363,6 +364,9 @@ export function runPluginClientBundle(
       }
       if (newAgentShortcut !== undefined && typeof newAgentShortcut !== "boolean") {
         throw new Error(`Attachment source ${normalizedId} has an invalid New Agent shortcut`);
+      }
+      if (crossHost !== undefined && typeof crossHost !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid cross-host setting`);
       }
       if (typeof search !== "function" && !search.name.trim()) {
         throw new Error(`Attachment source ${normalizedId} has no search implementation`);
@@ -378,6 +382,7 @@ export function runPluginClientBundle(
           pickerTitle,
           searchPlaceholder,
           ...(newAgentShortcut === true ? { newAgentShortcut: true } : {}),
+          ...(crossHost === true ? { crossHost: true } : {}),
           search: typeof search === "function" ? search : { ...search, name: search.name.trim() },
         },
         () => attachmentSourceIds.delete(normalizedId),
