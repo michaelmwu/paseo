@@ -449,6 +449,9 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     get features() {
       return inner.features;
     },
+    get idleBackendEvictionEligible() {
+      return inner.idleBackendEvictionEligible;
+    },
     usageSession: inner.usageSession?.bind(inner),
     run: (prompt, options) => inner.run(prompt, options),
     startTurn: (prompt, options) => inner.startTurn(prompt, options),
@@ -476,6 +479,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     revertFiles: inner.revertFiles?.bind(inner),
     revertBoth: inner.revertBoth?.bind(inner),
     tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),
+    canEvictIdleBackend: inner.canEvictIdleBackend?.bind(inner),
   } satisfies ForwardedAgentSession;
 }
 

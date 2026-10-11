@@ -1487,12 +1487,12 @@ describe("Codex app-server provider", () => {
       "collaborationMode/list": () => ({ data: [] }),
       "skills/list": () => ({ data: [] }),
     });
-    const session = new CodexAppServerAgentSession(
-      createConfig({ cwd: "/workspace/project" }),
-      null,
-      createTestLogger(),
-      async () => appServer.child,
-    );
+    const session = new CodexAppServerAgentSession({
+      config: createConfig({ cwd: "/workspace/project" }),
+      resumeHandle: null,
+      logger: createTestLogger(),
+      spawnAppServer: async () => appServer.child,
+    });
     const requested: AgentPermissionRequest[] = [];
     session.subscribe((event) => {
       if (event.type === "permission_requested") requested.push(event.request);
@@ -1716,12 +1716,12 @@ describe("Codex app-server provider", () => {
     "labels a terminal write started as %s with the command that started the terminal",
     async (command) => {
       const appServer = createFakeCodexAppServer();
-      const session = new CodexAppServerAgentSession(
-        createConfig({ cwd: "/workspace/project" }),
-        null,
-        createTestLogger(),
-        async () => appServer.child,
-      );
+      const session = new CodexAppServerAgentSession({
+        config: createConfig({ cwd: "/workspace/project" }),
+        resumeHandle: null,
+        logger: createTestLogger(),
+        spawnAppServer: async () => appServer.child,
+      });
 
       try {
         await session.connect();
@@ -1911,16 +1911,16 @@ describe("Codex app-server provider", () => {
 
   test("resumed session exposes usage before connecting and not after close", async () => {
     let spawns = 0;
-    const session = new CodexAppServerAgentSession(
-      createConfig({ cwd: "/workspace/project" }),
-      { sessionId: "saved-thread" },
-      createTestLogger(),
-      async () => {
+    const session = new CodexAppServerAgentSession({
+      config: createConfig({ cwd: "/workspace/project" }),
+      resumeHandle: { sessionId: "saved-thread" },
+      logger: createTestLogger(),
+      spawnAppServer: async () => {
         spawns++;
         throw new Error("unexpected spawn");
       },
-      { environment: { HOME: "/fixture/codex", CODEX_HOME: "/fixture/profile" } },
-    );
+      deps: { environment: { HOME: "/fixture/codex", CODEX_HOME: "/fixture/profile" } },
+    });
     expect(session.usageSession()).toMatchObject({
       provider: "codex",
       env: { CODEX_HOME: "/fixture/profile" },
@@ -2206,12 +2206,12 @@ describe("Codex app-server provider", () => {
         },
       }),
     });
-    const session = new CodexAppServerAgentSession(
-      createConfig({ cwd: "/workspace/project" }),
-      null,
-      createTestLogger(),
-      async () => appServer.child,
-    );
+    const session = new CodexAppServerAgentSession({
+      config: createConfig({ cwd: "/workspace/project" }),
+      resumeHandle: null,
+      logger: createTestLogger(),
+      spawnAppServer: async () => appServer.child,
+    });
 
     await session.startTurn("remember first");
     emitCodexUserMessage(appServer, {
