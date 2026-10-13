@@ -1855,6 +1855,27 @@ export class AgentManager {
     );
   }
 
+  // Terminal events publish idle before the run is removed; autonomous turns have no later state emission.
+  private syncIdleBackendTimerAfterRun(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (agent && !this.runs.hasRun(agentId)) this.syncIdleBackendTimer(agent);
+  }
+
+  private settleTerminalRun(agentId: string, turnId: string | undefined): void {
+    this.runs.settleTerminalRun(agentId, turnId);
+    this.syncIdleBackendTimerAfterRun(agentId);
+  }
+
+  private settleForegroundRun(agentId: string, token: string): void {
+    this.runs.settleForegroundRun(agentId, token);
+    this.syncIdleBackendTimerAfterRun(agentId);
+  }
+
+  private clearAgentRun(agentId: string): void {
+    this.runs.clearAgentRun(agentId);
+    this.syncIdleBackendTimerAfterRun(agentId);
+  }
+
   private syncIdleBackendTimer(agent: ManagedAgent): void {
     if (agent.lifecycle === "closed" || !this.isIdleBackendEvictionCandidate(agent)) {
       this.cancelIdleBackendTimer(agent.id);
@@ -2676,7 +2697,7 @@ export class AgentManager {
         pendingRun.start = { status: "failed", error: error.message };
         agent.pendingReplacement = false;
         if (!agent.activeForegroundTurnId) agent.lifecycle = "idle";
-        this.runs.settleForegroundRun(agentId, pendingRun.token);
+        this.settleForegroundRun(agentId, pendingRun.token);
         throw error;
       }
       agent.pendingReplacement = false;
@@ -2688,7 +2709,7 @@ export class AgentManager {
         error: errorMsg,
       });
       this.finalizeForegroundTurn(agent);
-      this.runs.settleForegroundRun(agentId, pendingRun.token);
+      this.settleForegroundRun(agentId, pendingRun.token);
       throw error;
     }
   }
@@ -2818,7 +2839,7 @@ export class AgentManager {
         if (turnStream) {
           this.runs.deleteWaiter(agent, turnStream.waiter);
         }
-        this.runs.settleForegroundRun(agentId, pendingRun.token);
+        this.settleForegroundRun(agentId, pendingRun.token);
         if (!agent.activeForegroundTurnId) {
           await this.refreshRuntimeInfo(agent);
         }
@@ -3279,7 +3300,7 @@ export class AgentManager {
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged pending turn still active after timeout, clearing it",
       );
-      this.runs.settleForegroundRun(agentId, run.token);
+      this.settleForegroundRun(agentId, run.token);
       if (!agent.pendingReplacement) {
         agent.lifecycle = "idle";
         this.touchUpdatedAt(agent);
@@ -3417,7 +3438,7 @@ export class AgentManager {
       );
       throw error;
     } finally {
-      this.runs.settleForegroundRun(agentId, lock.token);
+      this.settleForegroundRun(agentId, lock.token);
     }
   }
 
@@ -3935,7 +3956,7 @@ export class AgentManager {
       reason: cancelReason,
       turnId,
     }));
-    this.runs.clearAgentRun(agent.id);
+    this.clearAgentRun(agent.id);
     this.inFlightOutOfBand.delete(agent.id);
     return {
       ...agent,
@@ -4453,7 +4474,7 @@ export class AgentManager {
 
     if (!options?.fromHistory) {
       if (isTurnTerminalEvent(event)) {
-        this.runs.settleTerminalRun(agent.id, eventTurnId);
+        this.settleTerminalRun(agent.id, eventTurnId);
         if (isForegroundEvent) {
           this.finalizeForegroundTurn(agent, eventTurnId);
         }
