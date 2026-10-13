@@ -393,6 +393,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     agentManager: asAgentManager({
       listAgents: vi.fn(() => []),
       listProviderSubagentActivity: vi.fn(() => []),
+      noteAgentAccess: vi.fn(),
       subscribe: vi.fn(() => () => {}),
       ...options.agentManager,
     }),
