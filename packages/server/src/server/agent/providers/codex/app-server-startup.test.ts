@@ -22,6 +22,30 @@ function deferred<T = void>() {
 }
 
 describe("Codex app-server startup coordinator", () => {
+  test("exposes the initialize response before notifying the app-server", async () => {
+    const coordinator = new CodexAppServerStartupCoordinator();
+    const events: string[] = [];
+    const response = { userAgent: "codex/0.156.1" };
+
+    await coordinator.start({
+      stateDirKey: "/codex/shared",
+      spawn: createCodexAppServerChildProcess,
+      createClient: () => ({
+        request: async () => response,
+        notify: () => events.push("initialized"),
+        dispose: vi.fn(async () => {}),
+      }),
+      initializeParams: {},
+      onInitialized: (initialized) => {
+        expect(initialized).toEqual(response);
+        events.push("response");
+      },
+      logger: createTestLogger(),
+    });
+
+    expect(events).toEqual(["response", "initialized"]);
+  });
+
   test("serializes a burst through initialize but retains all initialized clients", async () => {
     const coordinator = new CodexAppServerStartupCoordinator();
     const firstEntered = deferred();
