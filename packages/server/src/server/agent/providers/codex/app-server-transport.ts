@@ -44,6 +44,49 @@ export class CodexAppServerRpcError extends Error {
   }
 }
 
+interface CodexAppServerExitDetails {
+  exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
+  stderr: string;
+}
+
+export class CodexAppServerExitError extends Error {
+  readonly reason: "sqlite_state_initialization" | "other";
+  readonly exitCode: number | null;
+  readonly exitSignal: NodeJS.Signals | null;
+  readonly stderr: string;
+
+  constructor(details: CodexAppServerExitDetails) {
+    const message =
+      details.exitCode === 0 && !details.exitSignal
+        ? "Codex app-server exited"
+        : `Codex app-server exited with code ${details.exitCode ?? "null"} and signal ${details.exitSignal ?? "null"}`;
+    super(`${message}\n${details.stderr}`.trim());
+    this.name = "CodexAppServerExitError";
+    this.exitCode = details.exitCode;
+    this.exitSignal = details.exitSignal;
+    this.stderr = details.stderr;
+    // Codex reports this pre-initialize failure only on stderr, not as a
+    // JSON-RPC error. Classify it here so callers branch on a typed reason.
+    this.reason =
+      details.exitCode === 1 &&
+      !details.exitSignal &&
+      details.stderr.includes("failed to initialize sqlite state runtime")
+        ? "sqlite_state_initialization"
+        : "other";
+  }
+}
+
+export class CodexAppServerRequestTimeoutError extends Error {
+  constructor(
+    readonly method: string,
+    readonly timeoutMs: number,
+  ) {
+    super(`Codex app-server request timed out for ${method}`);
+    this.name = "CodexAppServerRequestTimeoutError";
+  }
+}
+
 type RequestHandler = (params: unknown, requestId: number) => unknown;
 type NotificationHandler = (method: string, params: unknown) => void;
 type UnexpectedTerminationHandler = (error: Error) => void;
@@ -202,11 +245,11 @@ export class CodexAppServerClient {
     });
 
     child.on("exit", (code, signal) => {
-      const message =
-        code === 0 && !signal
-          ? "Codex app-server exited"
-          : `Codex app-server exited with code ${code ?? "null"} and signal ${signal ?? "null"}`;
-      const error = new Error(`${message}\n${this.stderrBuffer}`.trim());
+      const error = new CodexAppServerExitError({
+        exitCode: code,
+        exitSignal: signal,
+        stderr: this.stderrBuffer,
+      });
       this.handleUnexpectedTermination(error);
     });
   }
@@ -234,7 +277,7 @@ export class CodexAppServerClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out for ${method}`));
+        reject(new CodexAppServerRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
     });
@@ -257,6 +300,15 @@ export class CodexAppServerClient {
   }
 
   async dispose(): Promise<void> {
+    await this.terminate("SIGTERM");
+  }
+
+  /** Skips the SIGTERM grace period for an app-server that has stopped answering requests. */
+  async forceDispose(): Promise<void> {
+    await this.terminate("SIGKILL");
+  }
+
+  private async terminate(firstSignal: "SIGTERM" | "SIGKILL"): Promise<void> {
     this.disposed = true;
     this.unexpectedTerminationHandler = null;
     this.rl.close();
@@ -267,12 +319,13 @@ export class CodexAppServerClient {
       // ignore
     }
     const result = await terminateWithTreeKill(this.child, {
+      gracefulSignal: firstSignal,
       gracefulTimeoutMs: APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
       forceTimeoutMs: APP_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
       onForceSignal: () => {
         this.logger.warn(
-          { timeoutMs: APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS },
-          "Codex app-server did not exit after SIGTERM; sending SIGKILL",
+          { timeoutMs: APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS, firstSignal },
+          `Codex app-server did not exit after ${firstSignal}; sending SIGKILL`,
         );
       },
     });

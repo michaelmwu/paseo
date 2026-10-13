@@ -50,6 +50,7 @@ export interface CreateWorktreeWorkspaceInput {
   title: string | null;
   expectsInitialAgent?: boolean;
   untrustedSource?: UntrustedWorkspaceSource;
+  skipMissingLocalFiles?: boolean;
 }
 
 export interface WorkspaceProvisioningService {
@@ -269,6 +270,7 @@ export function createWorkspaceProvisioningService(deps: {
       createdAt: timestamp,
       updatedAt: timestamp,
       ...(input.untrustedSource ? { untrustedSource: input.untrustedSource } : {}),
+      ...(input.skipMissingLocalFiles ? { skipMissingLocalFiles: true } : {}),
     });
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
