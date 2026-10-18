@@ -54,6 +54,13 @@ function questionSubmitLabel(isChatDelivered: boolean, t: ReturnType<typeof useT
   return t(isChatDelivered ? "message.question.sendToChat" : "message.question.submit");
 }
 
+function isChatDeliveredQuestion(permission: PendingPermission): boolean {
+  return (
+    permission.request.provider === "codex" &&
+    permission.request.name === "request_user_input_async"
+  );
+}
+
 function ChatDeliveryNotice({ visible }: { visible: boolean }) {
   const { t } = useTranslation();
   if (!visible) return null;
@@ -371,9 +378,7 @@ export function QuestionFormCard({
     () => parseQuestionFormQuestions(permission.request.input),
     [permission.request.input],
   );
-  const isChatDelivered =
-    permission.request.provider === "codex" &&
-    permission.request.name === "request_user_input_async";
+  const isChatDelivered = isChatDeliveredQuestion(permission);
 
   const [selections, setSelections] = useState<Record<number, Set<number>>>({});
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});

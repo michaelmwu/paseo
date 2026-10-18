@@ -3248,8 +3248,8 @@ function WorkspaceScreenContent({
     () => (
       <View style={styles.headerRight}>
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
-        {(workspaceScripts.length > 0 ||
-          (workspaceLaunchManagementAvailable && workspaceLaunches.length > 0)) ? (
+        {workspaceScripts.length > 0 ||
+        (workspaceLaunchManagementAvailable && workspaceLaunches.length > 0) ? (
           <WorkspaceScriptsButton
             serverId={normalizedServerId}
             workspaceId={normalizedWorkspaceId}
@@ -3458,6 +3458,19 @@ function WorkspaceScreenContent({
             onCloseTabsBelow={handleCloseTabsToRight}
             onCloseOtherTabs={handleCloseOtherTabs}
           />
+          {workspaceLaunchManagementAvailable && workspaceLaunches.length > 0 ? (
+            <WorkspaceScriptsButton
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              scripts={[]}
+              launches={workspaceLaunches}
+              liveTerminalIds={liveTerminalIds}
+              onScriptTerminalStarted={handleScriptTerminalStarted}
+              onViewTerminal={handleViewScriptTerminal}
+              onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+              hideLabels
+            />
+          ) : null}
           <WorkspaceHeaderMenuMobile
             normalizedServerId={normalizedServerId}
             scripts={compactHeaderScripts}
@@ -3506,8 +3519,12 @@ function WorkspaceScreenContent({
       isMobile,
       isWorkspaceHeaderLoading,
       isWorkspaceHeaderSubtitleDistinct,
+      liveTerminalIds,
       normalizedServerId,
       normalizedWorkspaceId,
+      handleScriptTerminalStarted,
+      handleViewScriptTerminal,
+      handleOpenUrlInBrowserTab,
       openImportSheet,
       showCreateBrowserTab,
       showWorkspaceSetup,
@@ -3515,6 +3532,8 @@ function WorkspaceScreenContent({
       workspaceDirectory,
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
+      workspaceLaunches,
+      workspaceLaunchManagementAvailable,
     ],
   );
   const desktopSplitContent = useMemo(() => {

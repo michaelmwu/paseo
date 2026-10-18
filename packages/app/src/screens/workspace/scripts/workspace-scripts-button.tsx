@@ -505,6 +505,10 @@ function WorkspaceRunMenuContent({
   const serviceScripts = scripts.filter((script) => (script.type ?? "service") === "service");
   const plainScripts = scripts.filter((script) => (script.type ?? "service") === "script");
   const hasScripts = serviceScripts.length > 0 || plainScripts.length > 0;
+  const scriptRowProps = useMemo(
+    () => ({ liveTerminalIdSet, actions, onViewTerminal, onOpenUrlInBrowserTab }),
+    [liveTerminalIdSet, actions, onViewTerminal, onOpenUrlInBrowserTab],
+  );
 
   return (
     <>
@@ -517,7 +521,7 @@ function WorkspaceRunMenuContent({
           label={servicesLabel}
           scripts={serviceScripts}
           testID="workspace-scripts-services-section"
-          rowProps={{ liveTerminalIdSet, actions, onViewTerminal, onOpenUrlInBrowserTab }}
+          rowProps={scriptRowProps}
         />
       ) : null}
       {serviceScripts.length > 0 && plainScripts.length > 0 ? <DropdownMenuSeparator /> : null}
@@ -526,7 +530,7 @@ function WorkspaceRunMenuContent({
           label={scriptsLabel}
           scripts={plainScripts}
           testID="workspace-scripts-scripts-section"
-          rowProps={{ liveTerminalIdSet, actions, onViewTerminal, onOpenUrlInBrowserTab }}
+          rowProps={scriptRowProps}
         />
       ) : null}
     </>
@@ -619,7 +623,6 @@ export function WorkspaceScriptsButton({
       onOpenUrlInBrowserTab,
     ],
   );
-
 
   if (scripts.length === 0 && launches.length === 0) {
     return null;

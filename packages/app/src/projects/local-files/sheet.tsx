@@ -124,7 +124,6 @@ export function LocalFilesSheet({ target, sources, onClose }: Props) {
       header={header}
       footer={footer}
       desktopMaxWidth={560}
-      sizeContentToCurrentSnapPoint
       testID="local-files-sheet"
     >
       <View style={styles.content}>
