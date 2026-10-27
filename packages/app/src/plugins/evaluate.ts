@@ -421,7 +421,9 @@ export function runPluginClientBundle(
       const title = normalizePluginText(contribution.title);
       const pickerTitle = normalizePluginText(contribution.pickerTitle);
       const searchPlaceholder = normalizePluginText(contribution.searchPlaceholder);
-      const method = contribution.search.name.trim();
+      const search = contribution.search;
+      const newAgentShortcut = contribution.newAgentShortcut;
+      const crossHost = contribution.crossHost;
       if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
       const icon = parseSerializablePluginIcon(
         `Attachment source ${normalizedId}`,
@@ -431,7 +433,15 @@ export function runPluginClientBundle(
       if (!searchPlaceholder) {
         throw new Error(`Attachment source ${normalizedId} has no search placeholder`);
       }
-      if (!method) throw new Error(`Attachment source ${normalizedId} has no search RPC`);
+      if (newAgentShortcut !== undefined && typeof newAgentShortcut !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid New Agent shortcut`);
+      }
+      if (crossHost !== undefined && typeof crossHost !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid cross-host setting`);
+      }
+      if (typeof search !== "function" && !search.name.trim()) {
+        throw new Error(`Attachment source ${normalizedId} has no search implementation`);
+      }
       attachmentSourceIds.add(normalizedId);
       return register(
         collector.attachmentSources,
@@ -441,7 +451,9 @@ export function runPluginClientBundle(
           icon,
           pickerTitle,
           searchPlaceholder,
-          search: { ...contribution.search, name: method },
+          ...(newAgentShortcut === true ? { newAgentShortcut: true } : {}),
+          ...(crossHost === true ? { crossHost: true } : {}),
+          search: typeof search === "function" ? search : { ...search, name: search.name.trim() },
         },
         () => attachmentSourceIds.delete(normalizedId),
       );
@@ -520,6 +532,7 @@ export function runPluginClientBundle(
         useSettings,
         openExternalUrl,
         getPaseoClient: (serverId: string) => runtime.hosts.getPaseoClient(serverId),
+        listHosts: () => runtime.hosts.getSnapshot(),
         useHosts: () =>
           React.useSyncExternalStore(
             runtime.hosts.subscribe,

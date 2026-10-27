@@ -1,3 +1,5 @@
+import type { RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
+import { ensureAgentLoaded } from "./agent-loading.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
@@ -264,6 +266,8 @@ export type ImportablePersistedAgentQueryOptions = ListImportableSessionsOptions
 
 export interface ManagedImportableProviderSession extends ImportableProviderSession {
   provider: AgentProvider;
+  /** Whether this provider can create a new native session from this source. */
+  canContinueHere?: boolean;
 }
 
 export interface ImportableSessionProviderError {
@@ -758,6 +762,8 @@ export class AgentManager {
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
+  private readonly runtimeCleanupIdentities = new WeakMap<AgentSession, object>();
+  private readonly collectingRuntimes = new Set<string>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
@@ -1457,6 +1463,95 @@ export class AgentManager {
     return this.trackAgentRegistrationOperation(this.importProviderSessionInternal(input));
   }
 
+  /**
+   * Create a fresh provider-native session from an importable source session.
+   * Unlike importProviderSession(), this never adopts or mutates the source
+   * native handle.
+   */
+  continueProviderSession(input: {
+    provider: AgentProvider;
+    providerHandleId: string;
+    sourceCwd: string;
+    destinationCwd: string;
+    workspaceId: string;
+    labels?: Record<string, string>;
+  }): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(this.continueProviderSessionInternal(input));
+  }
+
+  private async continueProviderSessionInternal(input: {
+    provider: AgentProvider;
+    providerHandleId: string;
+    sourceCwd: string;
+    destinationCwd: string;
+    workspaceId: string;
+    labels?: Record<string, string>;
+  }): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
+    const resolvedAgentId = validateAgentId(this.idFactory(), "continueProviderSession");
+    this.requireEnabledProvider(input.provider);
+
+    const client = await this.requireAvailableClient({ provider: input.provider });
+    if (!client.forkImportableSession) {
+      throw new Error(`Provider '${input.provider}' does not support continuing imported sessions`);
+    }
+
+    const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+      {
+        provider: input.provider,
+        cwd: input.destinationCwd,
+      },
+      resolvedAgentId,
+    );
+    this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+    const launchContext = await this.buildLaunchContext(
+      resolvedAgentId,
+      client,
+      storedConfig.cwd,
+      paseoToolPolicy,
+      undefined,
+      { reason: "import", purpose: "interactive", workspaceId: input.workspaceId },
+    );
+    const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const imported = await client.forkImportableSession(
+      {
+        providerHandleId: input.providerHandleId,
+        sourceCwd: input.sourceCwd,
+        destinationCwd: input.destinationCwd,
+      },
+      { config: providerLaunchConfig, storedConfig, launchContext },
+    );
+    let handedToRegistration = false;
+    try {
+      const importedConfig = await this.normalizeConfig(
+        stripInternalPaseoMcpServer(imported.config),
+      );
+      const timelineRows = buildImportedTimelineRows(imported.timeline);
+      const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
+
+      const agent = await this.registerSession(imported.session, importedConfig, resolvedAgentId, {
+        labels: input.labels,
+        workspaceId: input.workspaceId,
+        timelineRows,
+        timelineNextSeq: timelineRows.length + 1,
+        persistence: imported.persistence,
+        historyPrimed: true,
+        initialTitle,
+        publishWhenReady: true,
+      });
+      handedToRegistration = true;
+      for (const event of imported.providerSubagentEvents ?? []) {
+        const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+        this.dispatch({ type: "provider_subagent", event: update });
+      }
+      return agent;
+    } finally {
+      if (!handedToRegistration) {
+        await this.closeUnregisteredSession(imported.session);
+      }
+    }
+  }
+
   private async importProviderSessionInternal(input: {
     provider: AgentProvider;
     providerHandleId: string;
@@ -1747,6 +1842,64 @@ export class AgentManager {
     });
   }
 
+  /** Capture runtime capabilities without handing lifecycle ownership to the collector. */
+  getRuntimeCleanupCandidates(): RuntimeCleanupCandidate[] {
+    if (!this.registry) return [];
+    const candidates: RuntimeCleanupCandidate[] = [];
+    for (const agent of this.agents.values()) {
+      const updatedAt = agent.updatedAt;
+      let identity = this.runtimeCleanupIdentities.get(agent.session);
+      if (!identity) {
+        identity = Object.freeze({});
+        this.runtimeCleanupIdentities.set(agent.session, identity);
+      }
+      const isEligible = () =>
+        this.agents.get(agent.id) === agent &&
+        agent.updatedAt === updatedAt &&
+        this.runtimeHasNoPendingWork(agent);
+      candidates.push({
+        identity,
+        agentId: agent.id,
+        parentAgentId: getParentAgentIdFromLabels(agent.labels) ?? undefined,
+        provider: agent.provider,
+        sessionId: agent.persistence?.sessionId ?? null,
+        lastActivityAt: updatedAt.getTime(),
+        isEligible,
+        canStopRuntime: agent.session.canStopRuntime?.bind(agent.session),
+        closeIfEligible: async (revalidate) => {
+          if (!agent.persistence?.sessionId) return false;
+          // Block prompt admission before entering the close lane. A skipped close also
+          // releases this barrier, so the waiting prompt keeps the existing runtime.
+          this.collectingRuntimes.add(agent.id);
+          try {
+            return await this.runLifecycleMutation(agent.id, () =>
+              this.closeAgentRuntime(agent.id, () => isEligible() && revalidate()),
+            );
+          } finally {
+            this.collectingRuntimes.delete(agent.id);
+          }
+        },
+      });
+    }
+    return candidates;
+  }
+
+  private runtimeHasNoPendingWork(agent: LiveManagedAgent): boolean {
+    return (
+      agent.lifecycle === "idle" &&
+      !agent.internal &&
+      agent.activeForegroundTurnId === null &&
+      !this.runs.hasRun(agent.id) &&
+      !agent.pendingReplacement &&
+      agent.pendingPermissions.size === 0 &&
+      agent.inFlightPermissionResponses.size === 0 &&
+      (this.collectingRuntimes.has(agent.id) || !this.lifecycleMutationTails.has(agent.id)) &&
+      !this.foregroundMutationTails.has(agent.id) &&
+      !this.sessionEventTails.has(agent.id) &&
+      !this.providerSubagents.list(agent.id).some((child) => child.status === "running")
+    );
+  }
+
   closeAgent(agentId: string): Promise<void> {
     const existing = this.inFlightAgentCloses.get(agentId);
     if (existing) {
@@ -1767,7 +1920,7 @@ export class AgentManager {
     return close;
   }
 
-  private async closeAgentRuntime(agentId: string): Promise<void> {
+  private async closeAgentRuntime(agentId: string, canClose?: () => boolean): Promise<boolean> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -1782,6 +1935,7 @@ export class AgentManager {
       "agent.manager.close.start",
     );
     await this.drainSessionEvents(agentId);
+    if (canClose && !canClose()) return false;
     // Retain ownership until shutdown succeeds. A failed close may still own a
     // native writer, so publishing a resumable closed snapshot would orphan it.
     await agent.session.close();
@@ -1807,6 +1961,7 @@ export class AgentManager {
     if (persistError !== undefined) {
       throw persistError;
     }
+    return true;
   }
 
   private cancelRunningProviderSubagents(parentAgentId: string): void {
@@ -2459,7 +2614,19 @@ export class AgentManager {
    * emitted by the handler flow through dispatchStream so they persist and
    * broadcast like normal timeline events.
    */
-  tryRunOutOfBand(agentId: string, prompt: AgentPromptInput, options?: AgentRunOptions): boolean {
+  async tryRunOutOfBand(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<boolean> {
+    if (this.collectingRuntimes.has(agentId) || !this.agents.has(agentId)) {
+      await this.waitForAgentClose(agentId);
+      await ensureAgentLoaded(agentId, {
+        agentManager: this,
+        agentStorage: this.requireRegistry(),
+        logger: this.logger,
+      });
+    }
     const agent = this.requireSessionAgent(agentId);
     // Providers parse slash commands from the raw text, so a command another agent sent
     // must reach them without its sender envelope.
@@ -2470,6 +2637,7 @@ export class AgentManager {
     if (!handler) {
       return false;
     }
+    this.touchUpdatedAt(agent);
     if (options?.clientMessageId) {
       this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "accepted");
       this.emitState(agent);
@@ -2489,7 +2657,7 @@ export class AgentManager {
       }
       this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
     };
-    void (async () => {
+    void this.runForegroundMutation(agentId, async () => {
       try {
         await handler.run({ emit: dispatch });
       } catch (error) {
@@ -2500,7 +2668,7 @@ export class AgentManager {
           item: { type: "assistant_message", text: `[Error] ${text}` },
         });
       }
-    })();
+    });
     return true;
   }
 
@@ -2584,11 +2752,27 @@ export class AgentManager {
     }
   }
 
+  private async *streamAfterRuntimeCollection(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): AsyncGenerator<AgentStreamEvent> {
+    await this.waitForAgentClose(agentId);
+    await ensureAgentLoaded(agentId, {
+      agentManager: this,
+      agentStorage: this.requireRegistry(),
+      logger: this.logger,
+    });
+    yield* this.streamAgent(agentId, prompt, options);
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
+    if (this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && this.registry))
+      return this.streamAfterRuntimeCollection(agentId, prompt, options);
     const existingAgent = this.requireSessionAgent(agentId);
     this.logger.trace(
       {

@@ -5,6 +5,17 @@ import { i18n } from "@/i18n/i18next";
 export const PER_PROVIDER_LIMIT = 15;
 export const ALL_FILTER_VALUE = "__all__";
 
+export type ImportSessionAction = "resume_original" | "continue_here";
+
+/** Use the daemon's typed capability flags instead of inferring support from a provider ID. */
+export function resolveImportSessionAction(
+  entry: FetchRecentProviderSessionEntry,
+  hasTargetWorkspace: boolean,
+): ImportSessionAction | null {
+  if (!hasTargetWorkspace || entry.isTargetCwd === true) return "resume_original";
+  return entry.canContinueHere === true ? "continue_here" : null;
+}
+
 /**
  * Paging grows the per-provider limit instead of carrying an offset. The daemon
  * ranks the whole candidate set on every request, so an offset into a previous

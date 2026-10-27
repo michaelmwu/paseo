@@ -25,8 +25,54 @@ Reload releases the old runtime before resuming its durable session: an idle pro
 still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
 replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+Idle resumable runtimes are collected after one hour without activity, checked once a minute.
+Collection releases the process and preserves the agent record, conversation, relationships, and
+provider session. The next prompt resumes that session. Set `agents.idleRuntimeCleanup: false` in
+host config to disable automatic collection. The host setting applies immediately; config-file edits
+apply on reload. Disabling invalidates pending safety checks and close admission. A close already
+started finishes. Re-enabling keeps the existing idle timestamps.
+
+Foreground runs, permissions and responses, queued deliveries, lifecycle operations, and working
+managed or native descendants prevent collection. Outstanding local or remote finish subscriptions
+also protect their caller, including registration, recovery and notification dispatch acknowledgment.
+An idle managed child can still own background work.
+
+The daemon baseline always applies. An optional provider `canStopRuntime()` adds a veto: false,
+errors and timeouts retain ownership, while true cannot override daemon blockers. Without a provider
+check, the baseline decides collection after the same one-hour idle period. Once protected work
+finishes, a fresh idle hour starts. There is no deadline that overrides a veto.
+
+The `idle-runtime-cleanup/` module owns the clocks, eligibility policy and sweep lifetime.
+AgentManager supplies captured runtime capabilities and owns atomic revalidation and shutdown.
+Finish subscriptions expose caller protection through their public capability; the collector never
+reads their watches or durable records.
+
+The collector rechecks daemon state after asynchronous probes and event draining, in the existing
+close/load lifecycle lane. A prompt admitted before closure prevents collection. A prompt arriving
+after closure starts waits for release and resumes the saved session.
+
+Provider checks follow the signals their runtimes expose:
+
+- Claude uses its process-local background roster and pending completion notifications. A fresh
+  process starts empty. CLI 2.1.292 or newer is known to support the roster; older binaries must
+  demonstrate support by emitting one. Unknown versions stay resident until then.
+- Codex queries background terminals for loaded threads, including native children, and protects
+  pending provider requests. App servers without the terminal-list RPC stay resident.
+- OpenCode checks active executions and descendants. V1 checks PTYs; v2 also checks shell and
+  inbox inventories. The shared server remains leased while a session vetoes collection.
+- Pi checks streaming, compaction, pending replies, and adapter-owned operations. Known native
+  subagent signals also protect their parent through the daemon's subagent store.
+- OMP additionally requires `get_state.isSettled: true` and `hasPendingAsyncWork: false`.
+  These protect jobs with unsuppressed completion delivery, pending deliveries, queued result
+  injection, and admitted or scheduled continuations that can re-wake the session. Older OMP
+  runtimes without either field stay resident. These signals are not an inventory of arbitrary
+  processes.
+- ACP checks adapter-owned foreground turns, permissions, buffered user messages, and running
+  ACP terminals, including quiet terminals. Exited or failed-to-spawn terminal records do not
+  prevent collection. This does not inspect processes launched internally by the provider.
+
+These checks do not discover arbitrary detached processes or work hidden by third-party
+extensions. A provider plugin adds its own veto through the [runtime safety contract](../public-docs/plugins/providers.md#permit-idle-runtime-cleanup).
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
@@ -36,6 +82,25 @@ between turns nothing is watching, so the agent sits at `idle` looking healthy w
 work is gone. Report that exit as a turn failure so the agent lands in `error` with a timeline entry.
 Claude and OMP report exits between turns. OMP relaunches from its session file on the next prompt;
 the unfinished turn is lost.
+
+## Importing an existing provider session
+
+Importing an external Codex, Claude, or other provider session has two intentionally different
+lifecycles:
+
+- **Resume original** adopts the provider-native handle and runs it in the session's original
+  working directory. Paseo creates or reuses a workspace record for that directory; it does not
+  create a checkout or relocate the provider session.
+- **Continue here** creates a new provider-native fork in an already-existing destination
+  workspace. The daemon permits it only when source and destination are separate paths in the same
+  local Git working copy. The source session and its worktree—including uncommitted changes—remain
+  untouched. The destination receives a new conversation handle and uses its own files and runtime
+  configuration.
+
+`Continue here` is capability-gated per provider. It is not a Git-state transfer, is not a
+cross-repository or cross-host operation, and does not archive the source. Providers that cannot
+prove a native fork remain resume-only; users can instead create a fresh agent with transcript
+context when that feature is available.
 
 ### Cancellation
 

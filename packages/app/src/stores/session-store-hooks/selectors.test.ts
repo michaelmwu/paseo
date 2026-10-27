@@ -229,6 +229,52 @@ describe("workspace replica authority", () => {
       [`${hydratedServerId}:${hydratedWorkspace.id}`],
     ]);
   });
+  it("keeps automatic grouping when a linked host is excluded while hydrating", () => {
+    const primaryServerId = "primary-server";
+    const loadingServerId = "loading-server";
+    const projectKey = "remote:github.com/acme/app";
+    const primaryWorkspace = createWorkspace({
+      id: "primary-workspace",
+      projectId: "primary-project",
+      projectRootPath: "/repos/app",
+    });
+    const primaryProject = {
+      ...projectDescriptorFromTestWorkspace(primaryWorkspace),
+      projectKey,
+    };
+    const state = {
+      sessions: {
+        [primaryServerId]: {
+          hasHydratedWorkspaces: true,
+          projects: new Map([[primaryProject.projectId, primaryProject]]),
+          workspaces: new Map([[primaryWorkspace.id, primaryWorkspace]]),
+        },
+        [loadingServerId]: {
+          hasHydratedWorkspaces: false,
+          projects: new Map(),
+          workspaces: new Map(),
+        },
+      },
+    };
+
+    const directoryServerIds = selectWorkspaceDirectoryServerIds(state, [
+      primaryServerId,
+      loadingServerId,
+    ]);
+    const projects = selectWorkspaceStructureProjects(state, directoryServerIds, [
+      {
+        id: "local-link",
+        members: [
+          { serverId: primaryServerId, projectId: primaryProject.projectId },
+          { serverId: loadingServerId, projectId: "loading-project" },
+        ],
+        identity: { repository: "github.com/acme/app", subdirectory: "" },
+      },
+    ]);
+
+    expect(directoryServerIds).toEqual([primaryServerId]);
+    expect(projects).toMatchObject([{ viewKey: projectKey, projectKey }]);
+  });
 });
 
 describe("selectWorkspace", () => {
@@ -624,7 +670,7 @@ it("a prompt changes only its project's structure and output preserves both proj
   const b = { ...createWorkspace({ id: "b", projectId: "p" }), createdAt: new Date("2026-02-01") };
   const c = { ...createWorkspace({ id: "c", projectId: "q" }), createdAt: new Date("2026-02-01") };
   const projects = new Map([a, c].map((w) => [w.projectId, projectDescriptorFromTestWorkspace(w)]));
-  const select = createWorkspaceStructureProjectsSelector([SERVER_ID], "lastPrompt");
+  const select = createWorkspaceStructureProjectsSelector([SERVER_ID], [], "lastPrompt");
   const state = (workspaces: WorkspaceDescriptor[]) => ({
     sessions: { [SERVER_ID]: { projects, workspaces: new Map(workspaces.map((w) => [w.id, w])) } },
   });
