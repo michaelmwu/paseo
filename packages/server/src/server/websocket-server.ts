@@ -79,6 +79,8 @@ import {
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
+import type { WorkspaceLaunchManager } from "./workspace-launch-manager.js";
 import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import {
@@ -587,6 +589,8 @@ export class VoiceAssistantWebSocketServer {
   private terminalManager!: TerminalManager | null;
   private serviceProxy!: ServiceProxySubsystem | null;
   private scriptRuntimeStore!: WorkspaceScriptRuntimeStore | null;
+  private workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService | null = null;
+  private workspaceLaunchManager: WorkspaceLaunchManager | null = null;
   private getDaemonTcpPort!: (() => number | null) | null;
   private getDaemonTcpHost!: (() => string | null) | null;
   private serviceProxyPublicBaseUrl!: string | null;
@@ -813,6 +817,14 @@ export class VoiceAssistantWebSocketServer {
     this.startApplicationSocketLeaseInterval();
 
     this.logger.info("WebSocket server initialized on /ws");
+  }
+
+  setWorkspaceLaunchServices(params: {
+    workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService;
+    workspaceLaunchManager: WorkspaceLaunchManager;
+  }): void {
+    this.workspaceRuntimeEnvironment = params.workspaceRuntimeEnvironment;
+    this.workspaceLaunchManager = params.workspaceLaunchManager;
   }
 
   private assignOptionalServices(params: {
@@ -1594,6 +1606,14 @@ export class VoiceAssistantWebSocketServer {
         );
       },
       publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
+      emitWorkspaceUpdatesForExternalWorkspaceIds: async (workspaceIds) => {
+        const workspaceIdList = Array.from(workspaceIds);
+        await Promise.all(
+          this.listSessions().map((activeSession) =>
+            activeSession.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
+          ),
+        );
+      },
       downloadTokenStore: this.downloadTokenStore,
       pushNotifications: this.pushNotifications,
       paseoHome: this.paseoHome,
@@ -1628,6 +1648,8 @@ export class VoiceAssistantWebSocketServer {
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupObservation: this.workspaceSetupObservation,
+      workspaceRuntimeEnvironment: this.workspaceRuntimeEnvironment ?? undefined,
+      workspaceLaunchManager: this.workspaceLaunchManager ?? undefined,
       workspaceSetupRuntime: this.workspaceSetupRuntime,
       onBranchChanged: this.onBranchChanged ?? undefined,
       getDaemonTcpPort: this.getDaemonTcpPort ?? undefined,
@@ -2086,6 +2108,8 @@ export class VoiceAssistantWebSocketServer {
         hopliteProvider: this.providerSnapshotManager.supportsConfigRequiredProvider("hoplite"),
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: true,
+        // COMPAT(providerSessionContinue): added in v0.2.1, remove gate after 2027-01-22.
+        providerSessionContinue: true,
         // COMPAT(importSessionSearch): added in v0.7.3, remove gate after 2027-03-02.
         importSessionSearch: true,
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after
@@ -2102,8 +2126,11 @@ export class VoiceAssistantWebSocketServer {
         stableProjectIdentity: true,
         // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.
         workspaceScriptManagement: true,
+        // COMPAT(workspaceLaunchManagement): added in v0.7.0, remove gate after 2027-08-29.
+        workspaceLaunchManagement: true,
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: true,
+        projectLocalFiles: true,
         // COMPAT(fsEntryOps): added in v0.3.0, remove gate after 2027-02-08.
         fsEntryOps: true,
         // COMPAT(fsEntryDuplicate): added in v0.3.0, remove gate after 2027-02-09.

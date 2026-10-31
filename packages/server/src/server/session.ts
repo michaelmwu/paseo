@@ -16,6 +16,7 @@ import { isAbsolute } from "node:path";
 import { CreationService, type CreatedAgent } from "./creation/index.js";
 import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
 import type { MessageReceipts } from "./message-receipts/index.js";
+import { handleLocalFilesRequest } from "./session/local-files/local-files-session.js";
 import equal from "fast-deep-equal";
 import { WorkspaceSetupObservation } from "./workspace-setup-observation.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -37,6 +38,9 @@ import {
   type WorkspaceScriptListRequest,
   type WorkspaceScriptStartRequest,
   type WorkspaceScriptStopRequest,
+  type WorkspaceLaunchListRequest,
+  type WorkspaceLaunchStartRequest,
+  type WorkspaceLaunchStopRequest,
   type CloseItemsRequest,
   type DirectorySuggestionsRequest,
   type ProjectPlacementPayload,
@@ -76,12 +80,15 @@ import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
+import type { WorkspaceLaunchManager, WorkspaceLaunchContext } from "./workspace-launch-manager.js";
 import {
   createWorkspaceScriptsService,
   type WorkspaceScriptsService,
 } from "./session/workspace-scripts/workspace-scripts-service.js";
 import type { DaemonConfigStore } from "./daemon-config-store.js";
 import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
+import { deriveProjectServiceSlug, deriveProjectSlug } from "./workspace-git-metadata.js";
 import { getErrorMessage, getErrorMessageOr } from "@getpaseo/protocol/error-utils";
 import { getAgentStatusPriority } from "@getpaseo/protocol/agent-state-bucket";
 import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
@@ -139,6 +146,7 @@ import {
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
 import {
+  continueProviderSession,
   ImportSessionsRequestError,
   importProviderSession,
   listImportableProviderSessions,
@@ -458,6 +466,7 @@ export interface SessionOptions {
   onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
   onWorkspaceRecovered?: (workspace: PersistedWorkspaceRecord) => Promise<void>;
   publishScriptStatusUpdate?: (message: ScriptStatusUpdateMessage) => void;
+  emitWorkspaceUpdatesForExternalWorkspaceIds?: (workspaceIds: Iterable<string>) => Promise<void>;
   logger: pino.Logger;
   downloadTokenStore: DownloadTokenStore;
   pushNotifications: PushNotifications;
@@ -539,6 +548,8 @@ export interface SessionOptions {
   serviceProxy?: ServiceProxySubsystem;
   scriptRuntimeStore?: WorkspaceScriptRuntimeStore;
   workspaceSetupObservation?: WorkspaceSetupObservation;
+  workspaceRuntimeEnvironment?: WorkspaceRuntimeEnvironmentService;
+  workspaceLaunchManager?: WorkspaceLaunchManager;
   workspaceSetupRuntime?: WorkspaceSetupRuntime;
   onBranchChanged?: (
     workspaceId: string,
@@ -798,6 +809,8 @@ export class Session {
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private readonly serviceProxy: ServiceProxySubsystem | null;
   private readonly scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
+  private workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService | null = null;
+  private workspaceLaunches: WorkspaceLaunchManager | null = null;
   private readonly getDaemonTcpPort: (() => number | null) | null;
   private readonly getDaemonTcpHost: (() => string | null) | null;
   private readonly serviceProxyPublicBaseUrl: string | null;
@@ -956,6 +969,7 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.workspaceRecovery = createWorkspaceRecoveryService({
+      logger: this.sessionLogger,
       paseoHome: this.paseoHome,
       worktreesRoot: this.worktreesRoot,
       getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
@@ -1074,6 +1088,16 @@ export class Session {
         emit: (msg) => this.emit(msg),
       },
       projectRegistry: this.projectRegistry,
+      onProjectConfigWritten: async (projectId) => {
+        const workspaceIds = (await this.workspaceRegistry.list())
+          .filter((workspace) => workspace.projectId === projectId && !workspace.archivedAt)
+          .map((workspace) => workspace.workspaceId);
+        if (options.emitWorkspaceUpdatesForExternalWorkspaceIds) {
+          await options.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIds);
+          return;
+        }
+        await this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds);
+      },
       logger: this.sessionLogger,
     });
     this.daemonSession = new DaemonSession({
@@ -1206,6 +1230,7 @@ export class Session {
         });
       },
     );
+    this.initializeWorkspaceLaunchServices(options);
     this.workspaceSetupRuntime = resolveWorkspaceSetupRuntime(workspaceSetupRuntime);
     this.getDaemonTcpPort = getDaemonTcpPort ?? null;
     this.getDaemonTcpHost = getDaemonTcpHost ?? null;
@@ -1232,6 +1257,7 @@ export class Session {
       assertAutomationAllowed: (workspaceId) =>
         assertWorkspaceAutomationAllowedForWorkspace(this.workspaceRegistry, workspaceId),
       getGlobalServicePorts: () => this.daemonConfigStore.readServicePorts(),
+      workspaceRuntimeEnvironment: this.workspaceRuntimeEnvironment,
     });
     this.workspaceDirectory = new WorkspaceDirectory({
       logger: this.sessionLogger,
@@ -1285,6 +1311,13 @@ export class Session {
     );
 
     this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+  }
+
+  private initializeWorkspaceLaunchServices(
+    options: Pick<SessionOptions, "workspaceRuntimeEnvironment" | "workspaceLaunchManager">,
+  ): void {
+    this.workspaceRuntimeEnvironment = options.workspaceRuntimeEnvironment ?? null;
+    this.workspaceLaunches = options.workspaceLaunchManager ?? null;
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -2858,14 +2891,30 @@ export class Session {
     }
   }
 
+  private dispatchProviderSessionMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "fetch_recent_provider_sessions_request":
+        return this.handleFetchRecentProviderSessions(msg);
+      case "import_agent_request":
+        return this.handleImportAgentRequest(msg);
+      case "provider.session.continue.request":
+        return this.handleProviderSessionContinueRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
   private dispatchAgentLifecycleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const providerSessionRequest = this.dispatchProviderSessionMessage(msg);
+    if (providerSessionRequest) {
+      return providerSessionRequest;
+    }
+
     switch (msg.type) {
       case "fetch_agents_request":
         return this.handleFetchAgents(msg);
       case "fetch_agent_history_request":
         return this.handleFetchAgentHistory(msg);
-      case "fetch_recent_provider_sessions_request":
-        return this.handleFetchRecentProviderSessions(msg);
       case "fetch_agent_request":
         return this.handleFetchAgent(msg.agentId, msg.requestId);
       case "delete_agent_request":
@@ -2888,8 +2937,6 @@ export class Session {
         return this.handleCreateAgentRequest(msg);
       case "resume_agent_request":
         return this.handleResumeAgentRequest(msg);
-      case "import_agent_request":
-        return this.handleImportAgentRequest(msg);
       case "refresh_agent_request":
         return this.handleRefreshAgentRequest(msg);
       case "cancel_agent_request":
@@ -3096,6 +3143,12 @@ export class Session {
     source?: object,
   ): Promise<void> | undefined {
     switch (msg.type) {
+      case "project.local_files.inspect.request":
+      case "project.local_files.read.request":
+      case "project.local_files.import.request":
+        return handleLocalFilesRequest(msg, this.projectRegistry).then((response) =>
+          this.emitForSource(response, source),
+        );
       case "file_explorer_request":
         return this.workspaceFilesSession.handleFileExplorerRequest(msg, source);
       case "fs.file.subscribe.request":
@@ -3176,6 +3229,12 @@ export class Session {
         return this.handleWorkspaceScriptStartRequest(msg);
       case "workspace.script.stop.request":
         return this.handleWorkspaceScriptStopRequest(msg);
+      case "workspace.launch.list.request":
+        return this.handleWorkspaceLaunchListRequest(msg);
+      case "workspace.launch.start.request":
+        return this.handleWorkspaceLaunchStartRequest(msg);
+      case "workspace.launch.stop.request":
+        return this.handleWorkspaceLaunchStopRequest(msg);
       default:
         return this.terminalController.dispatch(msg, this.delivery);
     }
@@ -4710,6 +4769,64 @@ export class Session {
     }
   }
 
+  private async handleProviderSessionContinueRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.session.continue.request" }>,
+  ): Promise<void> {
+    this.sessionLogger.info(
+      {
+        provider: msg.providerId,
+        providerHandleId: msg.providerHandleId,
+        sourceCwd: msg.sourceCwd,
+        workspaceId: msg.workspaceId,
+      },
+      "Continuing provider session in workspace",
+    );
+
+    try {
+      const workspace = await this.workspaceRegistry.get(msg.workspaceId);
+      if (!workspace || workspace.archivedAt) {
+        throw new ImportSessionsRequestError(
+          "workspace_not_found",
+          `Workspace not found: ${msg.workspaceId}`,
+        );
+      }
+      const { snapshot } = await continueProviderSession({
+        request: msg,
+        destinationCwd: workspace.cwd,
+        workspaceProvisioning: this.workspaceProvisioning,
+        workspaceGitService: this.workspaceGitService,
+        agentManager: this.agentManager,
+      });
+      this.emit({
+        type: "provider.session.continue.response",
+        payload: {
+          requestId: msg.requestId,
+          agent: await this.buildAgentPayload(snapshot),
+        },
+      });
+    } catch (error) {
+      const code =
+        error instanceof ImportSessionsRequestError
+          ? error.code
+          : "provider_session_continue_failed";
+      const message =
+        error instanceof Error ? error.message : "Failed to continue provider session";
+      this.sessionLogger.error(
+        { err: error, provider: msg.providerId, providerHandleId: msg.providerHandleId },
+        "Failed to continue provider session",
+      );
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: message,
+          code,
+        },
+      });
+    }
+  }
+
   private async handleRefreshAgentRequest(
     msg: Extract<SessionInboundMessage, { type: "refresh_agent_request" }>,
   ): Promise<void> {
@@ -5137,6 +5254,21 @@ export class Session {
     response: AgentPermissionResponse,
   ): Promise<void> {
     try {
+      const pendingRequest = this.agentManager
+        .getPendingPermissions(agentId)
+        .find((request) => request.id === requestId);
+      const questions = pendingRequest?.input?.questions;
+      const hasSecretAnswer =
+        pendingRequest?.provider === "codex" &&
+        pendingRequest.name === "request_user_input" &&
+        Array.isArray(questions) &&
+        questions.some(
+          (question) =>
+            typeof question === "object" &&
+            question !== null &&
+            "isSecret" in question &&
+            question.isSecret === true,
+        );
       await respondToAgentPermission({
         agentManager: this.agentManager,
         agentId,
@@ -5150,7 +5282,11 @@ export class Session {
       if (this.delivery.isModern(this.delivery.currentSource)) {
         this.delivery.reply({
           type: "agent_permission_resolved",
-          payload: { agentId, requestId, resolution: response },
+          payload: {
+            agentId,
+            requestId,
+            resolution: hasSecretAnswer ? { behavior: response.behavior } : response,
+          },
         });
       }
     } catch (error) {
@@ -5670,6 +5806,7 @@ export class Session {
       createdAt: workspace.createdAt,
       diffStat,
       scripts: await this.buildWorkspaceScriptPayloadSnapshot(workspace, resolvedProjectRecord),
+      launches: await this.buildWorkspaceLaunchPayloadSnapshot(workspace, resolvedProjectRecord),
       ...(resolvedProjectRecord
         ? {
             project: await this.buildProjectPlacementForWorkspace(workspace, resolvedProjectRecord),
@@ -5768,6 +5905,7 @@ export class Session {
       lastUserMessageAt: null,
       diffStat: { additions: 0, deletions: 0 },
       scripts: [],
+      launches: [],
       gitRuntime: {
         currentBranch: result.worktree.branchName || null,
         remoteUrl: null,
@@ -6049,6 +6187,7 @@ export class Session {
   private async teardownArchivedWorkspace(workspaceId: string): Promise<void> {
     this.workspaceGitObserver.removeForWorkspaceId(workspaceId);
     this.scriptRuntimeStore?.removeForWorkspace(workspaceId);
+    await this.workspaceLaunches?.disposeWorkspace(workspaceId);
     releaseWorkspaceServicePortPlan(workspaceId);
   }
 
@@ -6347,6 +6486,7 @@ export class Session {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         providerSnapshotManager: this.providerSnapshotManager,
+        workspaceGitService: this.workspaceGitService,
       });
       this.emit({
         type: "fetch_recent_provider_sessions_response",
@@ -6878,6 +7018,7 @@ export class Session {
         workspaceId,
         projectId: source.projectId,
         worktreeSlug: source.worktreeSlug,
+        skipMissingLocalFiles: source.skipMissingLocalFiles,
         action: source.action,
         refName: source.refName,
         branchName: source.branchName,
@@ -7266,6 +7407,46 @@ export class Session {
     return this.workspaceScripts.buildSnapshot(workspace, project);
   }
 
+  private async buildWorkspaceLaunchPayloadSnapshot(
+    workspace: PersistedWorkspaceRecord,
+    project: PersistedProjectRecord | null,
+  ): Promise<WorkspaceDescriptorPayload["launches"]> {
+    if (!this.workspaceLaunches) {
+      return [];
+    }
+    return this.workspaceLaunches.buildSnapshot(
+      this.resolveWorkspaceLaunchContext(workspace, project),
+    );
+  }
+
+  private resolveWorkspaceLaunchContext(
+    workspace: PersistedWorkspaceRecord,
+    project: PersistedProjectRecord | null,
+  ): WorkspaceLaunchContext {
+    const snapshot = this.workspaceRuntimeStore.get(workspace.cwd);
+    const branchName = snapshot?.git.currentBranch ?? workspace.branch ?? null;
+    return {
+      workspaceId: workspace.workspaceId,
+      workspaceDirectory: workspace.cwd,
+      projectConfigDirectory: project?.rootPath ?? workspace.cwd,
+      projectSlug: project
+        ? deriveProjectServiceSlug(project)
+        : deriveProjectSlug(workspace.cwd, snapshot?.git.isGit ? snapshot.git.remoteUrl : null),
+      branchName,
+    };
+  }
+
+  private async resolveWorkspaceLaunchContextById(
+    workspaceId: string,
+  ): Promise<WorkspaceLaunchContext> {
+    const workspace = await this.workspaceRegistry.get(workspaceId);
+    if (!workspace || workspace.archivedAt) {
+      throw new Error(`Workspace not found: ${workspaceId}`);
+    }
+    const project = await this.projectRegistry.get(workspace.projectId);
+    return this.resolveWorkspaceLaunchContext(workspace, project);
+  }
+
   private handleStartWorkspaceScriptRequest(request: StartWorkspaceScriptRequest): Promise<void> {
     return this.workspaceScripts.start(request);
   }
@@ -7350,6 +7531,106 @@ export class Session {
           scriptName: request.scriptName,
           script: null,
           error: error instanceof Error ? error.message : "Failed to stop workspace script",
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceLaunchListRequest(
+    request: WorkspaceLaunchListRequest,
+  ): Promise<void> {
+    try {
+      if (!this.workspaceLaunches) {
+        throw new Error("Workspace launches are not available on this daemon");
+      }
+      const context = await this.resolveWorkspaceLaunchContextById(request.workspaceId);
+      this.emit({
+        type: "workspace.launch.list.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launches: await this.workspaceLaunches.buildSnapshot(context),
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "workspace.launch.list.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launches: [],
+          error: error instanceof Error ? error.message : "Failed to list workspace launches",
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceLaunchStartRequest(
+    request: WorkspaceLaunchStartRequest,
+  ): Promise<void> {
+    try {
+      if (!this.workspaceLaunches) {
+        throw new Error("Workspace launches are not available on this daemon");
+      }
+      const context = await this.resolveWorkspaceLaunchContextById(request.workspaceId);
+      await assertWorkspaceAutomationAllowedForWorkspace(
+        this.workspaceRegistry,
+        request.workspaceId,
+      );
+      const launch = await this.workspaceLaunches.start(context, request.launchName);
+      this.emit({
+        type: "workspace.launch.start.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launchName: request.launchName,
+          launch,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "workspace.launch.start.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launchName: request.launchName,
+          launch: null,
+          error: error instanceof Error ? error.message : "Failed to start workspace launch",
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceLaunchStopRequest(
+    request: WorkspaceLaunchStopRequest,
+  ): Promise<void> {
+    try {
+      if (!this.workspaceLaunches) {
+        throw new Error("Workspace launches are not available on this daemon");
+      }
+      const context = await this.resolveWorkspaceLaunchContextById(request.workspaceId);
+      const launch = await this.workspaceLaunches.stop(context, request.launchName);
+      this.emit({
+        type: "workspace.launch.stop.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launchName: request.launchName,
+          launch,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "workspace.launch.stop.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          launchName: request.launchName,
+          launch: null,
+          error: error instanceof Error ? error.message : "Failed to stop workspace launch",
         },
       });
     }
@@ -7459,6 +7740,8 @@ export class Session {
     return handleWorkspaceSetupRunRequestMessage(
       {
         getWorkspace: (workspaceId) => this.workspaceRegistry.get(workspaceId),
+        getProjectRoot: async (projectId) =>
+          (await this.projectRegistry.get(projectId))?.rootPath ?? null,
         clearAutomationBlock: (workspaceId) =>
           clearWorkspaceAutomationBlock(this.workspaceRegistry, workspaceId),
         startWorkspaceSetup: (workspaceId, operation) =>
