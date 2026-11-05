@@ -28,12 +28,12 @@ async function setup(metadata?: Record<string, unknown>, rejectSteer = false) {
     },
     "thread/read": () => ({ thread: { id: "thread-1", turns: [] } }),
   });
-  const session = new CodexAppServerAgentSession(
-    { provider: "codex", cwd: tmpdir(), model: "gpt-5.4", modeId: "full-access" },
-    metadata ? { sessionId: "thread-1", metadata } : null,
-    createTestLogger(),
-    async () => appServer.child,
-  );
+  const session = new CodexAppServerAgentSession({
+    config: { provider: "codex", cwd: tmpdir(), model: "gpt-5.4", modeId: "full-access" },
+    resumeHandle: metadata ? { sessionId: "thread-1", metadata } : null,
+    logger: createTestLogger(),
+    spawnAppServer: async () => appServer.child,
+  });
   const events: AgentStreamEvent[] = [];
   session.subscribe((event) => events.push(event));
   await session.startTurn("Help me choose a color while you inspect the project.");
@@ -108,12 +108,12 @@ async function setupRewind(fail = false) {
         }
       : {}),
   });
-  const session = new CodexAppServerAgentSession(
-    { provider: "codex", cwd: tmpdir(), model: "gpt-5.4", modeId: "full-access" },
-    { sessionId: "thread-1", metadata: { asyncQuestions: records } },
-    createTestLogger(),
-    async () => appServer.child,
-  );
+  const session = new CodexAppServerAgentSession({
+    config: { provider: "codex", cwd: tmpdir(), model: "gpt-5.4", modeId: "full-access" },
+    resumeHandle: { sessionId: "thread-1", metadata: { asyncQuestions: records } },
+    logger: createTestLogger(),
+    spawnAppServer: async () => appServer.child,
+  });
   const events: AgentStreamEvent[] = [];
   session.subscribe((event) => events.push(event));
   await session.connect();
@@ -131,7 +131,7 @@ test("rewind removes only questions outside the remaining history, including aft
     metadata = session.describePersistence()!.metadata;
     expect(metadata.asyncQuestions).toEqual(
       records.slice(0, 2).map((record) => ({
-        resolution: record.resolution,
+        resolution: record.resolution ? "answered" : undefined,
         item: {
           type: "agentMessage",
           id: record.item.id,
@@ -245,7 +245,7 @@ test("manager snapshots capture pending and answered question state before the t
           delivery: "async",
           questions: questionItem.questions,
         },
-        resolution: ["Green"],
+        resolution: "answered",
       },
     ]);
   } finally {
@@ -318,15 +318,34 @@ test("shows an async question, keeps streaming, and delivers its answer without 
           event.item.text.includes("still inspecting"),
       ),
     ).toBe(true);
-    await session.respondToPermission(permission.id, answer);
+    const privateAnswer = {
+      behavior: "allow" as const,
+      updatedInput: { answers: { "Question 1": "private-answer" } },
+    };
+    await session.respondToPermission(permission.id, privateAnswer);
     expect(session.getPendingPermissions()).toEqual([]);
+    expect(JSON.stringify(session.describePersistence()?.metadata?.asyncQuestions)).not.toContain(
+      "private-answer",
+    );
+    expect(
+      JSON.stringify(
+        events.findLast(
+          (event) =>
+            event.type === "timeline" &&
+            event.item.type === "tool_call" &&
+            event.item.callId === questionItem.id,
+        ),
+      ),
+    ).not.toContain("private-answer");
     expect(appServer.requests().filter((request) => request.method === "turn/steer")).toMatchObject(
       [
         {
           params: {
             expectedTurnId: "native-turn",
             clientUserMessageId: expect.any(String),
-            input: [{ type: "text", text: expect.stringContaining("Which color?\nGreen") }],
+            input: [
+              { type: "text", text: expect.stringContaining("Which color?\nprivate-answer") },
+            ],
           },
         },
       ],

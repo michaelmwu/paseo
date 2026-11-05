@@ -29,9 +29,11 @@ import { resolveFirstAgentPromptTitle } from "./agent/create-agent-title.js";
 import { buildAgentBranchNameSeed } from "./agent/prompt-attachments.js";
 import type { FirstAgentContext } from "@getpaseo/protocol/messages";
 import { runWithGitCommandPriority } from "../utils/run-git-command.js";
+import type { WorktreeIncludeSummary } from "../utils/worktree-include.js";
 
 export interface CreatePaseoWorktreeInput extends CreateWorktreeCoreInput {
   workspaceId?: string;
+  skipMissingLocalFiles?: boolean;
   projectId?: string;
   title?: string;
   background?: boolean;
@@ -40,6 +42,7 @@ export interface CreatePaseoWorktreeInput extends CreateWorktreeCoreInput {
 
 export interface CreatePaseoWorktreeResult {
   worktree: WorktreeConfig;
+  worktreeIncludeSummary?: WorktreeIncludeSummary;
   intent: WorktreeCreationIntent;
   workspace: PersistedWorkspaceRecord;
   repoRoot: string;
@@ -116,6 +119,7 @@ async function createPaseoWorktreeWithPriority(
       expectsInitialAgent: Boolean(input.firstAgentContext),
       background: input.background,
       callerWorkspaceId: input.callerWorkspaceId,
+      skipMissingLocalFiles: input.skipMissingLocalFiles,
       ...(createdWorktree.intent.kind === "checkout-change-request" &&
       createdWorktree.intent.headRepository
         ? {
@@ -133,6 +137,7 @@ async function createPaseoWorktreeWithPriority(
 
     return {
       worktree: createdWorktree.worktree,
+      worktreeIncludeSummary: createdWorktree.worktreeIncludeSummary,
       intent: createdWorktree.intent,
       workspace,
       repoRoot: createdWorktree.repoRoot,
