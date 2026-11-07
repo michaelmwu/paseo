@@ -78,8 +78,16 @@ export interface PluginAttachmentSourceContribution<Text extends PluginText = st
   icon: PluginSerializableIcon;
   pickerTitle: Text;
   searchPlaceholder: Text;
-  search: PluginRpcContract;
+  /** Also show this source as a shortcut on New Agent drafts. */
+  newAgentShortcut?: boolean;
+  /** Allow selection from composers connected to another host. */
+  crossHost?: boolean;
+  search: PluginRpcContract | PluginAttachmentSearchHandler;
 }
+
+export type PluginAttachmentSearchHandler = (input: {
+  query: string;
+}) => unknown | Promise<unknown>;
 
 export type PluginTimelineData = JsonValue;
 
