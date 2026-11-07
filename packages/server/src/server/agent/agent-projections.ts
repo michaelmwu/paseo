@@ -349,7 +349,11 @@ export function selectAgentListItems(
 }
 
 export function toRecentProviderSessionDescriptorPayload(
-  session: ImportableProviderSession & { provider: string },
+  session: ImportableProviderSession & {
+    provider: string;
+    canContinueHere?: boolean;
+    isTargetCwd?: boolean;
+  },
   options: RecentProviderSessionProjectionOptions,
 ): RecentProviderSessionDescriptorPayload {
   return {
@@ -361,6 +365,8 @@ export function toRecentProviderSessionDescriptorPayload(
     firstPromptPreview: session.firstPromptPreview,
     lastPromptPreview: session.lastPromptPreview,
     lastActivityAt: session.lastActivityAt.toISOString(),
+    ...(session.canContinueHere !== undefined ? { canContinueHere: session.canContinueHere } : {}),
+    ...(session.isTargetCwd !== undefined ? { isTargetCwd: session.isTargetCwd } : {}),
   };
 }
 
