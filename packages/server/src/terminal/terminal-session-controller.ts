@@ -913,6 +913,7 @@ export class TerminalSessionController {
       return null;
     }
 
+    const isCompleted = terminal.getExitInfo() !== null;
     const activeStream: ActiveTerminalStream = {
       terminalId: terminal.id,
       slot,
@@ -922,7 +923,7 @@ export class TerminalSessionController {
       snapshotInFlight: false,
       retrySnapshotErrors: options.retrySnapshotErrors,
       exiting: false,
-      snapshotReady: false,
+      snapshotReady: isCompleted,
       restore: options?.restore,
       bufferedOutputs: [],
       bufferedOutputBytes: 0,
@@ -969,6 +970,13 @@ export class TerminalSessionController {
     };
 
     this.activeStreams.set(slot, activeStream);
+
+    // Completed launch terminals stay registered so their final snapshot can
+    // be opened later. They have no live output or future exit to subscribe to.
+    if (isCompleted) {
+      activeStream.unsubscribe = () => {};
+      return slot;
+    }
 
     const unsubscribeOutput = terminal.subscribe((message) => {
       if (this.activeStreams.get(slot) !== activeStream) {

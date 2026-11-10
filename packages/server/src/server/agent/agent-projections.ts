@@ -92,6 +92,7 @@ export function toStoredAgentRecord(
     updatedAt: agent.updatedAt.toISOString(),
     lastActivityAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
+    latestTurnChanges: agent.latestTurnChanges,
     title: options?.title ?? null,
     labels: agent.labels,
     metadata: agent.metadata,
@@ -150,6 +151,7 @@ export function toAgentPayload(
           startedAt: agent.activeTurnStartedAt?.toISOString() ?? null,
         }
       : null,
+    latestTurnChanges: agent.latestTurnChanges,
     capabilities: cloneCapabilities(agent.capabilities),
     currentModeId: agent.currentModeId,
     availableModes: cloneAvailableModes(agent.availableModes),
@@ -303,6 +305,7 @@ export function buildStoredAgentPayload(
     createdAt: createdAt.toISOString(),
     updatedAt: updatedAt.toISOString(),
     lastUserMessageAt: lastUserMessageAt ? lastUserMessageAt.toISOString() : null,
+    latestTurnChanges: record.latestTurnChanges,
     status: record.lastStatus,
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
@@ -408,7 +411,11 @@ export function selectAgentListItems(
 }
 
 export function toRecentProviderSessionDescriptorPayload(
-  session: ImportableProviderSession & { provider: string },
+  session: ImportableProviderSession & {
+    provider: string;
+    canContinueHere?: boolean;
+    isTargetCwd?: boolean;
+  },
   options: RecentProviderSessionProjectionOptions,
 ): RecentProviderSessionDescriptorPayload {
   return {
@@ -420,6 +427,8 @@ export function toRecentProviderSessionDescriptorPayload(
     firstPromptPreview: session.firstPromptPreview,
     lastPromptPreview: session.lastPromptPreview,
     lastActivityAt: session.lastActivityAt.toISOString(),
+    ...(session.canContinueHere !== undefined ? { canContinueHere: session.canContinueHere } : {}),
+    ...(session.isTargetCwd !== undefined ? { isTargetCwd: session.isTargetCwd } : {}),
   };
 }
 
