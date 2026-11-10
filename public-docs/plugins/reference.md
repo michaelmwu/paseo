@@ -2465,6 +2465,7 @@ export const issues = defineAttachmentSource({
   pickerTitle: "Attach Acme issue",
   searchPlaceholder: "Search by identifier or title",
   newAgentShortcut: true,
+  crossHost: true,
   search: searchIssues,
 });
 ```
@@ -2505,7 +2506,9 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. `icon` is a Lucide name or `{ svg }`; see [Icons](#icons). Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on New Agent drafts as well as in the attachment menu.
+Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. `icon` is a Lucide name or `{ svg }`; see [Icons](#icons). Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on same-host New Agent drafts as well as in the attachment menu.
+
+Set `crossHost` to `true` only when the source is safe to offer on other connected hosts. Paseo lists it under its source host in the attachment menu and asks for confirmation before searching that host. The plugin's search results, including readable `text`, are copied to the app. A selected snapshot is copied to the destination host on send. The plugin runs on the source host; it does not install or invoke itself on the destination host. Remote sources do not get the New Agent shortcut. Keep search results bounded and redact secrets before returning them.
 
 The [Linear example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/linear) shows a complete attachment source for a vendor resource.
 
@@ -2513,7 +2516,7 @@ The [Linear example](https://github.com/getpaseo/paseo/tree/main/plugin-examples
 
 Plugins are installed per daemon. When the same contribution exists on several connected hosts, Paseo shows one sidebar item and adds a host picker. The selected host supplies the bundle, Paseo API, RPC transport, and query cache. Calls never fall through to another host when the selected host is offline.
 
-Attachment sources remain scoped to each composer's host.
+Attachment sources remain scoped to each composer's host unless they opt into `crossHost`. A remote source stays on its installation host; the app asks before searching it and sends only the selected text snapshot to the destination host with the prompt.
 
 A dropped connection keeps client plugin registrations, mounted surfaces, local state, and query caches. Reconnecting through the existing `DaemonClient` object keeps unchanged installations and refreshes their settings. Consume SDK observation snapshots to refresh other daemon state; setup does not run again for an unchanged installation. Daemon calls still depend on connectivity.
 
