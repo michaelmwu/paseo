@@ -87,6 +87,16 @@ export interface TerminalActivityTransition {
   previous: TerminalActivity | null;
 }
 
+export interface WorkspacePortBlockTerminalMetadata {
+  portBase: number;
+  portCount: number;
+}
+
+export interface WorkspaceLaunchTerminalMetadata extends WorkspacePortBlockTerminalMetadata {
+  launchName: string;
+  command: string;
+}
+
 export interface TerminalSession {
   /** Absent on terminal workers started before creation timestamps were tracked. */
   createdAt?: string;
@@ -94,6 +104,9 @@ export interface TerminalSession {
   name: string;
   cwd: string;
   workspaceId: string;
+  readonly workspaceLaunch?: WorkspaceLaunchTerminalMetadata;
+  readonly workspacePortBlock?: WorkspacePortBlockTerminalMetadata;
+  readonly workspaceScriptName?: string;
   send(msg: ClientMessage): void;
   subscribe(listener: (msg: ServerMessage) => void): () => void;
   onExit(listener: (info: TerminalExitInfo) => void): () => void;
@@ -110,7 +123,11 @@ export interface TerminalSession {
   setTitle(title: string): void;
   getExitInfo(): TerminalExitInfo | null;
   kill(): void;
-  killAndWait(options?: { gracefulTimeoutMs?: number; forceTimeoutMs?: number }): Promise<void>;
+  killAndWait(options?: {
+    gracefulTimeoutMs?: number;
+    forceTimeoutMs?: number;
+    preserveSession?: boolean;
+  }): Promise<void>;
 }
 
 /** A session that owns its PTY in this process, so it knows the program's pid. */
@@ -144,6 +161,10 @@ export interface CreateTerminalOptions {
   id?: string;
   cwd: string;
   workspaceId: string;
+  workspaceLaunch?: WorkspaceLaunchTerminalMetadata;
+  workspacePortBlock?: WorkspacePortBlockTerminalMetadata;
+  retainOnExit?: boolean;
+  workspaceScriptName?: string;
   shell?: string;
   env?: Record<string, string>;
   activityEnv?: Record<string, string>;
@@ -1041,7 +1062,9 @@ export async function createTerminal(
       // Commit protocol modes with the parsed bytes, so a replay cut cannot
       // combine an older xterm buffer with modes from queued future output.
       const inputModeUpdate = inputModeTracker.feed(data);
-      for (const response of inputModeUpdate.responses) ptyProcess.write(response);
+      if (!processExited) {
+        for (const response of inputModeUpdate.responses) ptyProcess.write(response);
+      }
       stateRevision += 1;
       for (const listener of listeners) {
         listener({ type: "output", data, revision: stateRevision });
@@ -1074,23 +1097,28 @@ export async function createTerminal(
   });
 
   ptyProcess.onExit((event) => {
-    killed = true;
     processExited = true;
-    for (const waiter of Array.from(processExitWaiters)) {
-      try {
-        waiter();
-      } catch {
-        // no-op
+    // Drain xterm's queued writes before publishing exit or exposing retained
+    // output. Retained sessions are disposed only when explicitly removed.
+    terminal.write("", () => {
+      killed = true;
+      activityTracker.clear();
+      emitExit(
+        buildExitInfo({
+          exitCode: event.exitCode,
+          signal: event.signal,
+        }),
+      );
+      for (const waiter of Array.from(processExitWaiters)) {
+        try {
+          waiter();
+        } catch {
+          // no-op
+        }
       }
-    }
-    processExitWaiters.clear();
-    emitExit(
-      buildExitInfo({
-        exitCode: event.exitCode,
-        signal: event.signal,
-      }),
-    );
-    disposeResources();
+      processExitWaiters.clear();
+      if (!options.retainOnExit) disposeResources();
+    });
   });
 
   async function waitForPtyProcessStart(): Promise<void> {
@@ -1344,12 +1372,13 @@ export async function createTerminal(
   async function killAndWait(killOptions?: {
     gracefulTimeoutMs?: number;
     forceTimeoutMs?: number;
+    preserveSession?: boolean;
   }): Promise<void> {
     const gracefulTimeoutMs = killOptions?.gracefulTimeoutMs ?? 2000;
     const forceTimeoutMs = killOptions?.forceTimeoutMs ?? 1000;
 
     if (processExited) {
-      kill();
+      if (!killOptions?.preserveSession || !options.retainOnExit) kill();
       return;
     }
 
@@ -1370,7 +1399,7 @@ export async function createTerminal(
     }
 
     // Finalize bookkeeping (idempotent if ptyProcess.onExit already fired).
-    kill();
+    if (!killOptions?.preserveSession || !options.retainOnExit) kill();
   }
 
   await waitForPtyProcessStart();
@@ -1385,6 +1414,9 @@ export async function createTerminal(
     name,
     cwd,
     workspaceId,
+    workspaceLaunch: options.workspaceLaunch,
+    workspacePortBlock: options.workspacePortBlock,
+    workspaceScriptName: options.workspaceScriptName,
     send,
     subscribe,
     onExit,

@@ -83,6 +83,7 @@ export interface Agent {
   createdAt: Date;
   updatedAt: Date;
   lastUserMessageAt: Date | null;
+  latestTurnChanges?: { turnId: string; before: string; after: string };
   lastActivityAt: Date;
   capabilities: AgentCapabilityFlags;
   currentModeId: string | null;
@@ -137,6 +138,7 @@ export interface WorkspaceDescriptor {
   archivingAt: string | null;
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
+  launches?: NonNullable<WorkspaceDescriptorPayload["launches"]>;
   gitRuntime?: WorkspaceDescriptorPayload["gitRuntime"];
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
@@ -182,6 +184,12 @@ export function normalizeWorkspaceDescriptor(
     archivingAt: payload.archivingAt ?? null,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => Object.assign({}, s)),
+    // COMPAT(workspaceLaunchManagement): old daemons omit launches. Preserve that absence so
+    // feature consumers can distinguish an old descriptor from a supported daemon with no
+    // configured launches.
+    ...(payload.launches !== undefined
+      ? { launches: payload.launches.map((launch) => Object.assign({}, launch)) }
+      : {}),
     gitRuntime: payload.gitRuntime,
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
