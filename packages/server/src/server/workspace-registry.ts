@@ -108,6 +108,9 @@ const PersistedWorkspaceRecordSchema = z.object({
   untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
   // Public discovery visibility. Contents retain their ordinary lifecycle.
   background: z.boolean().optional().default(false),
+  // Preserve the user's explicit missing-file acknowledgement while setup is
+  // deferred behind the untrusted-workspace automation gate.
+  skipMissingLocalFiles: z.boolean().optional(),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
@@ -704,6 +707,7 @@ export function createPersistedWorkspaceRecord(input: {
   metadata?: Record<string, JsonValue>;
   untrustedSource?: UntrustedWorkspaceSource;
   background?: boolean;
+  skipMissingLocalFiles?: boolean;
 }): PersistedWorkspaceRecord {
   const { background, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({

@@ -1,11 +1,75 @@
-import { describe, expect, it } from "vitest";
+import { JSDOM } from "jsdom";
+import { describe, expect, it, vi } from "vitest";
 import {
   createElementSelectorController,
+  buildElementSelectorScript,
   type BrowserElementSelection,
   type ElementSelectorOutcome,
   type ElementSelectorRuntime,
   type ElementSelectorWebview,
 } from "./element-selector.electron";
+
+describe("interactive element selection", () => {
+  it("selects a control without enabling a decorative overlay or running page handlers", () => {
+    const dom = new JSDOM(
+      '<button id="target">Select me</button><div id="overlay" style="pointer-events:none"></div>',
+      { runScripts: "outside-only", url: "http://localhost/" },
+    );
+    try {
+      const { window } = dom;
+      Object.defineProperty(window.document, "readyState", { value: "complete" });
+      const clicked = vi.fn();
+      window.document.addEventListener("click", clicked, true);
+      const button = window.document.getElementById("target")!;
+      button.addEventListener("click", clicked);
+      window.eval(buildElementSelectorScript("interactive-test"));
+      expect(
+        window.getComputedStyle(window.document.getElementById("overlay")!).pointerEvents,
+      ).toBe("none");
+      button.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(clicked).not.toHaveBeenCalled();
+      expect(Reflect.get(window, "__paseoSelectorResult")).toMatchObject({
+        tag: "button",
+        selector: "#target",
+        __paseoSessionToken: "interactive-test",
+      });
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it("selects a disabled control after the gesture without synthesizing a page click", async () => {
+    const dom = new JSDOM('<button id="target" disabled>Disabled</button>', {
+      runScripts: "outside-only",
+      url: "http://localhost/",
+    });
+    try {
+      const { window } = dom;
+      Object.defineProperty(window.document, "readyState", { value: "complete" });
+      const clicked = vi.fn();
+      window.document.addEventListener("click", clicked, true);
+      const button = window.document.getElementById("target")!;
+      button.addEventListener("click", clicked);
+      window.eval(buildElementSelectorScript("disabled-test"));
+      button.dispatchEvent(
+        new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }),
+      );
+      button.dispatchEvent(
+        new window.MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }),
+      );
+      await new Promise((resolve) => window.setTimeout(resolve, 1));
+      expect(button.hasAttribute("disabled")).toBe(true);
+      expect(clicked).not.toHaveBeenCalled();
+      expect(Reflect.get(window, "__paseoSelectorResult")).toMatchObject({
+        tag: "button",
+        selector: "#target",
+        __paseoSessionToken: "disabled-test",
+      });
+    } finally {
+      dom.window.close();
+    }
+  });
+});
 
 function selectorHarness() {
   let installed: ((state: "installed" | "loading" | "unavailable") => void) | undefined;

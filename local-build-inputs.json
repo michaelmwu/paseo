@@ -1,0 +1,89 @@
+{
+  "release": { "tag": "v0.16.0-beta.2", "commit": "23bae61535542a45ade7196a7b3c152705f16de3" },
+  "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
+  "features": [
+    {
+      "pr": 4052,
+      "branch": "add-project-linking-dialog-duplicate-git-repos",
+      "commit": "a9d4a682877d556a857f52b1354e884d037efe71"
+    },
+    {
+      "pr": 4627,
+      "branch": "agent-context-attachment-plugin",
+      "commit": "07e750d7c368ed61adaebe4c957a445d43b3b419"
+    },
+    {
+      "pr": 2496,
+      "branch": "session-portability-prototype",
+      "commit": "b370aadf21f0144f4a500797c4b32de2059383c9"
+    },
+    {
+      "pr": 4381,
+      "branch": "feat/project-secrets-import-worktrees",
+      "commit": "c5c0501480d8764e522fa20d0cc91e8b5cde9add"
+    },
+    {
+      "branch": "worktreeinclude-missing-files-conflict-fixed",
+      "commit": "b8be2560ea4ede3272f91fa8c62ebd9960926fd4"
+    },
+    {
+      "pr": 4525,
+      "branch": "redesign-service-definitions",
+      "commit": "20d1b2180f43bca32d5e15de6fafbb98dc3281d8"
+    },
+    {
+      "pr": 9332,
+      "branch": "codex/offline-mobile-outbox",
+      "commit": "5e9f158ca08b72538706ad7eade1773992e11b3d"
+    },
+    {
+      "pr": 9333,
+      "branch": "feat/turn-scoped-changes",
+      "commit": "21c285b72b270d141f3eeab1d3c99317b43d451c"
+    },
+    {
+      "pr": 9334,
+      "branch": "feat/named-port-forwarding",
+      "commit": "78742fdde45d6bed15caef4ffb76ee4081ee69f2",
+      "includes": [6534]
+    },
+    { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" }
+  ],
+  "plugins": [
+    {
+      "repository": "508-dev/paseo-action-inbox",
+      "id": "action-inbox",
+      "commit": "ea9d65b2d2522e075fe5ce78af9acad1aa254366"
+    },
+    {
+      "repository": "508-dev/paseo-pr-watcher",
+      "id": "pr-watcher",
+      "commit": "bc22f8dd34e6efa1990aea3b0355c65671fe76b7"
+    },
+    {
+      "repository": "508-dev/paseo-issue-workflow",
+      "id": "github-issue-workflow",
+      "commit": "c0531834646c0f1907b106e087fc97f94faebb8f"
+    },
+    {
+      "repository": "508-dev/paseo-remote-browser",
+      "id": "remote-browser",
+      "commit": "3d6bea3d9c3ffbeb3ac598350718edb5d914166e"
+    },
+    {
+      "repository": "508-dev/paseo-agent-context",
+      "id": "agent-context",
+      "commit": "f5fae145ad028671b658b6c2a5addafdd89e86e3"
+    },
+    {
+      "repository": "508-dev/paseo-project-environment",
+      "id": "project-environment",
+      "commit": "ceefd8213ca87dce6cfc0b9f35c9158ed1c16bff"
+    },
+    {
+      "repository": "cprecioso/paseo-worktreeinclude",
+      "id": "paseo-worktreeinclude",
+      "commit": "d32b1a4d1eeced93c964073813be5289d6150171"
+    }
+  ]
+}

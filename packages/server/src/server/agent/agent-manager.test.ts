@@ -4,7 +4,7 @@ import {
   formatAgentMessage,
   formatSystemNotificationPrompt,
 } from "./agent-messages/index.js";
-import { expect, test, vi, onTestFinished } from "vitest";
+import { describe, expect, test, vi, onTestFinished } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,6 +53,7 @@ import type {
   AgentSlashCommand,
   AgentStreamEvent,
   AgentTimelineItem,
+  ForkImportableProviderSessionInput,
   ImportProviderSessionInput,
   ImportProviderSessionContext,
   ResolveAgentDefaultModeInput,
@@ -68,6 +69,51 @@ import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+test.each([0, 2_100])(
+  "does not submit a canceled turn after worktree capture (cancel delay: %i)",
+  async (delayMs) => {
+    const entered = deferred<void>();
+    const captured = deferred<string | null>();
+    const cwd = mkdtempSync(join(tmpdir(), "agent-capture-cancel-"));
+    const session = new TestAgentSession({ provider: "codex", cwd });
+    const start = vi.spyOn(session, "startTurn");
+    const client = new (class extends TestAgentClient {
+      override async createSession() {
+        return session;
+      }
+    })();
+    const manager = new AgentManager({
+      clients: { codex: client },
+      logger,
+      captureTurnWorktree: async () => {
+        entered.resolve();
+        return captured.promise;
+      },
+    });
+    const agent = await manager.createAgent({ provider: "codex", cwd }, undefined, {
+      workspaceId: undefined,
+    });
+    const stream = manager.streamAgent(agent.id, "must not execute");
+    const rejected = expect(stream.next()).rejects.toThrow("canceled before its turn started");
+    await entered.promise;
+    vi.useFakeTimers();
+    try {
+      const cancellation = manager.cancelAgentRun(agent.id);
+      await vi.advanceTimersByTimeAsync(delayMs);
+      captured.resolve(null);
+      await rejected;
+      await expect(cancellation).resolves.toEqual({ status: "settled" });
+      expect(start).not.toHaveBeenCalled();
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    } finally {
+      vi.useRealTimers();
+      captured.resolve(null);
+      await manager.closeAgent(agent.id);
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -5065,6 +5111,81 @@ test("importProviderSession imports the selected session without listing and pub
     },
   });
   expect((await storage.get(imported.id))?.title).toBe("Trace provider imports");
+});
+
+test("continueProviderSession registers a fork in the destination workspace without importing the source", async () => {
+  const sourceCwd = mkdtempSync(join(tmpdir(), "agent-manager-continue-source-"));
+  const destinationCwd = mkdtempSync(join(tmpdir(), "agent-manager-continue-destination-"));
+  const storage = new AgentStorage(join(destinationCwd, "agents"), logger);
+  const forkedSession = new TestAgentSession({ provider: "codex", cwd: destinationCwd });
+
+  class ForkClient extends TestAgentClient {
+    forkInput: ForkImportableProviderSessionInput | null = null;
+    importCalls = 0;
+
+    override async importSession() {
+      this.importCalls += 1;
+      throw new Error("Continue here must not import the source native handle");
+    }
+
+    override async forkImportableSession(
+      input: ForkImportableProviderSessionInput,
+      _context: ImportProviderSessionContext,
+    ) {
+      this.forkInput = input;
+      return {
+        session: forkedSession,
+        config: { provider: "codex" as const, cwd: destinationCwd },
+        persistence: {
+          provider: "codex" as const,
+          sessionId: "forked-thread",
+          nativeHandle: "forked-thread",
+          metadata: {
+            provider: "codex",
+            cwd: destinationCwd,
+            continuationSource: {
+              providerHandleId: input.providerHandleId,
+              cwd: input.sourceCwd,
+            },
+          },
+        },
+        timeline: [{ item: { type: "assistant_message" as const, text: "Forked context" } }],
+      };
+    }
+  }
+
+  const client = new ForkClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+  });
+
+  const continued = await manager.continueProviderSession({
+    provider: "codex",
+    providerHandleId: "desktop-thread",
+    sourceCwd,
+    destinationCwd,
+    workspaceId: "ws-destination",
+  });
+
+  expect(client.importCalls).toBe(0);
+  expect(client.forkInput).toEqual({
+    providerHandleId: "desktop-thread",
+    sourceCwd,
+    destinationCwd,
+  });
+  expect(continued.cwd).toBe(destinationCwd);
+  expect(continued.workspaceId).toBe("ws-destination");
+  expect(continued.persistence).toMatchObject({
+    sessionId: "forked-thread",
+    metadata: {
+      continuationSource: { providerHandleId: "desktop-thread", cwd: sourceCwd },
+    },
+  });
+  expect(manager.getTimeline(continued.id)).toEqual([
+    { type: "assistant_message", text: "Forked context" },
+  ]);
 });
 
 test("reloadAgentSession passes daemon launch env through the provider launch context", async () => {

@@ -451,9 +451,9 @@ test.each(["mode", "thinking", "rewind"])(
         runtime.recordedLaunches.filter((launch) => launch.session === sessionFile),
       ).toHaveLength(1);
       expect(manager.getAgent(agentId)?.currentModeId).toBe("full");
-      expect(runtime.latestSession().prompts).toEqual([
-        expect.objectContaining({ message: "continue" }),
-      ]);
+      await expect
+        .poll(() => runtime.latestSession().prompts)
+        .toEqual([expect.objectContaining({ message: "continue" })]);
       runtime.latestSession().finishTurn();
       await manager.waitForAgentEvent(agentId);
       await manager.archiveAgent(agentId);

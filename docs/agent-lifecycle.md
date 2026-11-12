@@ -12,6 +12,12 @@ initializing → idle → running → idle (or error → closed)
 
 Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idle`, `running`, or `error`. `closed` is the persisted, resumable state for an agent record that has no live provider runtime. State transitions persist to disk and stream to subscribed clients via WebSocket.
 
+## Changes during a turn
+
+For a foreground turn in a Git worktree, the daemon captures the whole worktree before invoking the provider and again when the turn settles. The latest completed pair is retained as Git refs and exposed on the agent snapshot. The agent tab can compare the pair using the normal diff viewer. The capture uses a private index, includes untracked files, and respects Git ignore rules; it never changes the user's staging index.
+
+The comparison is a worktree time boundary, not attribution to the agent process. Edits from terminals, people, or other agents during that interval appear too. Changes made and reverted within the interval do not appear. The view is available after completion, and only the latest turn is shown. A non-Git directory or failed capture has no turn comparison.
+
 ## Daemon restart recovery
 
 Restart recovery is off by default. Enable `agents.resumeOnStartup` in host config or
@@ -103,6 +109,25 @@ between turns nothing is watching, so the agent sits at `idle` looking healthy w
 work is gone. Report that exit as a turn failure so the agent lands in `error` with a timeline entry.
 Claude and OMP report exits between turns. OMP relaunches from its session file on the next prompt;
 the unfinished turn is lost.
+
+## Importing an existing provider session
+
+Importing an external Codex, Claude, or other provider session has two intentionally different
+lifecycles:
+
+- **Resume original** adopts the provider-native handle and runs it in the session's original
+  working directory. Paseo creates or reuses a workspace record for that directory; it does not
+  create a checkout or relocate the provider session.
+- **Continue here** creates a new provider-native fork in an already-existing destination
+  workspace. The daemon permits it only when source and destination are separate paths in the same
+  local Git working copy. The source session and its worktree—including uncommitted changes—remain
+  untouched. The destination receives a new conversation handle and uses its own files and runtime
+  configuration.
+
+`Continue here` is capability-gated per provider. It is not a Git-state transfer, is not a
+cross-repository or cross-host operation, and does not archive the source. Providers that cannot
+prove a native fork remain resume-only; users can instead create a fresh agent with transcript
+context when that feature is available.
 
 ### Cancellation
 

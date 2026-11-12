@@ -2,6 +2,25 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Navigateur",
+    permissionDenied:
+      "Cette connexion n’a pas l’autorisation d’utiliser le réseau de l’hôte. Demandez au propriétaire de l’hôte d’autoriser l’accès au réseau.",
+    title: "Utiliser le réseau de l’hôte pour les onglets du navigateur",
+    description:
+      "Les onglets de cet hôte utilisent son réseau et un profil distinct avec leurs propres cookies.",
+    updateHost: "Mettez cet hôte à jour pour utiliser son réseau dans les onglets du navigateur.",
+    settingFailed: "Impossible d’enregistrer ou de charger ce réglage. Réessayez.",
+    viaHost: "via {{host}}",
+    proxyUnavailable:
+      "La connexion du navigateur au réseau de l’hôte {{host}} est indisponible. Reconnectez l’hôte et rechargez.",
+    destinationFailed:
+      "Impossible d’accéder à cette adresse via le réseau de l’hôte {{host}}. Vérifiez l’adresse et la connexion de l’hôte.",
+    connectionClosed:
+      "La connexion via le réseau de l’hôte {{host}} a été fermée. Reconnectez l’hôte et rechargez.",
+    notReady:
+      "Le navigateur n’a pas pu préparer le réseau de l’hôte {{host}}. Réessayez d’ouvrir l’onglet.",
+  },
   pluginCombobox: {
     searching: "Recherche…",
     empty: "Aucun résultat",
@@ -31,6 +50,61 @@ export const fr: TranslationResources = {
     position: "{{current}} sur {{total}}",
     total: "{{total}} résultats",
   },
+  localFiles: {
+    updateHost: "Mettez cet hôte à jour pour importer des fichiers locaux.",
+    missingTitle: "Fichiers locaux manquants",
+    missingConfirm:
+      "{{files}} sont absents de {{root}}. Continuer sans ces fichiers ? Annulez pour les importer.",
+    continueWithout: "Continuer sans les fichiers",
+    unavailableForWorktree: "Vérifiez ces fichiers locaux avant de créer un worktree : {{files}}",
+
+    title: "Fichiers locaux",
+    info: "Importez les fichiers d’environnement et de configuration ignorés par Git sur cet hôte. Ses agents et scripts peuvent les lire.",
+    import: "Importer des fichiers…",
+    importTo: "Importer sur {{host}}",
+    thisDevice: "Cet appareil",
+    fromDevice: "Depuis cet appareil…",
+    fromHost: "Depuis un autre hôte…",
+    source: "Source : {{source}}",
+    sourcePath: "Autre fichier source (chemin relatif au projet)",
+    inspect: "Vérifier",
+    refresh: "Actualiser",
+    total: "Sélection : {{count}} · {{size}}",
+    include: "Inclure dans les futurs worktrees",
+    configPreview:
+      "Ajouter ces chemins à paseo.json. Cela crée une modification de configuration non commitée ; les fichiers des worktrees existants restent inchangés.",
+    complete: "Fichiers importés. Les worktrees existants n’ont pas été mis à jour.",
+    limits:
+      "Fichiers individuels uniquement. Maximum : 10 MiB par fichier, 25 MiB par import et 100 fichiers. Mises à jour manuelles.",
+    existing: "Existe déjà · sélectionner pour remplacer",
+    replace: "Remplacer {{path}}",
+    status: {
+      ready: "Présent",
+      missing: "Manquant",
+      not_ignored: "Doit être ignoré par Git",
+      unsupported: "Fichier ou chemin non pris en charge",
+      too_large: "Trop volumineux",
+      unavailable: "Indisponible",
+      imported: "Importé",
+    },
+    errors: {
+      load_failed:
+        "Impossible de vérifier les fichiers. Vérifiez la connexion à l’hôte et réessayez.",
+      selection_invalid: "Sélectionnez au maximum 100 fichiers de noms distincts.",
+      no_source_files:
+        "Aucun fichier admissible trouvé. Saisissez le chemin d’un fichier ignoré par Git.",
+      changed:
+        "Le fichier a changé depuis l’aperçu. Sélectionnez à nouveau la source pour vérifier la dernière copie.",
+      import_failed: "Échec de l’import. Vérifiez la connexion et réessayez.",
+      partial_failure:
+        "Certains fichiers ont échoué. Réessayez les échecs sélectionnés ou sélectionnez à nouveau la source.",
+      secure_connection_required:
+        "Utilisez un relais, TLS ou une connexion locale/SSH pour transférer des fichiers sensibles.",
+      config_failed:
+        "Fichiers importés, mais inclusion non enregistrée. Actualisez pour vérifier la configuration, puis enregistrez l’inclusion sans retransférer les fichiers.",
+    },
+  },
+
   common: {
     bottomSheetBackdrop: "Arrière-plan du panneau inférieur",
     back: "Retour",
@@ -123,6 +197,14 @@ export const fr: TranslationResources = {
     },
   },
   composer: {
+    outbox: {
+      pending: "Enregistré sur cet appareil. Envoi à la reconnexion de l’hôte.",
+      sending: "Envoi en cours…",
+      needsReview: "Vérifiez la livraison. Réessayez avec le même ID ou supprimez le message.",
+      retry: "Réessayer l’envoi",
+      discard: "Supprimer le message enregistré",
+      attachmentMessage: "Message avec pièces jointes",
+    },
     placeholders: {
       desktop: "Écrivez à l’agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
@@ -261,6 +343,10 @@ export const fr: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      viewChanges: "Modifications pendant ce tour",
+      backToConversation: "Retour à la conversation",
+    },
     states: {
       notFound: "Agent introuvable",
       failedToLoad: "Impossible de charger l’agent",
@@ -385,6 +471,9 @@ export const fr: TranslationResources = {
     question: {
       responseFailed: "Impossible d’envoyer votre réponse. Réessayez.",
       submit: "Envoyer",
+      sendToChat: "Envoyer dans le chat",
+      chatDeliveryWarning:
+        "Votre réponse apparaîtra dans le chat. Ne saisissez pas de mot de passe ni d'information secrète.",
       next: "Suivant",
       answerPlaceholder: "Saisissez votre réponse…",
       otherPlaceholder: "Autre…",
@@ -465,6 +554,9 @@ export const fr: TranslationResources = {
     },
     row: {
       importing: "Importation…",
+      continuing: "Continuation…",
+      continueHint:
+        "Crée une nouvelle conversation ici. Les fichiers et modifications restent dans le worktree source.",
     },
   },
   workspace: {
@@ -821,6 +913,34 @@ export const fr: TranslationResources = {
         stopFailed: "Impossible d’arrêter {{scriptName}}",
         running: "En cours",
         runningCount: "{{count}} en cours",
+      },
+    },
+    launches: {
+      title: "Lancements",
+      actions: {
+        switch: "Basculer",
+        start: "Démarrer",
+        stop: "Arrêter",
+        view: "Sortie",
+        openService: "Voir le service",
+      },
+      accessibility: {
+        switchLaunch: "Arrêter {{activeLaunchName}} et démarrer {{launchName}}",
+        trigger: "Lancements de l’espace de travail",
+        launch: "Lancement {{launchName}}",
+        startLaunch: "Démarrer {{launchName}}",
+        stopLaunch: "Arrêter {{launchName}}",
+        viewTerminal: "Voir le terminal de {{launchName}}",
+        openService: "Voir le service {{hostname}}",
+      },
+      states: {
+        running: "En cours",
+        stopped: "Arrêté",
+        stopping: "Arrêt en cours…",
+        noListeners: "Aucun port en écoute détecté pour le moment",
+        startFailed: "Échec du démarrage de {{launchName}}",
+        stopFailed: "Échec de l’arrêt de {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -2335,6 +2455,42 @@ export const fr: TranslationResources = {
       hostLoadFailed: "Impossible de charger les projets depuis l’hôte {{hostName}} : {{message}}",
       editProject: "Modifier {{projectName}}",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "Liens de projets possibles",
+        linkedTitle: "Liens de projets",
+        description:
+          "Examinez les liens de projets vérifiés par Git et enregistrés sur cet appareil.",
+        review: "Examiner les liens",
+      },
+      sheet: {
+        title: "Liens de projets",
+        deviceOnly:
+          "Les liens sont enregistrés uniquement sur cet appareil. Ils ne déplacent ni espaces de travail, ni réglages, ni fichiers.",
+        matchesTitle: "Correspondances vérifiées",
+        matchesDescription:
+          "Ces entrées ont le même dépôt distant Git et le même sous-répertoire de projet, mais restent séparées.",
+        linkedTitle: "Projets liés",
+        noMatchesTitle: "Aucun lien de projet à examiner",
+        noMatchesDescription:
+          "Ouvrez un espace de travail sur chaque hôte afin que Paseo puisse vérifier le dépôt distant Git et le sous-répertoire du projet.",
+        linkProjects: "Lier {{count}} projets",
+        remote: "Dépôt distant Git",
+        subdirectory: "Sous-répertoire du projet",
+        path: "Chemin",
+        needsReviewTitle: "À examiner",
+        needsReviewDescription:
+          "Les dernières informations Git ne confirment plus ce lien ; Paseo garde donc ces projets séparés.",
+        projectUnavailable: "Ce projet n'est pas disponible actuellement.",
+        saving: "Enregistrement du lien du projet…",
+        saveFailed: "Impossible d’enregistrer le lien du projet. Réessayez.",
+        unlink: "Délier",
+      },
+      toasts: {
+        linked: "Projets liés sur cet appareil",
+        unlinked: "Lien de projet supprimé",
+      },
+    },
     groupInfo: "À propos de {{title}}",
     sections: {
       general: "Général",
@@ -2485,11 +2641,12 @@ export const fr: TranslationResources = {
         title: "Données du navigateur",
         siteData: "Cookies et données des sites",
         description:
-          "Les onglets du navigateur partagent les connexions et les données des sites dans Paseo.",
+          "Les onglets du navigateur partagent les connexions et les données des sites dans Paseo. Les hôtes avec « Utiliser le réseau de l’hôte pour les onglets du navigateur » activé conservent un profil distinct, et l’effacement supprime les deux.",
         clear: "Effacer les données du navigateur",
         clearing: "Effacement…",
         confirmTitle: "Effacer les données du navigateur ?",
-        confirmMessage: "Vous serez déconnecté des sites et les onglets ouverts seront rechargés.",
+        confirmMessage:
+          "Vous serez déconnecté des sites sur tous les profils et les onglets ouverts seront rechargés.",
         success: "Données du navigateur effacées.",
         error: "Impossible d’effacer les données du navigateur.",
       },
@@ -3208,6 +3365,28 @@ export const fr: TranslationResources = {
           edit: "Modifier",
           remove: "Supprimer",
         },
+      },
+      launches: {
+        title: "Lancements",
+        info: "Configurations de développement que vous pouvez démarrer depuis n’importe quel espace de travail de ce projet",
+        empty: "Aucun lancement pour le moment.",
+        untitled: "Lancement sans titre",
+        menuAccessibility: "Ouvrir le menu de lancement",
+        removeTitle: "Supprimer le lancement ?",
+        removeMessage: "Supprimer {{name}} ?",
+        removeFallbackName: "ce lancement",
+        name: "Nom",
+        command: "Commande",
+        nameAccessibility: "Nom du lancement",
+        commandAccessibility: "Commande du lancement",
+        nameRequired: "Le nom est requis",
+        nameDuplicate: "Chaque lancement doit avoir un nom unique",
+        commandRequired: "La commande est requise",
+        newLaunch: "Nouveau lancement",
+        editLaunch: "Modifier {{name}}",
+        commandHint:
+          "Paseo exécute cette commande avec le bloc de ports de l’espace de travail et le nom du projet Compose dans son environnement.",
+        actions: { add: "Ajouter un lancement", edit: "Modifier", remove: "Supprimer" },
       },
       metadata: {
         title: "Génération des métadonnées",
