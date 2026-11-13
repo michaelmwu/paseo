@@ -28,6 +28,49 @@ beforeEach(() => {
 });
 
 describe("offline message outbox", () => {
+  it("serializes deliveries for one agent without blocking other agents", async () => {
+    const store = await import("./store");
+    const delivery = await import("./delivery");
+    const items = ["older", "newer", "other-agent"].map((id) =>
+      store.createPendingOutboxItem({
+        id,
+        serverId: "host-1",
+        agentId: id === "other-agent" ? "agent-2" : "agent-1",
+        text: id,
+        images: [],
+        attachments: [],
+      }),
+    );
+    for (const item of items) await store.enqueueOutboxItem(item);
+    const encoding = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const sendAgentMessage = vi.fn().mockResolvedValue({});
+    const client = { sendAgentMessage };
+    const older = delivery.deliverOutboxItem({
+      item: items[0]!,
+      client,
+      encode: async () => {
+        entered.resolve();
+        await encoding.promise;
+        return [];
+      },
+    });
+    await entered.promise;
+    const newer = delivery.deliverOutboxItem({ item: items[1]!, client });
+    try {
+      await delivery.deliverOutboxItem({ item: items[2]!, client });
+      expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual(["other-agent"]);
+    } finally {
+      encoding.resolve();
+      await Promise.all([older, newer]);
+    }
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "other-agent",
+      "older",
+      "newer",
+    ]);
+  });
+
   it("persists a pending message across reloads and retains its image", async () => {
     const first = await import("./store");
     const image = {

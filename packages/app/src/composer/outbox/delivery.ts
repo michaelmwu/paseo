@@ -7,17 +7,34 @@ import { removeOutboxItem, updateOutboxItem, useOutboxStore, type OutboxItem } f
 
 const inFlight = new Set<string>();
 const drains = new Set<string>();
+const agentDeliveries = new Map<string, Promise<void>>();
 
-export async function deliverOutboxItem(input: {
+interface DeliveryInput {
   item: OutboxItem;
   client: Pick<ComposerSendClient, "sendAgentMessage">;
   encode?: (
     images: AttachmentMetadata[],
   ) => Promise<Array<{ data: string; mimeType: string }> | undefined>;
-}): Promise<void> {
-  const { item, client } = input;
+}
+
+export async function deliverOutboxItem(input: DeliveryInput): Promise<void> {
+  const { item } = input;
   if (inFlight.has(item.id)) return;
   inFlight.add(item.id);
+  const key = JSON.stringify([item.serverId, item.agentId]);
+  const previous = agentDeliveries.get(key) ?? Promise.resolve();
+  const delivery = previous.catch(() => undefined).then(() => deliverOutboxItemNow(input));
+  agentDeliveries.set(key, delivery);
+  try {
+    await delivery;
+  } finally {
+    inFlight.delete(item.id);
+    if (agentDeliveries.get(key) === delivery) agentDeliveries.delete(key);
+  }
+}
+
+async function deliverOutboxItemNow(input: DeliveryInput): Promise<void> {
+  const { item, client } = input;
   try {
     await updateOutboxItem(item.id, (current) => ({
       ...current,
@@ -59,8 +76,6 @@ export async function deliverOutboxItem(input: {
       status: "needs_review",
       error: error instanceof Error ? error.message : String(error),
     }));
-  } finally {
-    inFlight.delete(item.id);
   }
 }
 

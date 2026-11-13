@@ -164,7 +164,7 @@ import {
   useOutboxStore,
   type OutboxItem,
 } from "@/composer/outbox/store";
-import { deliverOutboxItem } from "@/composer/outbox/delivery";
+import { deliverOutboxItem, drainPendingOutbox } from "@/composer/outbox/delivery";
 import { generateMessageId } from "@/types/stream";
 import { ComposerInputProvider, type ComposerInput } from "@/composer/session";
 import type { ComposerFocusOptions } from "@/composer/model";
@@ -1912,7 +1912,7 @@ function ComposerContentImpl({
           await enqueueOutboxItem(item);
           onMessageSent?.();
           if (isConnected && client) {
-            await deliverOutboxItem({ item, client });
+            await drainPendingOutbox({ serverId, client });
             if (!useOutboxStore.getState().items.some((pending) => pending.id === item.id)) {
               onAttentionPromptSend?.();
             }
