@@ -1430,6 +1430,42 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       ).toBe("");
     });
 
+    it("preserves tracked files and directory descendants when materializing includes", async () => {
+      writeFileSync(join(repoDir, ".env"), "tracked environment\n");
+      mkdirSync(join(repoDir, "config"));
+      writeFileSync(join(repoDir, "config", "tracked-only.txt"), "tracked configuration\n");
+      execFileSync("git", ["add", ".env", "config"], { cwd: repoDir });
+      execFileSync(
+        "git",
+        ["-c", "commit.gpgsign=false", "commit", "-m", "tracked include destinations"],
+        { cwd: repoDir },
+      );
+      writeFileSync(join(repoDir, ".env"), "uncommitted source environment\n");
+      rmSync(join(repoDir, "config", "tracked-only.txt"));
+      writeFileSync(join(repoDir, "config", "local.txt"), "source-only configuration\n");
+      writeFileSync(join(repoDir, ".worktreeinclude"), "copy .env\ncopy config\n");
+
+      const result = await createLegacyWorktreeForTest({
+        cwd: repoDir,
+        worktreeSlug: "tracked-include-destinations",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/tracked-includes" },
+        paseoHome,
+      });
+
+      expect(readFileSync(join(result.worktreePath, ".env"), "utf8")).toBe("tracked environment\n");
+      expect(readFileSync(join(result.worktreePath, "config", "tracked-only.txt"), "utf8")).toBe(
+        "tracked configuration\n",
+      );
+      expect(existsSync(join(result.worktreePath, "config", "local.txt"))).toBe(false);
+      expect(result.worktreeIncludeSummary).toMatchObject({
+        materialized: 0,
+        skipped: [
+          expect.objectContaining({ raw: "copy .env", reason: "conflict" }),
+          expect.objectContaining({ raw: "copy config", reason: "conflict" }),
+        ],
+      });
+    });
+
     it("materializes copies and symlinks before setup, then removes only the new worktree links", async () => {
       writeFileSync(
         join(repoDir, ".gitignore"),

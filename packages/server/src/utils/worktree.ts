@@ -1494,6 +1494,14 @@ export const createWorktree = async ({
       const materialization = await materializeWorktreeIncludePlan({
         plan: worktreeIncludePlan,
         worktreeRoot: worktreePath,
+        isDestinationTracked: async (relativePath) => {
+          // A literal pathspec protects both a file and tracked descendants of a directory.
+          const result = await runGitCommand(
+            ["ls-files", "--cached", "-z", "--", `:(literal)${relativePath}`],
+            { cwd: worktreePath },
+          );
+          return result.stdout.length > 0;
+        },
       });
 
       return {

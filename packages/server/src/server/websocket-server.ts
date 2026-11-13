@@ -2222,6 +2222,10 @@ export class VoiceAssistantWebSocketServer {
         importSessionWorkspaceTarget: true,
         // COMPAT(importSessionSearch): added in v0.7.3, remove gate after 2027-03-02.
         importSessionSearch: true,
+        // COMPAT(projectLocalFiles): added in local v0.16.0-beta.2, remove after 2027-05-14.
+        projectLocalFiles: true,
+        // COMPAT(providerSessionContinue): added in local v0.16.0-beta.2, remove after 2027-05-14.
+        providerSessionContinue: true,
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after
         // 2027-01-17 once the supported daemon floor is >= v0.2.0.
         forgeProviders: true,
