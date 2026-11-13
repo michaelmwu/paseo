@@ -1062,15 +1062,20 @@ function TurnChangesSwitch({
   const toggle = useCallback(() => setShow((value) => !value), []);
   return (
     <View style={styles.turnChangesSwitch}>
-      {changes ? (
-        <View style={styles.turnChangesAction}>
-          <Button variant="secondary" size="sm" onPress={toggle} testID="agent-turn-changes-toggle">
-            {show
-              ? t("agentPanel.turnChanges.backToConversation")
-              : t("agentPanel.turnChanges.viewChanges")}
-          </Button>
-        </View>
-      ) : null}
+      {/* Keep the viewport height stable when a completed turn publishes its snapshot. */}
+      <View style={styles.turnChangesAction}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!changes}
+          onPress={toggle}
+          testID="agent-turn-changes-toggle"
+        >
+          {show && changes
+            ? t("agentPanel.turnChanges.backToConversation")
+            : t("agentPanel.turnChanges.viewChanges")}
+        </Button>
+      </View>
       {show && changes ? (
         <TurnChangesContent
           key={changes.after}
