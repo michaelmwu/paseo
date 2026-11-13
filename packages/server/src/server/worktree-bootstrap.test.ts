@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, onTestFinished, vi } from "vitest";
 import { execFileSync } from "child_process";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createServer } from "node:net";
@@ -614,12 +614,9 @@ describe("runWorktreeAutoTerminals", () => {
 
   it("keeps service allocation outside active launch blocks", async () => {
     const reservedPort = 45_678;
-    const portScript = join(repoDir, "portmake");
-    writeFileSync(portScript, `#!/bin/sh\necho ${reservedPort}\n`);
-    chmodSync(portScript, 0o755);
     commitPaseoConfig({
       worktree: {
-        servicePorts: { portScript },
+        servicePorts: { range: `${reservedPort}-${reservedPort}` },
       },
       scripts: {
         api: {
@@ -652,7 +649,9 @@ describe("runWorktreeAutoTerminals", () => {
         terminalManager: createStubTerminalManager(createTerminalCalls),
         workspaceRuntimeEnvironment,
       }),
-    ).rejects.toThrow(`returned reserved port ${reservedPort}`);
+    ).rejects.toThrow(
+      `No available service port in configured range ${reservedPort}-${reservedPort}`,
+    );
     expect(createTerminalCalls).toEqual([]);
   });
 
