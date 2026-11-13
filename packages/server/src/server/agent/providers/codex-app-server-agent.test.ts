@@ -738,7 +738,12 @@ function createReopenableCodexAgent(threads: Record<string, unknown[]>) {
     },
     resumeSession: (...args) => provider.resumeSession(...args),
   };
-  const manager = new AgentManager({ clients: { codex: client }, logger: createTestLogger() });
+  const manager = new AgentManager({
+    clients: { codex: client },
+    logger: createTestLogger(),
+    // Provider protocol fixtures must not snapshot the checkout before their timed handshake.
+    captureTurnWorktree: async () => null,
+  });
   const agentId = "00000000-0000-4000-8000-000000000001";
   const handle = { provider: "codex", sessionId: "saved-thread" };
   const config = createConfig({ cwd: process.cwd() });

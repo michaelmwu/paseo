@@ -5,7 +5,7 @@ import {
   formatSystemNotificationPrompt,
 } from "./agent-messages/index.js";
 import { describe, expect, test, vi, onTestFinished } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -69,6 +69,47 @@ import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+test("settles a rejected turn after its repository disappears without leaking cleanup errors", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "agent-capture-removed-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" });
+  git("init");
+  git(
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "base",
+  );
+  const session = new TestAgentSession({ provider: "codex", cwd });
+  vi.spyOn(session, "startTurn").mockImplementation(async () => {
+    rmSync(join(cwd, ".git"), { recursive: true, force: true });
+    throw new Error("provider start failed");
+  });
+  const client = new (class extends TestAgentClient {
+    override async createSession() {
+      return session;
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd }, undefined, {
+      workspaceId: undefined,
+    });
+    await expect(manager.streamAgent(agent.id, "start").next()).rejects.toThrow(
+      "provider start failed",
+    );
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    await manager.closeAgent(agent.id);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
 
 test.each([0, 2_100])(
   "does not submit a canceled turn after worktree capture (cancel delay: %i)",

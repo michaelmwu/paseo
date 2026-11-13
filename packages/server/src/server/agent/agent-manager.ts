@@ -3310,7 +3310,7 @@ export class AgentManager {
       if (before) this.pendingTurnChanges.set(agentId, { turnId, before });
       return turnId;
     } catch (error) {
-      if (before) void discardPendingTurnStart(agent.cwd, agentId);
+      if (before) await this.discardPendingTurnCapture(agent.cwd, agentId);
       throw error;
     }
   }
@@ -3333,7 +3333,15 @@ export class AgentManager {
       }
     } catch (error) {
       this.logger.warn({ err: error, agentId: agent.id }, "Could not capture turn end worktree");
-      void discardPendingTurnStart(agent.cwd, agent.id);
+      await this.discardPendingTurnCapture(agent.cwd, agent.id);
+    }
+  }
+
+  private async discardPendingTurnCapture(cwd: string, agentId: string): Promise<void> {
+    try {
+      await discardPendingTurnStart(cwd, agentId);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Could not discard pending turn worktree capture");
     }
   }
 
