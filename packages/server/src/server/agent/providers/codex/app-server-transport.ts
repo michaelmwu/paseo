@@ -64,6 +64,16 @@ export class CodexAppServerRpcError extends Error {
   }
 }
 
+export class CodexAppServerRequestTimeoutError extends Error {
+  constructor(
+    readonly method: string,
+    readonly timeoutMs: number,
+  ) {
+    super(`Codex app-server request timed out for ${method}`);
+    this.name = "CodexAppServerRequestTimeoutError";
+  }
+}
+
 interface CodexAppServerExitDetails {
   exitCode: number | null;
   exitSignal: NodeJS.Signals | null;
@@ -314,7 +324,7 @@ export class CodexAppServerClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out for ${method}`));
+        reject(new CodexAppServerRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
       this.pending.set(id, { method, resolve, reject, timer });
     });
@@ -337,6 +347,14 @@ export class CodexAppServerClient {
   }
 
   async dispose(): Promise<void> {
+    await this.terminate("SIGTERM");
+  }
+
+  async forceDispose(): Promise<void> {
+    await this.terminate("SIGKILL");
+  }
+
+  private async terminate(firstSignal: "SIGTERM" | "SIGKILL"): Promise<void> {
     this.disposed = true;
     this.unexpectedTerminationHandler = null;
     this.stdoutLineReader.close();
@@ -347,6 +365,7 @@ export class CodexAppServerClient {
       // ignore
     }
     const result = await terminateWithTreeKill(this.child, {
+      gracefulSignal: firstSignal,
       gracefulTimeoutMs: APP_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
       forceTimeoutMs: APP_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
       onForceSignal: () => {

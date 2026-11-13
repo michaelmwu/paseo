@@ -72,6 +72,7 @@ const sessionMock = vi.hoisted(() => {
     wantsSourceEvent = (source: object) => !this.delivery.isModern(source);
     getSessionId = vi.fn(() => "mock-session-id");
     getPermissions = vi.fn(() => this.args.permissions as string[]);
+    permissionsForSource = vi.fn((_source?: object) => this.args.permissions as string[]);
     setPermissions = (permissions: string[]) => {
       this.args.permissions = permissions;
     };
@@ -1150,6 +1151,8 @@ describe("relay external socket reconnect behavior", () => {
     });
 
     expect(serverInfo.features?.stableProjectIdentity).toBe(true);
+    expect(serverInfo.features?.projectLocalFiles).toBe(true);
+    expect(serverInfo.features?.providerSessionContinue).toBe(true);
     expect(serverInfo.features?.canonicalSubmittedPrompts).toBe(true);
     expect(serverInfo.features?.providersSnapshotCwd).toBe(true);
     expect(serverInfo.features?.hopliteProvider).toBe(false);
