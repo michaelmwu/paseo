@@ -50,6 +50,18 @@ describe("worktree include planning", () => {
     ]);
   });
 
+  it("reports a missing bare source before checking its ignore policy", async () => {
+    writeFileSync(join(sourceRoot, ".worktreeinclude"), "missing.local\n");
+    const plan = await readWorktreeIncludePlan({
+      sourceRoot,
+      isSourceIgnored: async () => false,
+    });
+    expect(plan.materializations).toEqual([]);
+    expect(plan.skipped).toEqual([
+      expect.objectContaining({ raw: "missing.local", reason: "missing" }),
+    ]);
+  });
+
   it("copies bare entries and accepts explicit copy and symlink modes", async () => {
     writeFileSync(
       join(sourceRoot, ".worktreeinclude"),

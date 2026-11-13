@@ -318,6 +318,7 @@ test("workspace.create skips missing .worktreeinclude entries", async () => {
       path.join(repoDir, ".worktreeinclude"),
       ["# Optional local files", ".env", ".env.keys", ""].join("\n"),
     );
+    writeFileSync(path.join(repoDir, ".gitignore"), ".env\n.env.keys\n");
     writeFileSync(path.join(repoDir, ".env"), "present\n");
     await client.connect();
 

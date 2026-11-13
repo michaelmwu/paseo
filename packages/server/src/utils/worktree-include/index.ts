@@ -96,6 +96,12 @@ export async function readWorktreeIncludePlan(
 
     for (const relativePath of matchedPaths) {
       try {
+        const resolved = await resolveSourceMaterialization({
+          entry,
+          excludedSourceRoots,
+          relativePath,
+          sourceRoot,
+        });
         if (
           !/^(copy|symlink)\s/.test(entry.raw) &&
           options.isSourceIgnored &&
@@ -109,12 +115,6 @@ export async function readWorktreeIncludePlan(
           });
           continue;
         }
-        const resolved = await resolveSourceMaterialization({
-          entry,
-          excludedSourceRoots,
-          relativePath,
-          sourceRoot,
-        });
         materializations.push(resolved.materialization);
       } catch (error) {
         if (!isSkippableWorktreeIncludeError(error) && getErrorCode(error) === null) {
