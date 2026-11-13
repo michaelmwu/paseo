@@ -184,7 +184,7 @@ async function expectLaunchError(page: Page): Promise<void> {
 
 async function dismissLaunchErrorAfterMenuReopen(page: Page): Promise<void> {
   const runButton = page.getByTestId("workspace-scripts-button");
-  await runButton.click();
+  await page.getByTestId("workspace-scripts-menu-backdrop").click({ position: { x: 5, y: 5 } });
   await expect(page.getByTestId("workspace-scripts-menu")).toBeHidden({ timeout: 30_000 });
   await runButton.click();
   await expect(page.getByTestId("workspace-launches-error-dev")).toBeVisible({ timeout: 30_000 });

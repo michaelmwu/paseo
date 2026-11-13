@@ -130,7 +130,7 @@ test("an open Import Session row keeps its age current", async ({ page }) => {
   await flow.openWorkspace(scenario.project.workspaceId, { width: 390, height: 844 });
   await flow.openGlobally();
 
-  const row = page.getByTestId(`import-session-session-claude-${scenario.importSessionId}`);
+  const row = page.getByTestId(`import-session-row-claude-${scenario.importSessionId}`);
   await expect(row).toContainText("1m ago");
   await page.clock.fastForward("03:00");
   await expect(row).toContainText("4m ago");

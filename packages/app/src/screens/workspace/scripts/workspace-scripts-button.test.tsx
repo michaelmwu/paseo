@@ -76,22 +76,31 @@ vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
 });
 
-vi.mock("react-native-unistyles", () => ({
-  StyleSheet: {
-    create: (factory: unknown) => (typeof factory === "function" ? factory(theme) : factory),
-  },
-  withUnistyles:
-    (Component: React.ComponentType<Record<string, unknown>>) =>
-    ({
-      uniProps,
-      ...rest
-    }: {
-      uniProps?: (theme: unknown) => Record<string, unknown>;
-    } & Record<string, unknown>) => {
-      const themed = uniProps ? uniProps(theme) : {};
-      return React.createElement(Component, { ...rest, ...themed });
+vi.mock("react-native-unistyles", async () => {
+  const { lightTheme } = await import("@/styles/theme");
+  const resolvedTheme = {
+    ...lightTheme,
+    ...theme,
+    colors: { ...lightTheme.colors, ...theme.colors },
+  };
+  return {
+    StyleSheet: {
+      create: (factory: unknown) =>
+        typeof factory === "function" ? factory(resolvedTheme) : factory,
     },
-}));
+    withUnistyles:
+      (Component: React.ComponentType<Record<string, unknown>>) =>
+      ({
+        uniProps,
+        ...rest
+      }: {
+        uniProps?: (theme: unknown) => Record<string, unknown>;
+      } & Record<string, unknown>) => {
+        const themed = uniProps ? uniProps(resolvedTheme) : {};
+        return React.createElement(Component, { ...rest, ...themed });
+      },
+  };
+});
 
 vi.mock("@/constants/platform", () => ({
   isNative: false,
@@ -192,6 +201,7 @@ vi.mock("lucide-react-native", () => {
     });
   return {
     ChevronDown: createIcon("ChevronDown"),
+    ChevronRight: createIcon("ChevronRight"),
     Copy: createIcon("Copy"),
     Eye: createIcon("Eye"),
     ExternalLink: createIcon("ExternalLink"),

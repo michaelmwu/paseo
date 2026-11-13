@@ -37,6 +37,9 @@ retained buffers and worker compatibility. Additional local corrections prevent 
 prompts from reaching a provider after Git capture, keep pending capture from looking idle
 to waiters, omit absent optional snapshot fields, and retain the release's Codex constructor
 contract. Generated configuration schema and translated docs match the local features.
+Connected sends use the canonical submission and draft-recovery pipeline; offline sends and
+messages behind an existing queued delivery use the durable outbox. Worktree includes use the
+selected source checkout, preserve tracked target descendants, and keep bare entries Git-ignored-only.
 
 ## Companion plugins
 
@@ -72,6 +75,10 @@ checks all pins before changing plugin configuration. It does not create GitHub 
 - Linking, project structure and transcript attachment model: 45 pass.
 - Launch scripts, retained output and dismissal lifecycle: 77 pass.
 - Delayed-capture cancellation: two pass, before and after the cancellation-settlement timeout.
+- PR #10 maintenance: 95 worktree checks (two platform skips), nested-worktree integration,
+  19 MCP cases, four replacement/cancellation cases, three capture-adapter cases, nine script-menu
+  cases and the portable reserved-port regression pass. Five real-browser cases cover online
+  submission, rejected-draft recovery, launch errors, Import Session age and local-file import.
 - All seven companion plugin typechecks pass. Focused tests: action inbox 15, PR watcher nine,
   issue workflow 12, agent context ten, project environment seven, remote browser six.
 - Remote browser tests use real Chrome, including concurrent startup, popups and dialogs.

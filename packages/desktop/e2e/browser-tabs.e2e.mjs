@@ -956,7 +956,8 @@ async function runRegression({
     }`,
   });
   const interactiveAnnotateButton = originalDeck.getByRole("button", { name: "Annotate element" });
-  const annotationInput = originalDeck.getByRole("textbox", {
+  // Annotation controls are portaled outside the workspace deck.
+  const annotationInput = page.getByRole("textbox", {
     name: "Message to the agent about this element…",
   });
 
@@ -964,7 +965,7 @@ async function runRegression({
   await waitForSelectorInstallation(client, browserId);
   await clickGuestElement(page, client, browserId, "#selector-target");
   await annotationInput.waitFor({ state: "visible", timeout: 5_000 });
-  await originalDeck
+  await page
     .getByText("button · Selector target", { exact: true })
     .waitFor({ state: "visible", timeout: 5_000 });
   const enabledSelectionEffects = await callBrowserTool(client, "browser_evaluate", {
@@ -985,7 +986,7 @@ async function runRegression({
   await waitForSelectorInstallation(client, browserId);
   await clickGuestElement(page, client, browserId, "#disabled-selector-target");
   await annotationInput.waitFor({ state: "visible", timeout: 5_000 });
-  await originalDeck
+  await page
     .getByText("button · Disabled selector target", { exact: true })
     .waitFor({ state: "visible", timeout: 5_000 });
   const disabledSelectionEffects = await callBrowserTool(client, "browser_evaluate", {

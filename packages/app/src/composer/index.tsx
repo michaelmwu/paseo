@@ -1876,7 +1876,15 @@ function ComposerContentImpl({
           if (submitBehavior !== "preserve-and-lock") {
             beginSubmit(submitAttachments);
           }
-          if (inputMode !== "chat" || onSubmitMessage) {
+          const canSendOnline =
+            isConnected &&
+            client &&
+            !useOutboxStore
+              .getState()
+              .items.some((item) => item.serverId === serverId && item.agentId === agentId);
+          // Preserve the canonical online acknowledgement, rejection and draft-restore flow.
+          // The durable queue owns offline sends and ordered delivery behind an existing item.
+          if (inputMode !== "chat" || onSubmitMessage || canSendOnline) {
             await submitMessage(submitText, submitAttachments);
             return;
           }
