@@ -5230,11 +5230,11 @@ export class AgentManager {
 
     if (!options?.fromHistory) {
       if (isTurnTerminalEvent(event)) {
-        this.runs.settleTerminalRun(agent.id, eventTurnId);
         if (isForegroundEvent) {
           if (eventTurnId) await this.finishTurnWorktreeCapture(agent, eventTurnId);
           this.finalizeForegroundTurn(agent, eventTurnId);
         }
+        this.runs.settleTerminalRun(agent.id, eventTurnId);
       }
 
       if (flags.shouldDispatchEvent) {

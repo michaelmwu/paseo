@@ -716,6 +716,7 @@ async function startAndSteerThroughManager(
     activeTurnBehavior: behavior,
     runOptions: { clientMessageId: "replacement-client" },
   });
+  await manager.waitForAgentRunStart(agent.id);
   return { manager, agentId: agent.id, workdir };
 }
 
