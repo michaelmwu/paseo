@@ -144,6 +144,7 @@ async function createWorktreeCoreWithPriority(
 
   const { worktreeIncludeSummary, ...worktree } = await createWorktree({
     cwd: repoRoot,
+    includeSourceRoot: sourceCheckout,
     worktreeSlug: normalizedSlug,
     worktreePath: transformed.path,
     source: intent,

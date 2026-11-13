@@ -96,6 +96,19 @@ export async function readWorktreeIncludePlan(
 
     for (const relativePath of matchedPaths) {
       try {
+        if (
+          !/^(copy|symlink)\s/.test(entry.raw) &&
+          options.isSourceIgnored &&
+          !(await options.isSourceIgnored(relativePath))
+        ) {
+          skipped.push({
+            ...entry,
+            reason: "invalid",
+            message:
+              "Bare .worktreeinclude entries must be Git-ignored; use an explicit copy or symlink mode for other local paths.",
+          });
+          continue;
+        }
         const resolved = await resolveSourceMaterialization({
           entry,
           excludedSourceRoots,

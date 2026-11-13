@@ -473,7 +473,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       expect(metadata).toMatchObject({ baseRefName: "main" });
     });
 
-    it("removes fetched branches when include planning fails", async () => {
+    it("removes fetched branches when the worktree directory cannot be created", async () => {
       const remoteDir = join(tempDir, "remote.git");
       const remoteCloneDir = join(tempDir, "remote-clone");
       execFileSync("git", ["clone", "--bare", repoDir, remoteDir]);
@@ -493,7 +493,8 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         .trim();
       execFileSync("git", ["push", "origin", "contributor/cleanup"], { cwd: remoteCloneDir });
       execFileSync("git", [`--git-dir=${remoteDir}`, "update-ref", "refs/pull/44/head", prHead]);
-      mkdirSync(join(repoDir, ".worktreeinclude"));
+      mkdirSync(paseoHome, { recursive: true });
+      writeFileSync(join(paseoHome, "worktrees"), "not a directory");
 
       await expect(
         createLegacyWorktreeForTest({
@@ -508,7 +509,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
           runSetup: false,
           paseoHome,
         }),
-      ).rejects.toMatchObject({ code: "EISDIR" });
+      ).rejects.toMatchObject({ code: "ENOTDIR" });
 
       expect(() =>
         execFileSync("git", ["show-ref", "--verify", "--quiet", "refs/heads/contributor/cleanup"], {
@@ -525,7 +526,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
           runSetup: false,
           paseoHome,
         }),
-      ).rejects.toMatchObject({ code: "EISDIR" });
+      ).rejects.toMatchObject({ code: "ENOTDIR" });
 
       expect(() =>
         execFileSync("git", ["show-ref", "--verify", "--quiet", "refs/heads/contributor/cleanup"], {
@@ -1506,8 +1507,12 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         cwd: repoDir,
         worktreeSlug: "include-links",
         source: { kind: "branch-off", baseBranch: "main", branchName: "feature/include-links" },
-        runSetup: true,
         paseoHome,
+      });
+      await runWorktreeSetupCommands({
+        worktreePath: result.worktreePath,
+        branchName: result.branchName,
+        repoRootPath: repoDir,
       });
 
       expect(readFileSync(join(result.worktreePath, "setup.log"), "utf8")).toBe(
@@ -1558,7 +1563,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       const expectedWorktreePath = join(paseoHome, "worktrees", projectHash, "missing-include");
       writeFileSync(
         join(repoDir, ".worktreeinclude"),
-        [".env", ".env.local", ".sops.yaml", ""].join("\n"),
+        ["copy .env", "copy .env.local", "copy .sops.yaml", ""].join("\n"),
       );
       writeFileSync(join(repoDir, ".env"), "present\n");
 
@@ -1592,7 +1597,10 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         "protected-include",
       );
       mkdirSync(join(checkoutLocalPaseoHome, "worktrees", projectHash), { recursive: true });
-      writeFileSync(join(repoDir, ".worktreeinclude"), [".dev/**", ".env", ""].join("\n"));
+      writeFileSync(
+        join(repoDir, ".worktreeinclude"),
+        ["copy .dev/**", "copy .env", ""].join("\n"),
+      );
       writeFileSync(join(repoDir, ".env"), "present\n");
 
       const result = await createLegacyWorktreeForTest({
@@ -1610,7 +1618,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       expect(result.worktreePath).toBe(expectedWorktreePath);
       expect(readFileSync(join(result.worktreePath, ".env"), "utf8")).toBe("present\n");
       expect(result.worktreeIncludeSummary?.skipped).toEqual([
-        expect.objectContaining({ raw: ".dev/**", reason: "unsafe" }),
+        expect.objectContaining({ raw: "copy .dev/**", reason: "unsafe" }),
       ]);
       expect(
         execFileSync("git", ["worktree", "list", "--porcelain"], {

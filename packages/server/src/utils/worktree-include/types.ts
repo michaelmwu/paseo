@@ -52,6 +52,7 @@ export interface WorktreeIncludePlan {
 
 export interface ReadWorktreeIncludePlanOptions {
   excludedSourceRoots?: string[];
+  isSourceIgnored?: (relativePath: string) => Promise<boolean>;
   sourceRoot: string;
 }
 

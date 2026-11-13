@@ -36,6 +36,20 @@ describe("worktree include planning", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("keeps legacy bare entries ignored-only while allowing explicit local copies", async () => {
+    writeFileSync(join(sourceRoot, ".worktreeinclude"), ".env\nnotes.txt\ncopy local.txt\n");
+    for (const file of [".env", "notes.txt", "local.txt"])
+      writeFileSync(join(sourceRoot, file), file);
+    const plan = await readWorktreeIncludePlan({
+      sourceRoot,
+      isSourceIgnored: async (file) => file === ".env",
+    });
+    expect(plan.materializations.map((entry) => entry.relativePath)).toEqual([".env", "local.txt"]);
+    expect(plan.skipped).toEqual([
+      expect.objectContaining({ raw: "notes.txt", reason: "invalid" }),
+    ]);
+  });
+
   it("copies bare entries and accepts explicit copy and symlink modes", async () => {
     writeFileSync(
       join(sourceRoot, ".worktreeinclude"),

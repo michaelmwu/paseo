@@ -164,8 +164,10 @@ worktree.setup runs. Each path is relative to the source checkout.
     symlink node_modules
     copy .tool-state/**
 
-Each line is `[copy|symlink] <path>`; the mode is optional and defaults to `copy`. Blank lines
-and whole-line comments are ignored. A single star matches within a path segment and a double
+Each line is `[copy|symlink] <path>`; the mode is optional and defaults to `copy`. Bare entries
+use the legacy Git-ignored-only policy; explicit `copy` or `symlink` entries can select other
+local paths. Tracked target files and directories containing tracked files are never replaced.
+Blank lines and whole-line comments are ignored. A single star matches within a path segment and a double
 star matches recursively; a directory ending in /\*\* materializes that directory as one
 recursive entry. Absolute paths, parent-directory paths, and .git paths are rejected.
 

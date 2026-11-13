@@ -231,6 +231,7 @@ export type WorktreeSource =
 
 export interface CreateWorktreeOptions {
   cwd: string;
+  includeSourceRoot?: string;
   worktreeSlug: string;
   source: WorktreeSource;
   paseoHome?: string;
@@ -1433,6 +1434,7 @@ export async function resolveDefaultWorktreePath(
  */
 export const createWorktree = async ({
   cwd,
+  includeSourceRoot = cwd,
   source,
   worktreeSlug,
   paseoHome,
@@ -1448,8 +1450,18 @@ export const createWorktree = async ({
       : null;
   try {
     const worktreeIncludePlan = await readWorktreeIncludePlan({
-      sourceRoot: cwd,
+      sourceRoot: includeSourceRoot,
       excludedSourceRoots: [resolvePaseoWorktreesBaseRoot({ paseoHome, worktreesRoot })],
+      isSourceIgnored: async (relativePath) => {
+        const result = await runGitCommand(
+          ["check-ignore", "--no-index", "-q", "--", relativePath],
+          {
+            cwd: includeSourceRoot,
+            acceptExitCodes: [0, 1],
+          },
+        );
+        return result.exitCode === 0;
+      },
     });
     let worktreePath =
       explicitWorktreePath ??
