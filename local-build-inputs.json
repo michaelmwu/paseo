@@ -1,6 +1,7 @@
 {
   "release": { "tag": "v0.16.0-beta.2", "commit": "23bae61535542a45ade7196a7b3c152705f16de3" },
   "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
+  "rebuildBase": "4ab6b034aef4ecf67fe4b29acba806b24fadfe52",
   "features": [
     {
       "pr": 4052,
@@ -35,6 +36,13 @@
       "pr": 9332,
       "branch": "codex/offline-mobile-outbox",
       "commit": "5e9f158ca08b72538706ad7eade1773992e11b3d"
+    },
+    {
+      "pr": 9548,
+      "branch": "fix/message-receipt-reconciliation",
+      "commit": "4e60c84bcd155dfbd342fca8bc11b766602efe24",
+      "includes": [9580],
+      "prerequisiteCommit": "d30aa16bebb180740267178a97baae87a504ca4f"
     },
     {
       "pr": 9333,

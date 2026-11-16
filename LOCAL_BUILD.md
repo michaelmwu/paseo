@@ -10,6 +10,10 @@ published 0.16 tag checked November 13, 2026. Reconstructs the previous
 `daemon-patches-v0.16.0-beta.1` bundle on the release, then refreshes task-owned feature deltas.
 [local-build-inputs.json](local-build-inputs.json) records every reviewed branch and plugin pin.
 
+The November 16 rebuild retains the verified PR #10 stack through `4ab6b034a` and adds
+the current #9548 delta, not its superseded history-scanning implementation. Other feature
+and companion-plugin pins are unchanged.
+
 - Project linking #4052: linked branch through `a9d4a6828`, including hydration, repository
   identity, link merging, persistence and dismissal protections.
 - Transcript attachment contract #4627: `07e750d7c`. The standalone agent-context plugin
@@ -24,6 +28,10 @@ published 0.16 tag checked November 13, 2026. Reconstructs the previous
   configuration, restart lease recovery and live port policy. Unrelated main commits from
   its merge history are excluded.
 - Offline outbox #9332: `5e9f158ca`.
+- Receipt reconciliation #9548: `4e60c84bc`, with merged prerequisite #9580
+  (`d30aa16be`). Durable provider-acceptance records allow a pending receipt to complete
+  without resending. Legacy pending receipts without evidence remain unknown; a crash
+  between provider acknowledgement and journal persistence also remains unknown.
 - Per-turn changes #9333: `21c285b72`, plus the local cancellation repair below.
 - Browser network routing and named CLI forwarding #9334: `78742fdde`, including EOF
   cleanup and routing rollback. Its #6534 dependency is included once.
@@ -71,6 +79,9 @@ checks all pins before changing plugin configuration. It does not create GitHub 
 - Locked dependency install with lifecycle scripts disabled; dependency patches applied explicitly.
 - Server dependency stack, server and CLI build.
 - Full workspace typecheck, lint and formatting.
+- November 16 #9548 rebuild: 16 receipt/delivery cases, seven targeted acceptance-manager
+  cases and one real Hub pre-dispatch retry case pass. The compiled smoke passes with
+  all seven unchanged plugin pins, browser RPC, PTY output, launch recovery and retained output.
 - Refreshed worktreeinclude and forwarding/router regressions: 110 pass, one platform skip.
 - Linking, project structure and transcript attachment model: 45 pass.
 - Launch scripts, retained output and dismissal lifecycle: 77 pass.
@@ -108,8 +119,8 @@ gate for broad validation; do not merge the deployment record solely on the smok
 Use an independent SSH login or console, not a shell managed by Paseo:
 
 ```bash
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2/scripts/replace-local-patched-daemon.sh
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2/scripts/install-local-companion-plugins.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9548/scripts/replace-local-patched-daemon.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9548/scripts/install-local-companion-plugins.sh
 ```
 
 The first command restarts production and stops Paseo-managed agents. It checks the built

@@ -9238,8 +9238,9 @@ export class Session {
         queued = acceptAdmission;
       });
       let deliveryStatus: "queued" | undefined;
-      const send = async () => {
+      const send = async (beforeDispatch: () => Promise<void>) => {
         if (msg.sourceAgentId) {
+          await beforeDispatch();
           const receipt = this.agentMessages.enqueue({
             recipientId: agentId,
             messageId: msg.messageId,
@@ -9270,6 +9271,7 @@ export class Session {
           activeTurnBehavior: msg.activeTurnBehavior ?? "interrupt",
           sessionMode: msg.sessionMode,
           clearPendingPermissions: true,
+          beforeDispatch,
           logger: this.sessionLogger,
         });
         if (result.disposition === "turn_started") {
@@ -9280,10 +9282,11 @@ export class Session {
           );
         }
       };
-      const sent = msg.messageId
+      const messageId = msg.messageId;
+      const sent = messageId
         ? this.messageReceipts.send({
             agentId,
-            messageId: msg.messageId,
+            messageId,
             request: {
               prompt,
               sourceAgentId: msg.sourceAgentId,
@@ -9292,12 +9295,27 @@ export class Session {
               activeTurnBehavior:
                 msg.activeTurnBehavior ?? (msg.sourceAgentId ? "steer" : "interrupt"),
             },
-            prepare: async () => {
-              if (!msg.sourceAgentId) await this.prepareAgentMessage(agentId, msg.text);
+            isAccepted: async () => {
+              try {
+                return await this.agentManager.hasAcceptedSubmittedMessage({
+                  agentId,
+                  clientMessageId: messageId,
+                  prompt,
+                });
+              } catch (error) {
+                this.sessionLogger.warn(
+                  { err: error, agentId, messageId },
+                  "Could not reconcile message delivery",
+                );
+                return false;
+              }
             },
-            send,
+            send: async (beforeDispatch) => {
+              if (!msg.sourceAgentId) await this.prepareAgentMessage(agentId, msg.text);
+              await send(beforeDispatch);
+            },
           })
-        : send();
+        : send(async () => {});
       void sent.catch((error) => {
         if (deliveryStatus === "queued") {
           this.handleAgentRunError(agentId, error, "Failed to dispatch queued agent message");
