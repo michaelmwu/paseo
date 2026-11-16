@@ -1,7 +1,7 @@
 {
   "release": { "tag": "v0.16.0-beta.2", "commit": "23bae61535542a45ade7196a7b3c152705f16de3" },
   "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
-  "rebuildBase": "4ab6b034aef4ecf67fe4b29acba806b24fadfe52",
+  "rebuildBase": "6ae38e166588285f49c8938171e3f8cae3416fce",
   "features": [
     {
       "pr": 4052,
@@ -43,6 +43,13 @@
       "commit": "4e60c84bcd155dfbd342fca8bc11b766602efe24",
       "includes": [9580],
       "prerequisiteCommit": "d30aa16bebb180740267178a97baae87a504ca4f"
+    },
+    {
+      "pr": 9550,
+      "branch": "fix/codex-interrupt-retirement",
+      "commit": "42681dbbec5e218d9341d4fbe180a1b3736759e7",
+      "includes": [9549, 5633],
+      "prerequisiteCommit": "e6083d3ff7a4ab0fc5d8e64c5be7bfe09b4d493e"
     },
     {
       "pr": 9333,

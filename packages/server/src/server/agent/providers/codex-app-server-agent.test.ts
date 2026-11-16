@@ -5046,7 +5046,7 @@ describe("Codex app-server provider", () => {
     }
   });
 
-  test("requires a repeated cancel before stopping an app-server that never answers turn/interrupt", async () => {
+  test("retires an app-server on the first timed-out interrupt before resuming its saved thread", async () => {
     const stuckAppServer = createFakeCodexAppServer({
       "turn/interrupt": () => new Promise(() => undefined),
     });
@@ -5085,13 +5085,8 @@ describe("Codex app-server provider", () => {
 
       const firstInterrupt = session.interrupt();
       await stuckAppServer.waitForRequest("turn/interrupt");
-      await expect(firstInterrupt).rejects.toThrow("request timed out for turn/interrupt");
-      expect(exitSignal).toBeNull();
-      expect(terminalEvents).toEqual([]);
-
-      await expect(session.interrupt()).resolves.toBeUndefined();
-
-      expect(exitSignal).toBe("SIGKILL");
+      await expect(firstInterrupt).resolves.toBeUndefined();
+      expect(exitSignal).toBe("SIGTERM");
       expect(terminalEvents).toEqual([
         expect.objectContaining({
           type: "turn_canceled",
@@ -5300,7 +5295,7 @@ describe("Codex app-server provider", () => {
 
       threadStart.resolve({ thread: { id: "thread-1" } });
       await expect(interruptPromise).resolves.toBeUndefined();
-      await expect(resultPromise).rejects.toThrow("interrupted before reaching Codex");
+      await expect(resultPromise).resolves.toMatchObject({ canceled: true, timeline: [] });
       expect(appServer.requests()).not.toContainEqual(
         expect.objectContaining({ method: "turn/start" }),
       );

@@ -10,9 +10,10 @@ published 0.16 tag checked November 13, 2026. Reconstructs the previous
 `daemon-patches-v0.16.0-beta.1` bundle on the release, then refreshes task-owned feature deltas.
 [local-build-inputs.json](local-build-inputs.json) records every reviewed branch and plugin pin.
 
-The November 16 rebuild retains the verified PR #10 stack through `4ab6b034a` and adds
-the current #9548 delta, not its superseded history-scanning implementation. Other feature
-and companion-plugin pins are unchanged.
+The November 17 rebuild retains the PR #10 stack through `6ae38e166`, including the current
+#9548 acceptance journal, and adds #9550's current interruption recovery stack. Other feature
+and companion-plugin pins are unchanged. The newly available `v0.16.0` tag was not substituted
+for this existing beta.2 release base.
 
 - Project linking #4052: linked branch through `a9d4a6828`, including hydration, repository
   identity, link merging, persistence and dismissal protections.
@@ -32,6 +33,11 @@ and companion-plugin pins are unchanged.
   (`d30aa16be`). Durable provider-acceptance records allow a pending receipt to complete
   without resending. Legacy pending receipts without evidence remain unknown; a crash
   between provider acknowledgement and journal persistence also remains unknown.
+- Codex interruption recovery #9550: `42681dbbe`, including #9549's separate operation and
+  settlement budgets and #5633's startup-cancellation/sender-ownership fix, applied once.
+  A timed-out identified interrupt retires the old process before cancellation succeeds;
+  failed termination remains retryable. This supersedes the bundle's older second-Stop policy.
+  Startup cancellation releases its pending worktree capture before settlement admits a replacement.
 - Per-turn changes #9333: `21c285b72`, plus the local cancellation repair below.
 - Browser network routing and named CLI forwarding #9334: `78742fdde`, including EOF
   cleanup and routing rollback. Its #6534 dependency is included once.
@@ -82,6 +88,10 @@ checks all pins before changing plugin configuration. It does not create GitHub 
 - November 16 #9548 rebuild: 16 receipt/delivery cases, seven targeted acceptance-manager
   cases and one real Hub pre-dispatch retry case pass. The compiled smoke passes with
   all seven unchanged plugin pins, browser RPC, PTY output, launch recovery and retained output.
+- November 17 #9550 rebuild: 18 Codex process-exit cases, ten interrupt cases, four provider-runner
+  cases and targeted cold-start/sender/replacement regressions pass. The cold-start check uses
+  a real Git capture and acceptance journal: cancellation leaves neither a pending capture ref
+  nor acceptance evidence for the undelivered prompt. Existing receipt-recovery regressions pass.
 - Refreshed worktreeinclude and forwarding/router regressions: 110 pass, one platform skip.
 - Linking, project structure and transcript attachment model: 45 pass.
 - Launch scripts, retained output and dismissal lifecycle: 77 pass.
@@ -119,8 +129,8 @@ gate for broad validation; do not merge the deployment record solely on the smok
 Use an independent SSH login or console, not a shell managed by Paseo:
 
 ```bash
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9548/scripts/replace-local-patched-daemon.sh
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9548/scripts/install-local-companion-plugins.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9550/scripts/replace-local-patched-daemon.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.16.0-beta.2-pr9550/scripts/install-local-companion-plugins.sh
 ```
 
 The first command restarts production and stops Paseo-managed agents. It checks the built
