@@ -167,6 +167,7 @@ async function createRunStartScenario(startDelayMs: number | null): Promise<{
   const workdir = mkdtempSync(join(tmpdir(), "agent-run-start-budget-"));
   const client = new SlowStartAgentClient(startDelayMs);
   const agentManager = new AgentManager({
+    captureTurnWorktree: async () => null,
     clients: { codex: client },
     logger: createTestLogger(),
   });

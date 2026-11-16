@@ -1,8 +1,10 @@
+import { messageFingerprint } from "../message-receipts/fingerprint.js";
 import { prepareAgentMessage, type AgentPromptSource } from "./agent-messages/index.js";
 import type { Logger } from "pino";
 
 import type { AgentPromptInput, AgentRunOptions } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
+import { createForegroundRunRetry, type ForegroundRunStartOptions } from "./agent-run-state.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
@@ -40,6 +42,7 @@ async function steerOrReplaceActiveRun(
   agentId: string,
   prompt: AgentPromptInput,
   options: StartAgentRunOptions | undefined,
+  startOptions?: ForegroundRunStartOptions,
 ): Promise<
   | { disposition: "steered" }
   | {
@@ -54,7 +57,12 @@ async function steerOrReplaceActiveRun(
   const steerOptions = options.clearPendingPermissions
     ? { ...options.runOptions, clearPendingPermissions: true }
     : options.runOptions;
-  const result = await agentManager.steerOrReplaceActiveTurn(agentId, prompt, steerOptions);
+  const result = await agentManager.steerOrReplaceActiveTurn(
+    agentId,
+    prompt,
+    steerOptions,
+    startOptions,
+  );
   if (result.status === "steered") {
     return { disposition: "steered" };
   }
@@ -69,14 +77,15 @@ async function startOrReplaceRun(
   agentId: string,
   prompt: AgentPromptInput,
   options: StartAgentRunOptions | undefined,
+  startOptions?: ForegroundRunStartOptions,
 ): Promise<{
   iterator: AsyncGenerator<import("./agent-sdk-types.js").AgentStreamEvent>;
   replaced: boolean;
 }> {
   const replaced = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
   const iterator = replaced
-    ? await agentManager.replaceAgentRun(agentId, prompt, options?.runOptions)
-    : agentManager.streamAgent(agentId, prompt, options?.runOptions);
+    ? await agentManager.replaceAgentRun(agentId, prompt, options?.runOptions, startOptions)
+    : agentManager.streamAgent(agentId, prompt, options?.runOptions, startOptions);
   return { iterator, replaced };
 }
 
@@ -115,16 +124,24 @@ export async function startAgentRun(
     options?.onDispatch?.("out_of_band");
     return { disposition: "out_of_band" };
   }
+  const retry = createForegroundRunRetry();
   try {
     await agentManager.reloadStalePluginSession(agentId);
-    return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
+    return await startAgentRunInner(agentManager, agentId, prompt, logger, options, { retry });
   } catch (error) {
     if (!isStaleProviderSessionError(error)) throw error;
     logger.info({ agentId, err: error }, "Provider session went stale; reopening from persistence");
     // The live session belongs to a retired plugin runtime. Reload swaps in a
     // fresh session on the current runtime while preserving history and labels.
-    await agentManager.reloadAgentSession(agentId);
-    return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
+    try {
+      await agentManager.reloadAgentSession(agentId);
+      return await startAgentRunInner(agentManager, agentId, prompt, logger, options, {
+        retry: createForegroundRunRetry(),
+        retryOf: retry,
+      });
+    } finally {
+      retry.resolve(null);
+    }
   }
 }
 
@@ -133,17 +150,24 @@ async function startAgentRunInner(
   agentId: string,
   prompt: AgentPromptInput,
   logger: Logger,
-  options?: StartAgentRunOptions,
+  options: StartAgentRunOptions | undefined,
+  startOptions: ForegroundRunStartOptions,
 ): Promise<{ disposition: PromptDispatchDisposition }> {
   const snapshot = agentManager.getAgent(agentId);
-  const steered = await steerOrReplaceActiveRun(agentManager, agentId, prompt, options);
+  const steered = await steerOrReplaceActiveRun(
+    agentManager,
+    agentId,
+    prompt,
+    options,
+    startOptions,
+  );
   if (steered?.disposition === "steered") {
     options?.onDispatch?.("steered");
     return steered;
   }
   const { iterator, replaced } = steered
     ? { iterator: steered.iterator, replaced: true }
-    : await startOrReplaceRun(agentManager, agentId, prompt, options);
+    : await startOrReplaceRun(agentManager, agentId, prompt, options, startOptions);
   logger.trace(
     {
       agentId,
@@ -164,9 +188,15 @@ async function startAgentRunInner(
           { agentId, err: error },
           "Provider session went stale; reopening from persistence",
         );
-        await agentManager.reloadAgentSession(agentId);
-        const retry = await startOrReplaceRun(agentManager, agentId, prompt, options);
-        await drainAgentRunIterator(retry.iterator);
+        try {
+          await agentManager.reloadAgentSession(agentId);
+          const retry = await startOrReplaceRun(agentManager, agentId, prompt, options, {
+            retryOf: startOptions.retry,
+          });
+          await drainAgentRunIterator(retry.iterator);
+        } finally {
+          startOptions.retry?.resolve(null);
+        }
       }
       logger.trace(
         {
@@ -210,6 +240,8 @@ export async function unarchiveAgentState(
 }
 
 export interface SendPromptToAgentParams {
+  /** Awaited after the agent is loaded and its mode is set, before the prompt is handed to a run. */
+  beforeDispatch?: () => Promise<void>;
   onDispatch?: StartAgentRunOptions["onDispatch"];
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -316,7 +348,16 @@ export async function sendPromptToAgent(
     ...params,
     prompt: delivery.prompt,
     runOptions: delivery.messageId
-      ? { ...params.runOptions, clientMessageId: delivery.messageId }
+      ? {
+          ...params.runOptions,
+          clientMessageId: delivery.messageId,
+          submittedMessages: [
+            {
+              clientMessageId: delivery.messageId,
+              promptFingerprint: messageFingerprint(params.prompt),
+            },
+          ],
+        }
       : params.runOptions,
   });
 }
@@ -357,6 +398,7 @@ export async function sendPreparedPromptToAgent(
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
 
+  await params.beforeDispatch?.();
   return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
     replaceRunning: true,
     onDispatch: params.onDispatch,

@@ -37,6 +37,7 @@ function createFixture(): {
     cwd: "/tmp",
     workspaceId: "workspace-1",
     getSize: () => size,
+    getExitInfo: () => null,
     send: (message: { type: string; rows?: number; cols?: number }) => {
       if (message.type !== "resize" || message.rows === undefined || message.cols === undefined) {
         return;

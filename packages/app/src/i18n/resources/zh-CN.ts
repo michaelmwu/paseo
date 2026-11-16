@@ -2,6 +2,19 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "浏览器",
+    permissionDenied: "此连接无权使用主机网络。请联系主机所有者以允许网络访问。",
+    title: "浏览器标签页使用主机网络",
+    description: "此主机的标签页使用其网络和独立配置文件，Cookie 单独保存。",
+    updateHost: "请更新此主机，以便浏览器标签页使用其网络。",
+    settingFailed: "无法保存或加载此设置。请重试。",
+    viaHost: "经由 {{host}}",
+    proxyUnavailable: "浏览器无法连接到主机 {{host}} 的网络。请重新连接主机并刷新。",
+    destinationFailed: "无法通过主机 {{host}} 的网络访问此地址。请检查地址和主机连接。",
+    connectionClosed: "通过主机 {{host}} 网络的连接已关闭。请重新连接主机并刷新。",
+    notReady: "浏览器无法准备主机 {{host}} 的网络。请尝试重新打开标签页。",
+  },
   pluginCombobox: {
     searching: "搜索中…",
     empty: "无结果",
@@ -30,6 +43,54 @@ export const zhCN: TranslationResources = {
     position: "{{current}} / {{total}}",
     total: "{{total}} 个匹配项",
   },
+  localFiles: {
+    updateHost: "请更新此主机以导入本地文件。",
+    missingTitle: "缺少本地文件",
+    missingConfirm: "{{root}} 中缺少 {{files}}。是否不带这些文件继续？取消后可先导入文件。",
+    continueWithout: "不带文件继续",
+    unavailableForWorktree: "创建 worktree 前请检查这些本地文件：{{files}}",
+
+    title: "本地文件",
+    info: "将 Git 忽略的环境和配置文件导入此主机。此主机的代理和脚本可以读取它们。",
+    import: "导入文件…",
+    importTo: "导入到 {{host}}",
+    thisDevice: "此设备",
+    fromDevice: "从此设备…",
+    fromHost: "从其他主机…",
+    source: "来源：{{source}}",
+    sourcePath: "其他源文件（项目相对路径）",
+    inspect: "检查",
+    refresh: "刷新",
+    total: "已选：{{count}} · {{size}}",
+    include: "包含在今后的工作树中",
+    configPreview:
+      "将这些路径添加到 paseo.json。这会产生未提交的配置变更；已有工作树文件保持不变。",
+    complete: "文件已导入。已有工作树未更新。",
+    limits: "仅限单个文件。每个文件最多 10 MiB，每次导入最多 25 MiB、100 个文件。更新为手动操作。",
+    existing: "已存在 · 需选中才能替换",
+    replace: "替换 {{path}}",
+    status: {
+      ready: "已存在",
+      missing: "缺失",
+      not_ignored: "必须被 Git 忽略",
+      unsupported: "不支持的文件或路径",
+      too_large: "过大",
+      unavailable: "不可用",
+      imported: "已导入",
+    },
+    errors: {
+      load_failed: "无法检查文件。请检查主机连接并重试。",
+      selection_invalid: "请选择最多 100 个名称不同的文件。",
+      no_source_files: "未找到符合条件的文件。请输入被 Git 忽略的文件路径进行检查。",
+      changed: "文件在预览后已更改。请重新选择来源以检查最新副本。",
+      import_failed: "导入失败。请检查连接并重试。",
+      partial_failure: "部分文件失败。请重试选中的失败项，或重新选择来源以刷新。",
+      secure_connection_required: "请使用中继、TLS、本地或 SSH 连接传输敏感文件。",
+      config_failed:
+        "文件已导入，但包含设置未保存。请刷新以查看最新配置，然后保存包含设置，无需重新传输文件。",
+    },
+  },
+
   common: {
     bottomSheetBackdrop: "底部面板背景",
     back: "返回",
@@ -121,6 +182,14 @@ export const zhCN: TranslationResources = {
     },
   },
   composer: {
+    outbox: {
+      pending: "已保存在此设备上，主机重新连接后发送。",
+      sending: "发送中…",
+      needsReview: "请检查发送结果。可使用相同的消息 ID 重试或丢弃。",
+      retry: "重试发送",
+      discard: "丢弃已保存的消息",
+      attachmentMessage: "带附件的消息",
+    },
     placeholders: {
       desktop: "给 Agent 发消息，标记 @files，或使用 /commands 和 /skills",
       mobile: "发消息，@files，/commands",
@@ -258,6 +327,10 @@ export const zhCN: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      viewChanges: "本轮期间的更改",
+      backToConversation: "返回对话",
+    },
     states: {
       notFound: "未找到 Agent",
       failedToLoad: "加载 Agent 失败",
@@ -379,6 +452,8 @@ export const zhCN: TranslationResources = {
     },
     question: {
       responseFailed: "未能发送你的回复，请重试。",
+      sendToChat: "发送到聊天",
+      chatDeliveryWarning: "你的回答会显示在聊天中。请勿输入密码或其他秘密信息。",
       submit: "提交",
       next: "下一步",
       answerPlaceholder: "输入你的回答...",
@@ -460,6 +535,8 @@ export const zhCN: TranslationResources = {
     },
     row: {
       importing: "正在导入...",
+      continuing: "正在继续...",
+      continueHint: "将在此创建新的对话。源文件和更改会保留在源 worktree 中。",
     },
   },
   workspace: {
@@ -787,7 +864,7 @@ export const zhCN: TranslationResources = {
         view: "查看终端",
       },
       accessibility: {
-        trigger: "Workspace scripts",
+        trigger: "运行工作区命令",
         openService: "查看 {{scriptName}} 服务",
         viewTerminal: "查看 {{scriptName}} Terminal",
         runScript: "运行 {{scriptName}} script",
@@ -808,6 +885,34 @@ export const zhCN: TranslationResources = {
         stopFailed: "停止 {{scriptName}} 失败",
         running: "运行中",
         runningCount: "{{count}} 个运行中",
+      },
+    },
+    launches: {
+      title: "启动配置",
+      actions: {
+        switch: "切换",
+        start: "启动",
+        stop: "停止",
+        view: "输出",
+        openService: "查看服务",
+      },
+      accessibility: {
+        switchLaunch: "停止 {{activeLaunchName}} 并启动 {{launchName}}",
+        trigger: "工作区启动配置",
+        launch: "{{launchName}} 启动配置",
+        startLaunch: "启动 {{launchName}}",
+        stopLaunch: "停止 {{launchName}}",
+        viewTerminal: "查看 {{launchName}} 的终端",
+        openService: "查看 {{hostname}} 服务",
+      },
+      states: {
+        running: "运行中",
+        stopped: "已停止",
+        stopping: "正在停止…",
+        noListeners: "尚未检测到监听端口",
+        startFailed: "无法启动 {{launchName}}",
+        stopFailed: "无法停止 {{launchName}}",
+        portRange: "端口 {{base}}–{{end}}",
       },
     },
     tree: {
@@ -2262,6 +2367,38 @@ export const zhCN: TranslationResources = {
       hostLoadFailed: "无法从 Host {{hostName}} 加载 projects：{{message}}",
       editProject: "编辑 {{projectName}}",
     },
+    projectLinks: {
+      banner: {
+        matchesTitle: "可能的项目链接",
+        linkedTitle: "项目链接",
+        description: "查看存储在此设备上的、已由 Git 验证的项目链接。",
+        review: "查看链接",
+      },
+      sheet: {
+        title: "项目链接",
+        deviceOnly: "链接仅存储在此设备上，不会移动工作区、设置或文件。",
+        matchesTitle: "已验证的匹配项",
+        matchesDescription: "这些条目具有相同的 Git 远程仓库和项目子目录，但仍然是分开的。",
+        linkedTitle: "已链接的项目",
+        noMatchesTitle: "没有要查看的项目链接",
+        noMatchesDescription:
+          "请在每台主机上打开一个工作区，以便 Paseo 验证 Git 远程仓库和项目子目录。",
+        linkProjects: "链接 {{count}} 个项目",
+        remote: "Git 远程仓库",
+        subdirectory: "项目子目录",
+        path: "路径",
+        needsReviewTitle: "需要查看",
+        needsReviewDescription: "最新的 Git 信息已无法确认此链接，因此 Paseo 会保持这些项目分开。",
+        projectUnavailable: "此项目当前不可用。",
+        saving: "正在保存项目链接…",
+        saveFailed: "无法保存项目链接。请重试。",
+        unlink: "取消链接",
+      },
+      toasts: {
+        linked: "已在此设备上链接项目",
+        unlinked: "已移除项目链接",
+      },
+    },
     groupInfo: "关于 {{title}}",
     sections: {
       general: "通用",
@@ -2409,11 +2546,12 @@ export const zhCN: TranslationResources = {
       browserData: {
         title: "浏览器数据",
         siteData: "Cookie 和网站数据",
-        description: "浏览器标签页在 Paseo 中共享登录状态和网站数据。",
+        description:
+          "浏览器标签页在 Paseo 中共享登录状态和网站数据。开启“浏览器标签页使用主机网络”的主机会保留单独的配置文件，清除时会一并删除。",
         clear: "清除浏览器数据",
         clearing: "正在清除...",
         confirmTitle: "清除浏览器数据？",
-        confirmMessage: "网站帐号将退出登录，打开的浏览器标签页将重新加载。",
+        confirmMessage: "所有配置文件中的网站帐号将退出登录，打开的浏览器标签页将重新加载。",
         success: "浏览器数据已清除。",
         error: "无法清除浏览器数据。",
       },
@@ -3098,6 +3236,27 @@ export const zhCN: TranslationResources = {
           edit: "编辑",
           remove: "移除",
         },
+      },
+      launches: {
+        title: "启动配置",
+        info: "可从此项目的任何工作区启动的开发配置",
+        empty: "还没有启动配置。",
+        untitled: "未命名启动配置",
+        menuAccessibility: "打开启动配置菜单",
+        removeTitle: "移除启动配置？",
+        removeMessage: "移除 {{name}}？",
+        removeFallbackName: "此启动配置",
+        name: "名称",
+        command: "命令",
+        nameAccessibility: "启动配置名称",
+        commandAccessibility: "启动配置命令",
+        nameRequired: "必须填写名称",
+        nameDuplicate: "每个启动配置都必须有唯一的名称",
+        commandRequired: "必须填写命令",
+        newLaunch: "新建启动配置",
+        editLaunch: "编辑 {{name}}",
+        commandHint: "Paseo 会使用工作区端口块和 Compose 项目名称作为环境变量运行此命令。",
+        actions: { add: "添加启动配置", edit: "编辑", remove: "移除" },
       },
       metadata: {
         title: "元数据生成",

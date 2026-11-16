@@ -97,6 +97,37 @@ it("creates separate terminals for different cwds", async () => {
   expect(tmpTerminals[0].id).not.toBe(homeTerminals[0].id);
 });
 
+it("preserves a retained session when stopping its foreground process", async () => {
+  manager = createTerminalManager();
+  const cwd = mkdtempSync(join(tmpdir(), "terminal-manager-preserve-stop-"));
+  temporaryDirs.push(cwd);
+  const session = await manager.createTerminal({
+    cwd,
+    workspaceId: "ws-test",
+    command: process.execPath,
+    args: ["-e", "console.log('retained-stop-output'); setInterval(() => {}, 1000);"],
+    retainOnExit: true,
+  });
+  await expect
+    .poll(async () =>
+      (await manager.captureTerminal(session.id, { stripAnsi: true })).lines.join("\n"),
+    )
+    .toContain("retained-stop-output");
+
+  await manager.killTerminalAndWait(session.id, {
+    gracefulTimeoutMs: 1000,
+    forceTimeoutMs: 500,
+    preserveSession: true,
+  });
+
+  expect(manager.getTerminal(session.id)).toBe(session);
+  expect(
+    (await manager.captureTerminal(session.id, { stripAnsi: true })).lines.join("\n"),
+  ).toContain("retained-stop-output");
+  await manager.killTerminalAndWait(session.id);
+  expect(manager.getTerminal(session.id)).toBeUndefined();
+});
+
 it("lists subdirectory terminals when querying the workspace root", async () => {
   manager = createTerminalManager();
   const rootCwd = mkdtempSync(join(tmpdir(), "terminal-manager-subdir-root-"));

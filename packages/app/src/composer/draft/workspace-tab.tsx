@@ -8,7 +8,7 @@ import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { type ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
-import { ComposerImportPill } from "@/composer/draft/import-pill";
+import { DraftAttachmentActions } from "@/composer/draft/attachment-actions";
 import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
@@ -580,12 +580,14 @@ export function WorkspaceDraftComposer({
           </View>
         </View>
       ) : null}
-      {importPillPress && !isComposerFullscreen ? (
-        <View style={styles.importPillRow}>
-          <View style={styles.importPillContent}>
-            <ComposerImportPill onPress={importPillPress} />
-          </View>
-        </View>
+      {!isComposerFullscreen && !isSubmitting ? (
+        <DraftAttachmentActions
+          serverId={serverId}
+          client={client}
+          attachments={draftInput.attachments}
+          onChangeAttachments={setDraftAttachments}
+          onOpenImportSheet={importPillPress ?? undefined}
+        />
       ) : null}
       <Composer
         agentId={tabId}

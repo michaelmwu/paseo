@@ -1,11 +1,13 @@
+import { createTestAgentMessages } from "../test-utils/agent-messages.js";
+import { MessageAcceptanceStore } from "../message-receipts/acceptance.js";
 import { createIdleRuntimeCleanup } from "./idle-runtime-cleanup/index.js";
 import {
   prepareAgentMessage,
   formatAgentMessage,
   formatSystemNotificationPrompt,
 } from "./agent-messages/index.js";
-import { expect, test, vi, onTestFinished } from "vitest";
-import { spawn } from "node:child_process";
+import { describe, expect, test, vi, onTestFinished } from "vitest";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -20,13 +22,22 @@ import {
   type ManagedAgent,
 } from "./agent-manager.js";
 import { AgentStorage, parseStoredAgentRecord } from "./agent-storage.js";
+import { MessageReceipts } from "../message-receipts/index.js";
+import { AgentTurnStartCanceledError } from "./agent-sdk-types.js";
+import { createForegroundRunRetry } from "./agent-run-state.js";
+import { CodexAppServerAgentSession } from "./providers/codex-app-server-agent.js";
+import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-server.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import { buildStoredAgentPayload, toAgentPayload } from "./agent-projections.js";
 import type { ProviderOptions } from "@getpaseo/protocol/agent-types";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
-import { startAgentRun } from "./agent-prompt.js";
+import {
+  startAgentRun,
+  sendPromptToAgent,
+  waitForAgentRunStartWithTimeout,
+} from "./agent-prompt.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
@@ -53,6 +64,7 @@ import type {
   AgentSlashCommand,
   AgentStreamEvent,
   AgentTimelineItem,
+  ForkImportableProviderSessionInput,
   ImportProviderSessionInput,
   ImportProviderSessionContext,
   ResolveAgentDefaultModeInput,
@@ -68,6 +80,92 @@ import { V2Harness } from "./providers/opencode/test-utils/v2-harness.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+test("settles a rejected turn after its repository disappears without leaking cleanup errors", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "agent-capture-removed-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe" });
+  git("init");
+  git(
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "base",
+  );
+  const session = new TestAgentSession({ provider: "codex", cwd });
+  vi.spyOn(session, "startTurn").mockImplementation(async () => {
+    rmSync(join(cwd, ".git"), { recursive: true, force: true });
+    throw new Error("provider start failed");
+  });
+  const client = new (class extends TestAgentClient {
+    override async createSession() {
+      return session;
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd }, undefined, {
+      workspaceId: undefined,
+    });
+    await expect(manager.streamAgent(agent.id, "start").next()).rejects.toThrow(
+      "provider start failed",
+    );
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    await manager.closeAgent(agent.id);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test.each([0, 2_100])(
+  "does not submit a canceled turn after worktree capture (cancel delay: %i)",
+  async (delayMs) => {
+    const entered = deferred<void>();
+    const captured = deferred<string | null>();
+    const cwd = mkdtempSync(join(tmpdir(), "agent-capture-cancel-"));
+    const session = new TestAgentSession({ provider: "codex", cwd });
+    const start = vi.spyOn(session, "startTurn");
+    const client = new (class extends TestAgentClient {
+      override async createSession() {
+        return session;
+      }
+    })();
+    const manager = new AgentManager({
+      clients: { codex: client },
+      logger,
+      captureTurnWorktree: async () => {
+        entered.resolve();
+        return captured.promise;
+      },
+    });
+    const agent = await manager.createAgent({ provider: "codex", cwd }, undefined, {
+      workspaceId: undefined,
+    });
+    const stream = manager.streamAgent(agent.id, "must not execute");
+    const rejected = expect(stream.next()).rejects.toThrow("canceled before its turn started");
+    await entered.promise;
+    vi.useFakeTimers();
+    try {
+      const cancellation = manager.cancelAgentRun(agent.id);
+      await vi.advanceTimersByTimeAsync(delayMs);
+      captured.resolve(null);
+      await rejected;
+      await expect(cancellation).resolves.toEqual({ status: "settled" });
+      expect(start).not.toHaveBeenCalled();
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    } finally {
+      vi.useRealTimers();
+      captured.resolve(null);
+      await manager.closeAgent(agent.id);
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  },
+);
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -670,6 +768,7 @@ async function startAndSteerThroughManager(
     activeTurnBehavior: behavior,
     runOptions: { clientMessageId: "replacement-client" },
   });
+  await manager.waitForAgentRunStart(agent.id);
   return { manager, agentId: agent.id, workdir };
 }
 
@@ -5067,6 +5166,81 @@ test("importProviderSession imports the selected session without listing and pub
   expect((await storage.get(imported.id))?.title).toBe("Trace provider imports");
 });
 
+test("continueProviderSession registers a fork in the destination workspace without importing the source", async () => {
+  const sourceCwd = mkdtempSync(join(tmpdir(), "agent-manager-continue-source-"));
+  const destinationCwd = mkdtempSync(join(tmpdir(), "agent-manager-continue-destination-"));
+  const storage = new AgentStorage(join(destinationCwd, "agents"), logger);
+  const forkedSession = new TestAgentSession({ provider: "codex", cwd: destinationCwd });
+
+  class ForkClient extends TestAgentClient {
+    forkInput: ForkImportableProviderSessionInput | null = null;
+    importCalls = 0;
+
+    override async importSession() {
+      this.importCalls += 1;
+      throw new Error("Continue here must not import the source native handle");
+    }
+
+    override async forkImportableSession(
+      input: ForkImportableProviderSessionInput,
+      _context: ImportProviderSessionContext,
+    ) {
+      this.forkInput = input;
+      return {
+        session: forkedSession,
+        config: { provider: "codex" as const, cwd: destinationCwd },
+        persistence: {
+          provider: "codex" as const,
+          sessionId: "forked-thread",
+          nativeHandle: "forked-thread",
+          metadata: {
+            provider: "codex",
+            cwd: destinationCwd,
+            continuationSource: {
+              providerHandleId: input.providerHandleId,
+              cwd: input.sourceCwd,
+            },
+          },
+        },
+        timeline: [{ item: { type: "assistant_message" as const, text: "Forked context" } }],
+      };
+    }
+  }
+
+  const client = new ForkClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+  });
+
+  const continued = await manager.continueProviderSession({
+    provider: "codex",
+    providerHandleId: "desktop-thread",
+    sourceCwd,
+    destinationCwd,
+    workspaceId: "ws-destination",
+  });
+
+  expect(client.importCalls).toBe(0);
+  expect(client.forkInput).toEqual({
+    providerHandleId: "desktop-thread",
+    sourceCwd,
+    destinationCwd,
+  });
+  expect(continued.cwd).toBe(destinationCwd);
+  expect(continued.workspaceId).toBe("ws-destination");
+  expect(continued.persistence).toMatchObject({
+    sessionId: "forked-thread",
+    metadata: {
+      continuationSource: { providerHandleId: "desktop-thread", cwd: sourceCwd },
+    },
+  });
+  expect(manager.getTimeline(continued.id)).toEqual([
+    { type: "assistant_message", text: "Forked context" },
+  ]);
+});
+
 test("reloadAgentSession passes daemon launch env through the provider launch context", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reload-context-"));
   const storagePath = join(workdir, "agents");
@@ -9426,6 +9600,426 @@ test("streamAgent clears pending run when startTurn fails before a turn id exist
   );
 });
 
+test("canceling a pending Codex start settles as canceled without accepting its prompt", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-codex-cold-cancel-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: workdir, encoding: "utf8", stdio: "pipe" }).trim();
+  git("init");
+  git(
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "base",
+  );
+  const threadLoaded = deferred<{ data: string[] }>();
+  const appServer = createFakeCodexAppServer({ "thread/loaded/list": () => threadLoaded.promise });
+  class ColdStartClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new CodexAppServerAgentSession(config, null, logger, async () => appServer.child);
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ColdStartClient() },
+    registry: new AgentStorage(join(workdir, "agents"), logger),
+    messageAcceptanceStore: new MessageAcceptanceStore(join(workdir, "acceptance")),
+    logger,
+  });
+  const events: AgentStreamEvent[] = [];
+  manager.subscribe((event) => {
+    if (event.type === "agent_stream") events.push(event.event);
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    // Drain the stream: a fresh Codex agent has no session handle for runAgent before its first turn.
+    const firstRun = drainAsyncGenerator(
+      manager.streamAgent(agent.id, "Canceled prompt", { clientMessageId: "canceled-prompt" }),
+    );
+    void firstRun.catch(() => undefined);
+    await appServer.waitForRequest("thread/loaded/list");
+    const senderRejection = expect(manager.waitForAgentRunStart(agent.id)).rejects.toThrow(
+      "its prompt was not delivered",
+    );
+    const cancel = manager.cancelAgentRun(agent.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    threadLoaded.resolve({ data: ["thread-1"] });
+    await expect(cancel).resolves.toEqual({ status: "settled" });
+    await expect(firstRun).resolves.toBeUndefined();
+    await senderRejection;
+    expect(manager.getAgent(agent.id)).toMatchObject({ lifecycle: "idle", lastError: undefined });
+    expect(manager.hasInFlightRun(agent.id)).toBe(false);
+    expect(git("for-each-ref", "--format=%(refname)", "refs/paseo/turn-changes")).toBe("");
+    await expect(
+      manager.hasAcceptedSubmittedMessage({
+        agentId: agent.id,
+        clientMessageId: "canceled-prompt",
+        prompt: "Canceled prompt",
+      }),
+    ).resolves.toBe(false);
+    expect(events.map((event) => event.type)).toEqual(["turn_canceled"]);
+    expect(manager.getTimeline(agent.id)).toEqual([]);
+    expect(appServer.requests().some((request) => request.method === "turn/start")).toBe(false);
+
+    const nextRun = manager.runAgent(agent.id, "Next prompt", { clientMessageId: "next-prompt" });
+    await appServer.waitForRequest("turn/start");
+    appServer.startsTurn({ threadId: "thread-1", turnId: "next-turn" });
+    appServer.completeTurn();
+    await expect(nextRun).resolves.toMatchObject({ canceled: false });
+    appServer.assertNoErrors();
+  } finally {
+    threadLoaded.resolve({ data: ["thread-1"] });
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("stopping a Codex replacement of a stalled start clears replacement activity", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-codex-replacement-cancel-"));
+  const firstLoaded = deferred<{ data: string[] }>();
+  const firstInterruptRequested = deferred<void>();
+  const replacementLoaded = deferred<{ data: string[] }>();
+  const replacementEntered = deferred<void>();
+  let loadCount = 0;
+  const appServer = createFakeCodexAppServer({
+    "thread/loaded/list": () => {
+      loadCount += 1;
+      if (loadCount === 1) return firstLoaded.promise;
+      replacementEntered.resolve();
+      return replacementLoaded.promise;
+    },
+  });
+  class ColdStartSession extends CodexAppServerAgentSession {
+    override async interrupt(): Promise<void> {
+      const interruption = super.interrupt();
+      firstInterruptRequested.resolve();
+      await interruption;
+    }
+  }
+  class ColdStartClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new ColdStartSession(config, null, logger, async () => appServer.child);
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ColdStartClient() },
+    registry: new AgentStorage(join(workdir, "agents"), logger),
+    logger,
+    rescueTimeouts: { interruptSessionMs: 10 },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const firstRun = drainAsyncGenerator(manager.streamAgent(agent.id, "Original prompt"));
+    await appServer.waitForRequest("thread/loaded/list");
+    const replacement = manager.replaceAgentRun(agent.id, "Replacement prompt");
+    await firstInterruptRequested.promise;
+    firstLoaded.resolve({ data: ["thread-1"] });
+    const replacementStream = await replacement;
+    await expect(firstRun).resolves.toBeUndefined();
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("running");
+    const replacementEvent = replacementStream.next();
+    await replacementEntered.promise;
+    const cancel = manager.cancelAgentRun(agent.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    replacementLoaded.resolve({ data: ["thread-1"] });
+    await expect(cancel).resolves.toEqual({ status: "settled" });
+    await expect(replacementEvent).resolves.toMatchObject({
+      value: { type: "turn_canceled" },
+    });
+    await expect(replacementStream.next()).resolves.toMatchObject({ done: true });
+    expect(manager.hasInFlightRun(agent.id)).toBe(false);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    expect(appServer.requests().some((request) => request.method === "turn/start")).toBe(false);
+    appServer.assertNoErrors();
+  } finally {
+    firstLoaded.resolve({ data: ["thread-1"] });
+    replacementLoaded.resolve({ data: ["thread-1"] });
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("a stalled Codex start canceled by its replacement rejects its sender's start wait", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-codex-replaced-start-wait-"));
+  const firstLoaded = deferred<{ data: string[] }>();
+  const firstInterruptRequested = deferred<void>();
+  let loadCount = 0;
+  const appServer = createFakeCodexAppServer({
+    "thread/loaded/list": () => {
+      loadCount += 1;
+      return loadCount === 1 ? firstLoaded.promise : { data: ["thread-1"] };
+    },
+  });
+  class ColdStartSession extends CodexAppServerAgentSession {
+    override async interrupt(): Promise<void> {
+      const interruption = super.interrupt();
+      firstInterruptRequested.resolve();
+      await interruption;
+    }
+  }
+  class ColdStartClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new ColdStartSession(config, null, logger, async () => appServer.child);
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ColdStartClient() },
+    registry: new AgentStorage(join(workdir, "agents"), logger),
+    logger,
+    rescueTimeouts: { interruptSessionMs: 10 },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const firstRun = drainAsyncGenerator(manager.streamAgent(agent.id, "First prompt"));
+    await appServer.waitForRequest("thread/loaded/list");
+    const firstWait = manager.waitForAgentRunStart(agent.id);
+    void firstWait.catch(() => undefined);
+    const replacement = manager.replaceAgentRun(agent.id, "Second prompt");
+    await firstInterruptRequested.promise;
+    firstLoaded.resolve({ data: ["thread-1"] });
+    const replacementStream = await replacement;
+    await expect(firstRun).resolves.toBeUndefined();
+
+    const secondWait = manager.waitForAgentRunStart(agent.id);
+    const replacementDrained = drainAsyncGenerator(replacementStream);
+    await appServer.waitForRequest("turn/start");
+    appServer.startsTurn({ threadId: "thread-1", turnId: "second-turn" });
+    await expect(secondWait).resolves.toBeUndefined();
+    await expect(firstWait).rejects.toThrow("its prompt was not delivered");
+    appServer.completeTurn();
+    await replacementDrained;
+    expect(appServer.requests().filter((request) => request.method === "turn/start")).toEqual([
+      expect.objectContaining({
+        params: expect.objectContaining({
+          input: [expect.objectContaining({ text: "Second prompt" })],
+        }),
+      }),
+    ]);
+    appServer.assertNoErrors();
+  } finally {
+    firstLoaded.resolve({ data: ["thread-1"] });
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("a sender's start wait follows its prompt across a stale-session retry", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-start-wait-"));
+  const releaseStart = deferred<void>();
+  class StaleStartSession extends TestAgentSession {
+    override async startTurn(): Promise<{ turnId: string }> {
+      await releaseStart.promise;
+      throw new StaleProviderSessionError("stale-bridge");
+    }
+  }
+  class StaleStartClient extends ResumeTrackingTestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new StaleStartSession(config);
+    }
+  }
+  const client = new StaleStartClient();
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  const startedTurns: AgentStreamEvent[] = [];
+  manager.subscribe((event) => {
+    if (event.type === "agent_stream" && event.event.type === "turn_started") {
+      startedTurns.push(event.event);
+    }
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await startAgentRun(manager, agent.id, "Retry this prompt", logger, {
+      runOptions: { clientMessageId: "stale-start-wait" },
+    });
+    const senderWait = manager.waitForAgentRunStart(agent.id);
+    void senderWait.catch(() => undefined);
+    releaseStart.resolve();
+    await client.waitForRetryStart();
+    await manager.waitForAgentEvent(agent.id);
+    expect(client.resumeOverrides).toHaveLength(1);
+    expect(startedTurns).toHaveLength(1);
+    expect(manager.getTimeline(agent.id).filter((item) => item.type === "user_message")).toEqual([
+      expect.objectContaining({ text: "Retry this prompt", clientMessageId: "stale-start-wait" }),
+    ]);
+    await expect(senderWait).resolves.toBeUndefined();
+  } finally {
+    releaseStart.resolve();
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each(["reload", "retry", "stale retry"])(
+  "a sender's start wait rejects when its stale-session %s fails",
+  async (failure) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-start-failure-"));
+    const releaseStart = deferred<void>();
+    class StaleStartSession extends TestAgentSession {
+      override async startTurn(): Promise<{ turnId: string }> {
+        await releaseStart.promise;
+        throw new StaleProviderSessionError("stale-bridge");
+      }
+    }
+    class FailedRetrySession extends TestAgentSession {
+      override async startTurn(): Promise<{ turnId: string }> {
+        if (failure === "stale retry") throw new StaleProviderSessionError("retry-bridge");
+        throw new Error("retry failed");
+      }
+    }
+    class FailedRetryClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new StaleStartSession(config);
+      }
+      override async resumeSession(): Promise<AgentSession> {
+        if (failure === "reload") throw new Error("reload failed");
+        return new FailedRetrySession({ provider: "codex", cwd: workdir });
+      }
+    }
+    const manager = new AgentManager({ clients: { codex: new FailedRetryClient() }, logger });
+    try {
+      const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        workspaceId: undefined,
+      });
+      await startAgentRun(manager, agent.id, "Retry this prompt", logger);
+      const senderWait = manager.waitForAgentRunStart(agent.id);
+      const rejection = expect(senderWait).rejects.toThrow(
+        failure === "retry" ? "retry failed" : "is stale after its plugin reloaded",
+      );
+      releaseStart.resolve();
+      await rejection;
+    } finally {
+      releaseStart.resolve();
+      manager.prepareForShutdown();
+      await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+      await manager.flushForShutdown();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a sender's start wait rejects when Stop cancels its pending stale-session retry", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-retry-stop-"));
+  const releaseStart = deferred<void>();
+  const retryEntered = deferred<void>();
+  const retryCanceled = deferred<void>();
+  class StaleStartSession extends TestAgentSession {
+    override async startTurn(): Promise<{ turnId: string }> {
+      await releaseStart.promise;
+      throw new StaleProviderSessionError("stale-bridge");
+    }
+  }
+  class CanceledRetrySession extends TestAgentSession {
+    override async startTurn(): Promise<{ turnId: string }> {
+      retryEntered.resolve();
+      await retryCanceled.promise;
+      throw new AgentTurnStartCanceledError();
+    }
+    override async interrupt(): Promise<void> {
+      retryCanceled.resolve();
+    }
+  }
+  class RetryClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new StaleStartSession(config);
+    }
+    override async resumeSession(): Promise<AgentSession> {
+      return new CanceledRetrySession({ provider: "codex", cwd: workdir });
+    }
+  }
+  const manager = new AgentManager({ clients: { codex: new RetryClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await startAgentRun(manager, agent.id, "Retry this prompt", logger);
+    const senderWait = manager.waitForAgentRunStart(agent.id);
+    const rejection = expect(senderWait).rejects.toThrow("its prompt was not delivered");
+    releaseStart.resolve();
+    await retryEntered.promise;
+    await expect(manager.cancelAgentRun(agent.id)).resolves.toEqual({ status: "settled" });
+    await rejection;
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    expect(manager.getTimeline(agent.id)).toEqual([]);
+  } finally {
+    releaseStart.resolve();
+    retryCanceled.resolve();
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("a sender's start wait never adopts an unlinked run after a stale start", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-unlinked-start-"));
+  const releaseStart = deferred<void>();
+  const staleError = new StaleProviderSessionError("stale-bridge");
+  const retry = createForegroundRunRetry();
+  class StaleStartSession extends TestAgentSession {
+    override async startTurn(): Promise<{ turnId: string }> {
+      await releaseStart.promise;
+      throw staleError;
+    }
+  }
+  class RetryClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new StaleStartSession(config);
+    }
+  }
+  const manager = new AgentManager({ clients: { codex: new RetryClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const firstRun = drainAsyncGenerator(
+      manager.streamAgent(agent.id, "First prompt", undefined, { retry }),
+    );
+    const firstFailure = expect(firstRun).rejects.toBe(staleError);
+    const senderWait = manager.waitForAgentRunStart(agent.id);
+    const rejection = expect(senderWait).rejects.toThrow(staleError.message);
+    releaseStart.resolve();
+    await firstFailure;
+    try {
+      await manager.reloadAgentSession(agent.id);
+      const otherRun = drainAsyncGenerator(manager.streamAgent(agent.id, "Another sender"));
+      await expect(manager.waitForAgentRunStart(agent.id)).resolves.toBeUndefined();
+      await otherRun;
+    } finally {
+      retry.resolve(null);
+    }
+    await rejection;
+    expect(manager.getTimeline(agent.id).filter((item) => item.type === "user_message")).toEqual(
+      [],
+    );
+  } finally {
+    releaseStart.resolve();
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("acknowledged cancellation settles a pending run before it has a turn id", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-cancel-pending-start-"));
   const startEntered = deferred<void>();
@@ -12122,6 +12716,7 @@ test("authoritative timeline records a daemon-handled submitted prompt before it
   const manager = new AgentManager({
     clients: { codex: new DaemonHandledPromptClient() },
     registry: storage,
+    messageAcceptanceStore: new MessageAcceptanceStore(join(workdir, "acceptance")),
     logger,
     idFactory: () => "00000000-0000-4000-8000-000000000403",
   });
@@ -12140,6 +12735,13 @@ test("authoritative timeline records a daemon-handled submitted prompt before it
       runOptions: { clientMessageId: "msg-client-daemon-handled" },
     });
     await commandCompleted.promise;
+    await expect(
+      manager.hasAcceptedSubmittedMessage({
+        agentId: snapshot.id,
+        clientMessageId: "msg-client-daemon-handled",
+        prompt: "/handled",
+      }),
+    ).resolves.toBe(true);
 
     expect(
       events.flatMap((event) =>
@@ -14313,6 +14915,295 @@ test("workspace archive preserves a loaded history agent stamp and stamps cascad
     expect((await storage.get(parent.id))?.updatedAt).toBe("2026-11-09T01:00:00.000Z");
   } finally {
     await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+for (const origin of [
+  { name: "human", source: undefined, prompt: "hello" },
+  {
+    name: "quoted human",
+    source: undefined,
+    prompt: formatAgentMessage({
+      id: "foreign-envelope",
+      source: { kind: "agent-message", agentId: "untrusted" },
+      text: "quoted text",
+    }),
+  },
+  { name: "agent", source: { kind: "agent-message" as const, agentId: "sender" }, prompt: "hello" },
+]) {
+  test(`pending ${origin.name} receipts recover after restart without rereading provider history`, async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "message-receipt-restart-"));
+    const registryPath = join(workdir, "agents");
+    const receiptPath = join(workdir, "receipts");
+    const acceptancePath = join(workdir, "acceptance");
+    const history: AgentStreamEvent[] = [];
+    let historyReads = 0;
+    let sends = 0;
+    class ReceiptSession extends TestAgentSession {
+      private historyConsumed = false;
+      override async startTurn(prompt: AgentPromptInput): Promise<{ turnId: string }> {
+        if (typeof prompt !== "string") throw new Error("Expected a text prompt");
+        sends++;
+        // Codex history does not retain the human client's message ID.
+        history.push({
+          type: "timeline",
+          provider: "codex",
+          item: {
+            type: "user_message",
+            text: prompt,
+            messageId: "provider-native-message",
+          },
+        });
+        return super.startTurn();
+      }
+      override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+        historyReads++;
+        // Claude-style one-shot replay must not be used as an evidence lookup.
+        if (this.historyConsumed) return;
+        this.historyConsumed = true;
+        yield* history;
+      }
+    }
+    class ReceiptClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig) {
+        return new ReceiptSession(config);
+      }
+      override async resumeSession(
+        _handle: AgentPersistenceHandle,
+        config?: Partial<AgentSessionConfig>,
+      ) {
+        return new ReceiptSession({ ...config, provider: "codex", cwd: workdir });
+      }
+    }
+    const storageBeforeRestart = new AgentStorage(registryPath, logger);
+    const first = new AgentManager({
+      clients: { codex: new ReceiptClient() },
+      registry: storageBeforeRestart,
+      messageAcceptanceStore: new MessageAcceptanceStore(acceptancePath),
+      logger,
+    });
+    let restored: AgentManager | null = null;
+    let agentId: string | null = null;
+    try {
+      const agent = await first.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        workspaceId: undefined,
+      });
+      agentId = agent.id;
+      const messageId = "message-to-reconcile";
+      const identity = { agentId: agent.id, clientMessageId: messageId, prompt: origin.prompt };
+      const request = { agentId: agent.id, messageId, request: { prompt: origin.prompt } };
+      await expect(
+        new MessageReceipts(receiptPath).send({
+          ...request,
+          send: async (beforeDispatch) => {
+            await beforeDispatch();
+            await sendPromptToAgent({
+              agentManager: first,
+              agentStorage: storageBeforeRestart,
+              agentId: agent.id,
+              prompt: origin.prompt,
+              source: origin.source,
+              messageId,
+              logger,
+            });
+            await waitForAgentRunStartWithTimeout(first, agent.id);
+            throw new Error("acknowledgement lost");
+          },
+        }),
+      ).rejects.toThrow("acknowledgement lost");
+      await first.closeAgent(agent.id);
+      await first.flush();
+      const storage = new AgentStorage(registryPath, logger);
+      restored = new AgentManager({
+        clients: { codex: new ReceiptClient() },
+        registry: storage,
+        messageAcceptanceStore: new MessageAcceptanceStore(acceptancePath),
+        logger,
+      });
+      expect(restored.getLoadedTimelineHead(agent.id)).toBeNull();
+      const readsBeforeLookup = historyReads;
+      await expect(restored.hasAcceptedSubmittedMessage(identity)).resolves.toBe(true);
+      expect(historyReads).toBe(readsBeforeLookup);
+      expect(restored.getLoadedTimelineHead(agent.id)).toBeNull();
+      await ensureAgentLoaded(agent.id, { agentManager: restored, agentStorage: storage, logger });
+      const readsAfterReplay = historyReads;
+      const manager = restored;
+      await new MessageReceipts(receiptPath).send({
+        ...request,
+        isAccepted: () => manager.hasAcceptedSubmittedMessage(identity),
+        send: async () => {
+          throw new Error("An accepted prompt must never be resent");
+        },
+      });
+      expect(historyReads).toBe(readsAfterReplay);
+      expect(sends).toBe(1);
+      await expect(
+        manager.hasAcceptedSubmittedMessage({ ...identity, prompt: "different prompt" }),
+      ).resolves.toBe(false);
+      await manager.appendTimelineItem(agent.id, {
+        type: "user_message",
+        text: "not accepted",
+        clientMessageId: "rejected",
+        messageId: "rejected",
+      });
+      await manager.flush();
+      await expect(
+        manager.hasAcceptedSubmittedMessage({
+          ...identity,
+          clientMessageId: "rejected",
+          prompt: "not accepted",
+        }),
+      ).resolves.toBe(false);
+    } finally {
+      if (restored && agentId) await restored.closeAgent(agentId);
+      await first.flush();
+      await restored?.flush();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("an acceptance journal failure does not fail or lose a fast provider turn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "message-acceptance-failure-"));
+  const acceptancePath = join(workdir, "blocked-directory");
+  writeFileSync(acceptancePath, "not a directory");
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    messageAcceptanceStore: new MessageAcceptanceStore(acceptancePath),
+    logger,
+  });
+  let agentId: string | null = null;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    await manager.runAgent(agent.id, "fast turn", {
+      clientMessageId: "accepted-but-not-journaled",
+    });
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    rmSync(acceptancePath);
+    await expect(
+      manager.hasAcceptedSubmittedMessage({
+        agentId: agent.id,
+        clientMessageId: "accepted-but-not-journaled",
+        prompt: "fast turn",
+      }),
+    ).resolves.toBe(false);
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    await manager.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("batched agent messages retain each original payload's acceptance identity", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "message-acceptance-batch-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const acceptancePath = join(workdir, "acceptance");
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    messageAcceptanceStore: new MessageAcceptanceStore(acceptancePath),
+    logger,
+  });
+  const delivery = createTestAgentMessages({
+    agentManager: manager,
+    agentStorage: storage,
+    logger,
+  });
+  let agentId: string | null = null;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    const first = delivery.enqueue({
+      recipientId: agent.id,
+      messageId: "batch-first",
+      prompt: "first payload",
+      source: { kind: "agent-message", agentId: "sender-one" },
+    });
+    const second = delivery.enqueue({
+      recipientId: agent.id,
+      messageId: "batch-second",
+      prompt: "second payload",
+      source: { kind: "agent-message", agentId: "sender-two" },
+    });
+    await delivery.close();
+    await Promise.all([first.dispatched, second.dispatched]);
+    // Reconstructed evidence has no dependency on either the batch envelope or live rows.
+    const evidence = new MessageAcceptanceStore(acceptancePath);
+    await expect(
+      evidence.has({ agentId: agent.id, clientMessageId: "batch-first", prompt: "first payload" }),
+    ).resolves.toBe(true);
+    await expect(
+      evidence.has({
+        agentId: agent.id,
+        clientMessageId: "batch-second",
+        prompt: "second payload",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      evidence.has({ agentId: agent.id, clientMessageId: "batch-first", prompt: "second payload" }),
+    ).resolves.toBe(false);
+  } finally {
+    await delivery.close();
+    if (agentId) await manager.closeAgent(agentId);
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("steering journals only acknowledged submissions", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "message-acceptance-steer-"));
+  const session = new SteeringTestSession({ provider: "codex", cwd: workdir });
+  class ReceiptSteerClient extends TestAgentClient {
+    override async createSession(): Promise<AgentSession> {
+      return session;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ReceiptSteerClient() },
+    messageAcceptanceStore: new MessageAcceptanceStore(join(workdir, "acceptance")),
+    logger,
+  });
+  let agentId: string | null = null;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    const run = manager.streamAgent(agent.id, "initial");
+    await run.next();
+    session.steerResult = "unavailable";
+    await expect(
+      manager.steerAgentRun(agent.id, "rejected steer", { clientMessageId: "not-accepted" }),
+    ).resolves.toEqual({ status: "unavailable" });
+    await expect(
+      manager.hasAcceptedSubmittedMessage({
+        agentId: agent.id,
+        clientMessageId: "not-accepted",
+        prompt: "rejected steer",
+      }),
+    ).resolves.toBe(false);
+    session.steerResult = "accepted";
+    await expect(
+      manager.steerAgentRun(agent.id, "accepted steer", { clientMessageId: "accepted" }),
+    ).resolves.toMatchObject({ status: "accepted" });
+    await expect(
+      manager.hasAcceptedSubmittedMessage({
+        agentId: agent.id,
+        clientMessageId: "accepted",
+        prompt: "accepted steer",
+      }),
+    ).resolves.toBe(true);
+    await manager.cancelAgentRun(agent.id);
+    await run.return();
+  } finally {
+    if (agentId) await manager.closeAgent(agentId);
+    await manager.flush();
     rmSync(workdir, { recursive: true, force: true });
   }
 });
