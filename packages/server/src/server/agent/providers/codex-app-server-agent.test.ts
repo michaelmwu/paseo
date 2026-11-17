@@ -8400,6 +8400,7 @@ describe("Codex importable sessions", () => {
       appServerProcess: createFakeCodexAppServerProcess(createCodexAppServerChildProcess),
     });
     const resumedFork = {
+      describePersistence: () => null,
       async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
         yield* [];
       },

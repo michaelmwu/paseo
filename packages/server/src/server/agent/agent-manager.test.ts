@@ -1697,10 +1697,12 @@ test("Stop can cancel startup while an interrupting send waits behind it", async
 });
 
 test("an interrupting send replaces a turn whose start never finishes", async () => {
+  const stalledStartEntered = deferred<void>();
   class StalledStartSession extends SteeringTestSession {
     override async startTurn(prompt: AgentPromptInput): Promise<{ turnId: string }> {
       if (prompt === "stalled start") {
         this.startPrompts.push(prompt);
+        stalledStartEntered.resolve();
         return new Promise(() => {});
       }
       return super.startTurn(prompt);
@@ -1723,10 +1725,12 @@ test("an interrupting send replaces a turn whose start never finishes", async ()
   });
   try {
     await startAgentRun(manager, agent.id, "stalled start", logger, { replaceRunning: true });
-    await startAgentRun(manager, agent.id, "recovery", logger, {
+    await stalledStartEntered.promise;
+    const recovery = await startAgentRun(manager, agent.id, "recovery", logger, {
       replaceRunning: true,
       activeTurnBehavior: "interrupt",
     });
+    await dispatchStarted(recovery);
     expect(session.startPrompts).toEqual(["stalled start", "recovery"]);
   } finally {
     await manager.closeAgent(agent.id);
@@ -15822,14 +15826,15 @@ test.each([
         tick = callback;
         return () => {};
       },
-      dispatch: async (request) =>
-        (
-          await startAgentRun(manager, agent.id, request.prompt, logger, {
-            idleOnly: request.idleOnly,
-            replaceRunning: true,
-            activeTurnBehavior: request.activeTurnBehavior,
-          })
-        ).disposition,
+      dispatch: async (request) => {
+        const result = await startAgentRun(manager, agent.id, request.prompt, logger, {
+          idleOnly: request.idleOnly,
+          replaceRunning: true,
+          activeTurnBehavior: request.activeTurnBehavior,
+        });
+        if (result.disposition === "turn_started") await result.started;
+        return result.disposition;
+      },
       onError: (error) => {
         throw error;
       },
@@ -15843,8 +15848,7 @@ test.each([
       });
     });
     try {
-      await startAgentRun(manager, agent.id, "original", logger);
-      await manager.waitForAgentRunStart(agent.id);
+      await dispatchStarted(await startAgentRun(manager, agent.id, "original", logger));
       const receipt = delivery.enqueue({
         recipientId: agent.id,
         prompt: "queued",
@@ -15905,12 +15909,13 @@ test.each(["turn_completed", "turn_failed", "turn_canceled"] as const)(
         tick = callback;
         return () => {};
       },
-      dispatch: async (request) =>
-        (
-          await startAgentRun(manager, agent.id, request.prompt, logger, {
-            idleOnly: request.idleOnly,
-          })
-        ).disposition,
+      dispatch: async (request) => {
+        const result = await startAgentRun(manager, agent.id, request.prompt, logger, {
+          idleOnly: request.idleOnly,
+        });
+        if (result.disposition === "turn_started") await result.started;
+        return result.disposition;
+      },
       onError: (error) => {
         throw error;
       },
@@ -15918,7 +15923,7 @@ test.each(["turn_completed", "turn_failed", "turn_canceled"] as const)(
     try {
       session.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
       await vi.waitFor(() => expect(manager.hasInFlightRun(agent.id)).toBe(true));
-      delivery.enqueue({
+      const receipt = delivery.enqueue({
         recipientId: agent.id,
         prompt: "queued report",
         source: { kind: "agent-message", agentId: "child" },
@@ -15931,7 +15936,7 @@ test.each(["turn_completed", "turn_failed", "turn_canceled"] as const)(
         turnId: "autonomous",
         ...(ending === "turn_failed" ? { error: "test failure" } : {}),
       } as AgentStreamEvent);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await receipt.dispatched;
       expect(settledStates).toEqual([false]);
       expect(session.startCount).toBe(1);
     } finally {

@@ -57,7 +57,8 @@ discussions are created by either helper.
 ## Verification
 
 The locked dependency install disables lifecycle scripts initially; inspected dependency
-patches and the native PTY rebuild run explicitly. Logs for this rebuild live under `.dev/`.
+patches and the native PTY rebuild run explicitly. The November 17 build results follow;
+logs live under that artifact's `.dev/` directory.
 
 - Server dependency stack, server and CLI build; full workspace typecheck, lint and formatting.
 - Launches, scripts, receipts, queued delivery, Codex process retirement and turn changes:
@@ -91,8 +92,21 @@ suite or claim it green. An additional MCP/OMP regression, `delivers /follow-up 
 OMP child while ordinary messages in the same quiet window wait`, times out at 30 seconds
 after the no-capture fixture and native-start ordering adjustments; retries were stopped.
 The same MCP selection passes 27 cases before that failure. Its exact pending operation is
-not established, so OMP follow-up delivery is not verified by this build. CI remains the
-broad-validation gate; this is not an all-green test-suite result.
+not established, so OMP follow-up delivery was not verified by the original build.
+
+PR #11 maintenance on November 18 fixes cross-window attachment retention by reading current
+persisted outbox references before collection, without taking over another window's sends.
+It also settles tracked runs before publishing readiness and preserves newer update timestamps
+when a failed send restores an earlier archive. Regression fixtures now wait for sender-specific
+startup, model adoption before worker draining, and assert explicit provider-start rejection.
+Two OpenCode plugin-instruction tests accidentally carried from unselected #9781 are excluded
+alongside that absent implementation; release lifecycle and requested acknowledgement coverage
+remain. Core feature and companion pins are unchanged.
+
+Maintenance validation runs only focused suites through `paseo-resources job`, with full
+typecheck, lint and formatting before commit. Prior repeatedly failing OMP cases are deferred
+rather than rerun locally. CI remains the broad-validation gate; no deployment or merge should
+be inferred from passing focused tests.
 
 ## Deploy
 

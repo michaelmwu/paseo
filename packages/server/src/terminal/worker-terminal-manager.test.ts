@@ -1546,22 +1546,6 @@ it("retains hidden block owners after exit and failed stop until a retry confirm
   const worker = new FakeTerminalWorker();
   const ownedManager = createWorkerTerminalManager({ worker, requestTimeoutMs: 1000 });
   const drained: number[] = [];
-  const pool = createTerminalWorkerPool({
-    current: null,
-    draining: [
-      {
-        manager: ownedManager,
-        workerPid: 1,
-        exited: new Promise<void>(() => {}),
-        ready: async () => true,
-        stopRecovery() {},
-      },
-    ],
-    incompatible: null,
-    closeAll: () => ownedManager.closeTerminals(),
-    onDrained: (member) => drained.push(member.workerPid),
-  });
-  manager = pool;
   worker.emitWorkerMessage({
     type: "terminalCreated",
     terminal: {
@@ -1579,6 +1563,24 @@ it("retains hidden block owners after exit and failed stop until a retry confirm
   });
   const session = ownedManager.getTerminal("closing-script");
   if (!session) throw new Error("Expected script terminal");
+  // Adoption supplies terminal ownership before a worker joins the draining pool.
+  // An empty draining worker is correctly retired immediately.
+  const pool = createTerminalWorkerPool({
+    current: null,
+    draining: [
+      {
+        manager: ownedManager,
+        workerPid: 1,
+        exited: new Promise<void>(() => {}),
+        ready: async () => true,
+        stopRecovery() {},
+      },
+    ],
+    incompatible: null,
+    closeAll: () => ownedManager.closeTerminals(),
+    onDrained: (member) => drained.push(member.workerPid),
+  });
+  manager = pool;
   const closingAtRemoval: string[][] = [];
   ownedManager.subscribeTerminalsChanged(() => {
     closingAtRemoval.push((ownedManager.getClosingTerminals?.() ?? []).map((entry) => entry.id));

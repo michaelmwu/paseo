@@ -5398,12 +5398,15 @@ export class AgentManager {
       if (isTurnTerminalEvent(event)) {
         if (isForegroundEvent) {
           if (eventTurnId) await this.finishTurnWorktreeCapture(agent, eventTurnId);
+          this.runs.settleTerminalRun(agent.id, eventTurnId);
           this.finalizeForegroundTurn(agent, eventTurnId);
-        } else if (terminalDisposition !== "stale" && !agent.activeForegroundTurnId) {
-          // Publish autonomous readiness only after the tracked run has settled.
-          this.emitState(agent);
+        } else {
+          this.runs.settleTerminalRun(agent.id, eventTurnId);
+          if (terminalDisposition !== "stale" && !agent.activeForegroundTurnId) {
+            // Publish autonomous readiness only after the tracked run has settled.
+            this.emitState(agent);
+          }
         }
-        this.runs.settleTerminalRun(agent.id, eventTurnId);
       }
 
       if (flags.shouldDispatchEvent) {
