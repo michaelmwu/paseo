@@ -72,6 +72,7 @@ export interface FakeCodexAppServer {
   disconnect(): void;
   nextResponse(): Promise<string>;
   startsTurn(params: { threadId: string; turnId?: string }): void;
+  asksAsyncQuestion(params: { threadId: string; turnId: string }): void;
   startsCompaction(params: { threadId: string; itemId: string }): void;
   updatesPlan(params: { threadId: string; steps: string[] }): void;
   completeTurn(params?: {
@@ -171,7 +172,7 @@ export function createFakeCodexAppServer(
   const child = createCodexAppServerChildProcess();
   const recordedRollbacks: JsonObject[] = [];
   const responseHandlers: Record<string, FakeCodexAppServerHandler> = {
-    initialize: () => ({}),
+    initialize: () => ({ userAgent: "codex/0.150.0" }),
     "collaborationMode/list": () => ({ data: [] }),
     "config/read": () => ({ config: {} }),
     getUserSavedConfig: () => ({ config: {} }),
@@ -189,6 +190,7 @@ export function createFakeCodexAppServer(
     "thread/loaded/list": () => ({ data: [] }),
     "thread/backgroundTerminals/list": () => ({ data: [], nextCursor: null }),
     "thread/resume": () => ({}),
+    "thread/inject_items": () => ({}),
     "turn/start": () => ({}),
     "thread/fork": (params) => ({
       thread: {
@@ -413,6 +415,17 @@ export function createFakeCodexAppServer(
           },
         })}\n`,
       );
+    },
+    asksAsyncQuestion(params) {
+      writeNotification("item/completed", {
+        ...params,
+        item: {
+          type: "agentMessage",
+          id: "async-question",
+          delivery: "async",
+          questions: [{ title: "Which option?", options: ["One", "Two"] }],
+        },
+      });
     },
     startsCompaction(params) {
       writeNotification("item/started", {

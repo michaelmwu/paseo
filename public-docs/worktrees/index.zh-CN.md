@@ -120,6 +120,52 @@ paseo workspace create \
 
 命令以 worktree 作为 `cwd` 运行。使用 `$PASEO_SOURCE_CHECKOUT_PATH` 访问原始检出中的文件（未跟踪的配置、本地缓存等）。
 
+## 本地文件 {#local-files}
+
+在目标主机打开 **项目设置 → 本地文件**，选择导入文件。可以从设备选择文件，也可以从另一台已连接主机的已注册项目复制。跨主机复制时，两台主机都必须在线；设备不需要本地 daemon 或项目副本。
+
+导入前检查文件名、大小和目标状态。小型新文件默认选中；已有文件默认不选，选中才授权覆盖。预览不会显示文件内容。检查后源或目标发生变化时，需要重新选择并确认。
+
+目标文件必须被 Git 忽略且未被跟踪；主机上的源文件也必须满足此条件。只支持普通文件，不支持目录、glob 或符号链接。每个文件最多 10 MiB，每次最多 25 MiB 和 100 个文件。设备导入仅读取你选择的文件，不扫描凭据。
+
+启用 **包含在未来的 worktree 中**，把选定路径写入 `paseo.json`：
+
+```json
+{
+  "worktree": {
+    "localFiles": [".env.local", "local/dev.pem"]
+  }
+}
+```
+
+路径相对于选定项目根目录，也适用于仓库子目录中的项目。配置修改保持未提交；提交路径列表可与其他主机共享意图，但每台主机仍需要自己的文件内容。创建 worktree 时先复制文件，再运行 setup。已有 worktree 文件不会被覆盖，也不会在后台同步。
+
+处理外部变更请求时，文件复制与其他工作区自动化一样，必须等待你明确运行 setup。缺少文件时，可以先导入，或明确选择不带这些文件继续；依赖文件的 setup 仍可能失败。导入成功但配置保存失败时，刷新后重新保存包含配置，无需重传文件。
+
+文件内容传输要求加密中继、TLS 或 loopback 连接。文件以明文保存在目标主机，Agent 和脚本可以读取。POSIX 上新文件仅允许所有者访问；Windows 使用目标文件系统的访问控制。
+
+## .worktreeinclude {#worktreeinclude}
+
+项目根目录的 `.worktreeinclude` 在 `worktree.setup` 前准备源副本中的本地文件。路径相对于源副本：
+
+```text
+# 默认复制。
+.env.local
+.cache/**
+
+# 显式选择模式。
+symlink node_modules
+copy .tool-state/**
+```
+
+每行为 `[copy|symlink] <path>`，默认模式是 `copy`。省略模式时沿用只复制被 Git 忽略的文件的规则；显式 `copy` 或 `symlink` 可以选择其他本地路径。不会替换目标分支跟踪的文件或包含被跟踪文件的目录。忽略空行和整行注释。`*` 匹配路径段内的字符，`**` 递归匹配；以 `/**` 结尾的目录作为一个递归条目处理。拒绝绝对路径、父目录路径和 `.git` 路径。
+
+复制生成独立快照，再次执行时会替换已有副本。符号链接直接指向源文件或目录，两端的修改共享数据；Paseo 不用链接覆盖已有文件、目录或其他链接。源必须是普通文件或目录。顶层源链接只允许指向源副本内的真实目标；目录快照拒绝嵌套符号链接。
+
+优先使用目标分支忽略的路径。链接目录的忽略规则不要带尾部斜杠，例如 `node_modules` 而不是 `node_modules/`，因为 Git 把链接本身视为文件。未忽略的内容会出现在 `git status` 中。
+
+Windows 上本地目录使用 junction；文件和网络目录链接需要系统支持符号链接。无法创建显式链接时不会静默改为复制，请启用 Developer Mode 或改用 `copy`。归档只移除 worktree 中的链接，不删除源目标。源移动或删除后链接会失效，Paseo 不自动修复。
+
 ## 脚本与服务 {#scripts-and-services}
 
 `scripts` 是可以在 worktree 中按需运行的具名命令。把其中一个标记为 _service_，Paseo 就会把它作为长时间运行的进程进行监管，为它分配端口，并通过 daemon 的反向代理把 HTTP 流量路由给它。
@@ -193,6 +239,34 @@ paseo workspace create \
 ```
 
 Paseo 在工作区目录中运行该可执行文件，并传入四个参数：服务名、工作区 ID、分支名和 worktree 路径。由于脚本是直接执行的、不经过 shell，`portScript` 必须指向一个真正的可执行文件（例如编译后的二进制文件，或带有正确 shebang 行如 `#!/bin/bash` 的脚本），而不是内联的 shell 命令或管道。如果需要 shell 求值或管道，请把它们包装在一个小的可执行脚本中。没有分支时会传入空字符串。相同的值也可以通过 `PASEO_SCRIPTNAME`、`PASEO_WORKSPACE_ID`、`PASEO_BRANCH_NAME` 和 `PASEO_WORKTREE_PATH` 获取。它必须向 stdout 输出一个有效的 TCP 端口。同一块中 `portScript` 优先于 `range`。Paseo 信任外部分配器，因此返回的端口可能已经被占用，例如被 Paseo 将要连接的某个服务占用。
+
+### 工作区启动命令 {#workspace-launches}
+
+用 `launches` 声明已有的开发入口，例如同时启动 Docker Compose 和主机进程的脚本。普通脚本用于按需任务，service 用于只有一个 HTTP 端口的长驻服务，launch 用于带终端输出和多个发现端口的现有编排命令。三者都出现在同一个运行菜单中。
+
+```json
+{
+  "worktree": {
+    "servicePorts": { "range": "20000-50000", "blockSize": 100 }
+  },
+  "launches": {
+    "dev": { "command": "./bin/dev" },
+    "full": { "command": "./bin/dev --full" }
+  }
+}
+```
+
+命令在选定工作区目录中运行。service 获得单个 `$PASEO_PORT`，launch 获得共享的 `$PASEO_PORT_BASE` 到 `$PASEO_PORT_END` 端口块。项目 launch 优先于同名 worktree 脚本；Paseo 隐藏并停止旧脚本后再启动 launch。
+
+每个工作区同时只运行一个 launch。切换会先停止当前命令，再启动选定命令。输出操作打开终端标签页，可查看 stdout、stderr 和最近退出码；运行中不代表所有子服务都已就绪。Paseo 探测租用端口块内的 TCP 监听器，把 HTTP 服务接入现有反向代理，原始 TCP 端口保持本地直连。
+
+命令自行管理 Docker、依赖和重启策略。Unix 使用 Bash，Windows 使用 PowerShell，与交互 shell 无关。命令退出即视为 launch 结束；请让入口保持前台运行，单独执行 `docker compose up -d` 会立即退出。
+
+```bash
+paseo launch ls
+paseo launch start dev
+paseo launch stop dev
+```
 
 ### 反向代理 {#reverse-proxy}
 

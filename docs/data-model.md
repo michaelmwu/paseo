@@ -16,6 +16,14 @@ names, and workspace foreign keys. Attached workspaces are independently refresh
 from their own cwd, so an explicit project root never implies a workspace checkout. Empty projects
 are observed too.
 
+The app can also keep **device-local project links** in its own storage. A link is a presentation
+override over two or more host-local `(serverId, projectId)` entries, admitted only when the latest
+workspace projection proves the same normalized Git remote and selected subdirectory. It never
+writes a daemon record or changes `projectId`, `projectKey`, workspace membership, settings, or
+files. A missing or changed cached Git fact disables the link's grouping instead of falling back to
+automatic grouping; users can review or remove it. This deliberately does not make links available
+to other clients or devices.
+
 The workspace registry model defines placement once: initial directory/worktree construction,
 mutable reconciliation fields, and the persisted-to-wire checkout projection. Its update policy
 preserves `displayName` and `baseBranch`. `WorkspaceProvisioningService` owns the corresponding
@@ -54,6 +62,8 @@ $PASEO_HOME/
 ├── paseo.pid                            # Daemon PID lock file
 ├── local-credential                     # Per-run local client credential (mode 0600)
 ├── daemon.log                           # Default log file (path configurable)
+├── message-acceptance/                  # Durable acknowledgement evidence; see docs/hub.md
+│   └── {fingerprint}.json               # Agent/message IDs and a prompt hash; no prompt text
 ├── agents/
 │   └── {sanitized-cwd}/
 │       └── {agentId}.json               # One file per agent
@@ -590,14 +600,24 @@ bookkeeping may scan opaque row sizes during a deferred write, never during host
 before a requested cache row can paint. The row store is not encrypted. A cached timeline can contain
 source code, prompts, and tool output; encrypted-at-rest storage is a separate security decision.
 
+### Saved hosts
+
+**AsyncStorage key:** `@paseo:daemon-registry`, an array of host profiles.
+
+Every app build on a device shares this key, including an older build after a downgrade and a newer
+one that saves a connection kind this build doesn't know. The key holds every saved host and its
+password, so never remove it. Read each host and connection on its own, skip the ones this build
+can't read, and write them back on every save. A value that isn't a JSON array is copied to
+`@paseo:daemon-registry:unreadable` before the next save overwrites it.
+
 ### Draft Store
 
-**AsyncStorage key:** `paseo-drafts` (version 2)
+**AsyncStorage key:** `paseo-drafts` (version 5)
 
 ```typescript
 {
   drafts: Record<draftKey, {
-    input: { text: string, images: AttachmentMetadata[] },
+    input: { text: string, attachments: UserComposerAttachment[] },
     lifecycle: "active" | "abandoned" | "sent",
     updatedAt: number,     // epoch ms
     version: number        // optimistic concurrency
@@ -605,6 +625,18 @@ source code, prompts, and tool output; encrypted-at-rest storage is a separate s
   createModalDraft: DraftRecord | null
 }
 ```
+
+### Message outbox
+
+**AsyncStorage key:** `paseo-message-outbox-v1`
+
+Chat sends are saved on the device before transport submission. Each item keeps its
+original message ID, host and agent IDs, text, local image metadata, and normalized agent
+attachments. Connected sends start immediately; pending items send after reconnect. The app persists `sending` before transport
+submission; after an app restart, that state becomes `needs_review` and requires an explicit retry.
+The host's delivery receipt uses the same message ID to prevent a retry from starting a second
+turn. An ambiguous host receipt stays visible for review. Attachment garbage collection retains
+images referenced by outbox items.
 
 ### Attachment Store (Web)
 
