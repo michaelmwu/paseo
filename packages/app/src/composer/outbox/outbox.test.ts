@@ -218,6 +218,89 @@ describe("offline message outbox", () => {
     expect(store.useOutboxStore.getState().items).toEqual([]);
   });
 
+  it("blocks automatic delivery behind a failed message until its retry succeeds", async () => {
+    const store = await import("./store");
+    const delivery = await import("./delivery");
+    for (const [index, id] of ["first", "second", "other-agent"].entries()) {
+      await store.enqueueOutboxItem({
+        ...store.createPendingOutboxItem({
+          id,
+          serverId: "host-1",
+          agentId: id === "other-agent" ? "agent-2" : "agent-1",
+          text: id,
+          images: [],
+          attachments: [],
+        }),
+        createdAt: index,
+      });
+    }
+    const sendAgentMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Acknowledgement lost"))
+      .mockResolvedValue({});
+    const client = idleClient(sendAgentMessage);
+
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "first",
+      "other-agent",
+    ]);
+    expect(store.useOutboxStore.getState().items.map(({ id, status }) => ({ id, status }))).toEqual(
+      [
+        { id: "first", status: "needs_review" },
+        { id: "second", status: "pending" },
+      ],
+    );
+
+    await delivery.deliverOutboxItem({ item: store.useOutboxStore.getState().items[0]!, client });
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "first",
+      "other-agent",
+      "first",
+      "second",
+    ]);
+    expect(store.useOutboxStore.getState().items).toEqual([]);
+  });
+
+  it("blocks queued successors after an interrupted send until that item is discarded", async () => {
+    const first = await import("./store");
+    for (const [index, id] of ["first", "second"].entries()) {
+      await first.enqueueOutboxItem({
+        ...first.createPendingOutboxItem({
+          id,
+          serverId: "host-1",
+          agentId: "agent-1",
+          text: id,
+          images: [],
+          attachments: [],
+        }),
+        createdAt: index,
+      });
+    }
+    await first.updateOutboxItem("first", (item) => ({ ...item, status: "sending" }));
+    vi.resetModules();
+    const restored = await import("./store");
+    await restored.hydrateOutbox();
+    const delivery = await import("./delivery");
+    const client = idleClient();
+
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(client.sendAgentMessage).not.toHaveBeenCalled();
+    expect(restored.useOutboxStore.getState().items[0]?.status).toBe("needs_review");
+
+    await restored.discardOutboxItem("first");
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendAgentMessage).toHaveBeenCalledWith("agent-1", "second", {
+      messageId: "second",
+      images: [],
+      attachments: [],
+    });
+    expect(restored.useOutboxStore.getState().items).toEqual([]);
+  });
+
   it("reuses a canonical timeline row when retrying the same message", async () => {
     const store = await import("./store");
     const item = store.createPendingOutboxItem({

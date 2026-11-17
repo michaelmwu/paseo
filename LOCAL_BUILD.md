@@ -86,16 +86,16 @@ The full test suite and mobile/desktop binaries are not built. Replacing the dae
 not install a patched UI; client features require a matching client. Phone-side forwarding
 is separate from the host plugin and named CLI forwarding.
 
-Historical validation limitation: restored OMP history in `agent-loading.test.ts` timed out
-after two targeted fixture fixes in the previous bundle. This rebuild does not retry that
-suite or claim it green. An additional MCP/OMP regression, `delivers /follow-up to a running
-OMP child while ordinary messages in the same quiet window wait`, times out at 30 seconds
-after the no-capture fixture and native-start ordering adjustments; retries were stopped.
-The same MCP selection passes 27 cases before that failure. Its exact pending operation is
-not established, so OMP follow-up delivery was not verified by the original build.
+Remaining validation limitation: restored OMP history in `agent-loading.test.ts` still times
+out for mode, thinking and rewind after two prior targeted fixture fixes. These cases are
+deferred, not skipped or assigned longer timeouts. The original running-child follow-up/steer
+MCP timeouts are resolved by the readiness repair below.
 
 PR #11 maintenance on November 18 fixes cross-window attachment retention by reading current
 persisted outbox references before collection, without taking over another window's sends.
+Automatic draining considers only each agent's oldest outstanding item, so a failed or
+interrupted send awaiting review blocks later instructions until retry or discard. Other
+agents can continue independently.
 It also settles tracked runs before publishing readiness and preserves newer update timestamps
 when a failed send restores an earlier archive. Regression fixtures now wait for sender-specific
 startup, model adoption before worker draining, and assert explicit provider-start rejection.
@@ -104,9 +104,12 @@ alongside that absent implementation; release lifecycle and requested acknowledg
 remain. Core feature and companion pins are unchanged.
 
 Maintenance validation runs only focused suites through `paseo-resources job`, with full
-typecheck, lint and formatting before commit. Prior repeatedly failing OMP cases are deferred
-rather than rerun locally. CI remains the broad-validation gate; no deployment or merge should
-be inferred from passing focused tests.
+typecheck, lint and formatting before commit. On `f2f563f57`, the full Ubuntu server job
+reports 8,457 passed, three OMP history timeouts and 60 skips, down from 23 failures on the
+original build. No other server failures remain in that run. The later outbox ordering fix
+passes all 13 focused outbox cases, including retry/discard unblocking and independent agents.
+CI remains the broad-validation gate; no deployment or merge should be inferred from passing
+focused tests.
 
 ## Deploy
 

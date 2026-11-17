@@ -123,15 +123,15 @@ export async function drainPendingOutbox(input: {
   try {
     const deferredAgents = new Set<string>();
     while (input.client.isConnected) {
-      const next = useOutboxStore
-        .getState()
-        .items.find(
-          (item) =>
-            item.serverId === input.serverId &&
-            item.status === "pending" &&
-            !inFlight.has(item.id) &&
-            !deferredAgents.has(item.agentId),
+      const consideredAgents = new Set<string>();
+      const next = useOutboxStore.getState().items.find((item) => {
+        if (item.serverId !== input.serverId || consideredAgents.has(item.agentId)) return false;
+        // A head awaiting review or still sending blocks successors, not other agents.
+        consideredAgents.add(item.agentId);
+        return (
+          item.status === "pending" && !inFlight.has(item.id) && !deferredAgents.has(item.agentId)
         );
+      });
       if (!next) break;
       const attempted = await deliverOutboxItem({ item: next, client: input.client });
       if (!attempted || !next.sendBehavior || next.sendBehavior === "queue")
