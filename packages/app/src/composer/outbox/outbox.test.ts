@@ -152,6 +152,36 @@ describe("offline message outbox", () => {
     expect(sendAgentMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("retains images queued by another window after this window hydrated", async () => {
+    const first = await import("./store");
+    await first.hydrateOutbox();
+    vi.resetModules();
+    const second = await import("./store");
+    await second.enqueueOutboxItem(
+      second.createPendingOutboxItem({
+        id: "other-window",
+        serverId: "host-1",
+        agentId: "agent-1",
+        text: "Send this photo later",
+        images: [
+          {
+            id: "shared-photo",
+            mimeType: "image/png",
+            storageType: "web-indexeddb",
+            storageKey: "shared-photo",
+            createdAt: 1,
+          },
+        ],
+        attachments: [],
+      }),
+    );
+
+    expect(first.useOutboxStore.getState().items).toEqual([]);
+    expect(await first.getOutboxImageIds()).toEqual(new Set(["shared-photo"]));
+    // Reference collection must not adopt another window's delivery ownership.
+    expect(first.useOutboxStore.getState().items).toEqual([]);
+  });
+
   it("waits for the agent to be idle before draining the next queued message", async () => {
     const store = await import("./store");
     for (const id of ["first", "second"])
@@ -243,7 +273,7 @@ describe("offline message outbox", () => {
     expect(second.useOutboxStore.getState().items).toMatchObject([
       { id: "message-1", status: "pending" },
     ]);
-    expect(second.getOutboxImageIds().has("photo-1")).toBe(true);
+    expect((await second.getOutboxImageIds()).has("photo-1")).toBe(true);
   });
 
   it("requires manual review after an interrupted send, then retries with the same ID", async () => {
@@ -325,5 +355,14 @@ describe("offline message outbox", () => {
     expect(store.useOutboxStore.getState().items).toMatchObject([
       { id: "message-4", status: "sending" },
     ]);
+  });
+
+  it("rejects attachment collection when a persisted peer item is unreadable", async () => {
+    const store = await import("./store");
+    await store.hydrateOutbox();
+    backing.set("paseo-message-outbox-item-v1:broken", "not JSON");
+
+    await expect(store.getOutboxImageIds()).rejects.toThrow();
+    expect(backing.get("paseo-message-outbox-item-v1:broken")).toBe("not JSON");
   });
 });

@@ -128,8 +128,16 @@ export function discardOutboxItem(id: string): Promise<void> {
   });
 }
 
-export function getOutboxImageIds(): ReadonlySet<string> {
-  return new Set(useOutboxStore.getState().items.flatMap((item) => item.images.map((i) => i.id)));
+export async function getOutboxImageIds(): Promise<ReadonlySet<string>> {
+  await hydrateOutbox();
+  // Other windows can enqueue after our one-time hydration. Read their references
+  // without adopting their delivery state or ownership into this window's store.
+  const persisted = await readItems();
+  return new Set(
+    [...persisted, ...useOutboxStore.getState().items].flatMap((item) =>
+      item.images.map((image) => image.id),
+    ),
+  );
 }
 
 export function createPendingOutboxItem(input: {
