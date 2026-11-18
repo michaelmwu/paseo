@@ -12,6 +12,12 @@ initializing → idle → running → idle (or error → closed)
 
 Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idle`, `running`, or `error`. `closed` is the persisted, resumable state for an agent record that has no live provider runtime. State transitions persist to disk and stream to subscribed clients via WebSocket.
 
+## Changes during a turn
+
+For a foreground turn in a Git worktree, the daemon captures the whole worktree before invoking the provider and again when the turn settles. The latest completed pair is retained as Git refs and exposed on the agent snapshot. The agent tab can compare the pair using the normal diff viewer. The capture uses a private index, includes untracked files, and respects Git ignore rules; it never changes the user's staging index.
+
+The comparison is a worktree time boundary, not attribution to the agent process. Edits from terminals, people, or other agents during that interval appear too. Changes made and reverted within the interval do not appear. The view is available after completion, and only the latest turn is shown. A non-Git directory or failed capture has no turn comparison.
+
 ## Daemon restart recovery
 
 Restart recovery is off by default. Enable `agents.resumeOnStartup` in host config or
@@ -104,6 +110,25 @@ work is gone. Report that exit as a turn failure so the agent lands in `error` w
 Claude and OMP report exits between turns. OMP relaunches from its session file on the next prompt;
 the unfinished turn is lost.
 
+## Importing an existing provider session
+
+Importing an external Codex, Claude, or other provider session has two intentionally different
+lifecycles:
+
+- **Resume original** adopts the provider-native handle and runs it in the session's original
+  working directory. Paseo creates or reuses a workspace record for that directory; it does not
+  create a checkout or relocate the provider session.
+- **Continue here** creates a new provider-native fork in an already-existing destination
+  workspace. The daemon permits it only when source and destination are separate paths in the same
+  local Git working copy. The source session and its worktree—including uncommitted changes—remain
+  untouched. The destination receives a new conversation handle and uses its own files and runtime
+  configuration.
+
+`Continue here` is capability-gated per provider. It is not a Git-state transfer, is not a
+cross-repository or cross-host operation, and does not archive the source. Providers that cannot
+prove a native fork remain resume-only; users can instead create a fresh agent with transcript
+context when that feature is available.
+
 ### Cancellation
 
 Provider interruption is idempotent at the `AgentSession` boundary. It resolves when the prior
@@ -116,6 +141,20 @@ arrives or the run was still waiting for its provider turn id. The captured run 
 older cancellation from settling a newer turn. If interruption is rejected or times out, the agent
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
+
+The manager gives provider interruption ten seconds. This outer budget includes the provider's
+own interrupt RPC and any bounded cleanup before acknowledging cancellation. Post-acknowledgement
+settlement still waits two seconds. Waiting for a starting run before replacement uses the same
+outer budget; it cannot hold later interruption requests indefinitely.
+
+Codex retires its app-server when an interrupt or startup acknowledgement is lost, and when Stop
+cancels an in-flight startup. It confirms process exit before allowing another prompt; a failed
+termination retains ownership so Stop can retry. The snapshot reports pending interrupt recovery
+separately from turn activity so Stop stays available even after a failed startup has settled. Stopping the runtime proves it cannot continue,
+but does not prove a prompt was never delivered: a turn may have executed before its reply was
+lost. Startup acknowledgement loss therefore stays explicitly unknown and is never replayed
+automatically. Retirement settles tool rows and questions before publishing cancellation so
+reopening cannot restore activity from the retired runtime.
 
 ## Relationships
 
@@ -150,12 +189,13 @@ Users can also detach an existing subagent from the subagents track. Detach is d
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` for explicit reporting or no completion callback.
 
-Agent-originated messages and automatic notifications share a recipient-daemon delivery module. A queued receipt acknowledges admission before provider dispatch, allowing a child to report and finish in the same two-second quiet window. Human prompts dispatch directly. Conflicting explicit interruption or session-mode choices retain separate ordered dispatches.
+Agent-originated messages and automatic notifications share a recipient-daemon delivery module. A queued receipt acknowledges admission before provider dispatch. Idle recipients retain the two-second quiet window. While a recipient has a running or starting turn (including compaction), messages stay queued across quiet windows and are delivered together after that turn settles, including failure or cancellation. A ready batch is released when the daemon observes the recipient settle; the two-second timer also retries it. Agent callers using `steer`, including the default, wait for the turn to end; only explicit `interrupt` replaces a running turn. An explicit interrupt or a command the provider accepts out of band runs before earlier queued messages. Those messages stay queued and are delivered after the running or replacement turn ends. Human prompts dispatch directly with their existing behavior. Conflicting session-mode choices retain separate ordered dispatches.
 
 The pending message window is in memory. Clean shutdown flushes it before closing agents; an abrupt
 crash can lose queued prompts. A durable send receipt remains pending until actual dispatch
 acknowledgment, so a lost window never becomes a completed receipt. Completion waits cover queued
-admission within their original timeout and cancellation scope.
+admission within their original timeout and cancellation scope, and return permission checkpoints
+while messages are waiting.
 
 Finish notification intent has a separate daemon-owned lifetime. The finish-subscriptions module
 persists caller, child, host, and ownership policy through an injectable store; its JSON adapter uses

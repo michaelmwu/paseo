@@ -1,3 +1,4 @@
+import { useHostFeature } from "@/runtime/host-features";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -27,6 +28,7 @@ import { ComposerDock } from "@/composer/dock";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
+import { TurnChangesContent } from "./turn-changes-content";
 import { Composer } from "@/composer";
 import { AgentCommandsProvider } from "@/agent-commands";
 import {
@@ -120,6 +122,7 @@ interface ChatAgentStateShape {
   options?: Agent["options"];
   controls?: Agent["controls"];
   lastError?: Agent["lastError"] | null;
+  latestTurnChanges?: Agent["latestTurnChanges"];
 }
 
 interface ChatAgentSelectedState extends ChatAgentStateShape {
@@ -180,6 +183,7 @@ function selectChatAgentState(
     options: agent.options,
     controls: agent.controls,
     lastError: agent.lastError ?? null,
+    latestTurnChanges: agent.latestTurnChanges,
     archivedAt: agent.archivedAt ?? null,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
@@ -1036,6 +1040,62 @@ function ChatAgentContent({
   );
 }
 
+function availableTurnChanges(
+  agent: ChatAgentSelectedState,
+  draft: DraftConversation | null,
+): Agent["latestTurnChanges"] {
+  return draft || agent.status === "running" ? undefined : agent.latestTurnChanges;
+}
+
+function TurnChangesSwitch({
+  serverId,
+  cwd,
+  changes,
+  children,
+}: {
+  serverId: string;
+  cwd: string;
+  changes: Agent["latestTurnChanges"];
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  // COMPAT(turnChanges): added in v0.16.0, remove gate after 2027-05-13.
+  const supported = useHostFeature(serverId, "turnChanges");
+  const [show, setShow] = useState(false);
+  const toggle = useCallback(() => setShow((value) => !value), []);
+  return (
+    <View style={styles.turnChangesSwitch}>
+      {/* Keep the viewport height stable when a completed turn publishes its snapshot. */}
+      <View style={styles.turnChangesAction}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={supported && !changes}
+          onPress={toggle}
+          testID="agent-turn-changes-toggle"
+        >
+          {show && changes
+            ? t("agentPanel.turnChanges.backToConversation")
+            : t("agentPanel.turnChanges.viewChanges")}
+        </Button>
+      </View>
+      {show && !supported ? (
+        <Text style={styles.turnChangesHint}>{t("agentPanel.turnChanges.updateHost")}</Text>
+      ) : null}
+      {show && supported && changes ? (
+        <TurnChangesContent
+          key={changes.after}
+          serverId={serverId}
+          cwd={cwd}
+          before={changes.before}
+          after={changes.after}
+        />
+      ) : null}
+      {!show || (supported && !changes) ? children : null}
+    </View>
+  );
+}
+
 const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   serverId,
   workspaceId,
@@ -1154,6 +1214,12 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   const parentCallout = parentAgentId ? (
     <ParentAgentCallout serverId={serverId} parentAgentId={parentAgentId} />
   ) : null;
+  const viewSubmittedMessage = useCallback(
+    async (clientMessageId: string) => {
+      return (await streamViewRef.current?.focusSubmittedMessage(clientMessageId)) ?? false;
+    },
+    [streamViewRef],
+  );
   const agentComposerSection = showsComposer ? (
     <RenderProfile id={`AgentComposerSection:${agentId}`}>
       <AgentComposerSection
@@ -1170,6 +1236,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         onAttentionPromptSend={onAttentionPromptSend}
         onComposerHeightChange={handleComposerHeightChange}
         onMessageSent={handleMessageSent}
+        onViewSubmittedMessage={viewSubmittedMessage}
       />
     </RenderProfile>
   ) : (
@@ -1189,32 +1256,41 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     onAttentionInputFocus();
     return false;
   }, [onAttentionInputFocus]);
+  const agentStreamSection = (
+    <RenderProfile id={`AgentStreamSection:${agentId}`}>
+      <AgentStreamSection
+        streamViewRef={streamViewRef}
+        serverId={serverId}
+        agentId={agentId}
+        agent={effectiveAgent}
+        draft={draft}
+        routeBottomAnchorRequest={routeBottomAnchorRequest}
+        hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
+        isInitialHistoryLoading={
+          routeBottomAnchorRequest?.reason === "initial-entry" &&
+          !hasCachedHistory &&
+          !showHistorySyncError
+        }
+        revealInitialHistory={hasCachedHistory || showHistorySyncError}
+        hasActiveComposer={hasActiveComposer}
+        toast={toastApi}
+        onOpenWorkspaceFile={onOpenWorkspaceFile}
+      />
+    </RenderProfile>
+  );
   const streamContent = (
     <View
       style={animatedStaticStyles.content}
       onStartShouldSetResponderCapture={handleAttentionInteraction}
     >
       {showsComposer ? null : <SheetAgentFacts serverId={serverId} agentId={agentId} />}
-      <RenderProfile id={`AgentStreamSection:${agentId}`}>
-        <AgentStreamSection
-          streamViewRef={streamViewRef}
-          serverId={serverId}
-          agentId={agentId}
-          agent={effectiveAgent}
-          draft={draft}
-          routeBottomAnchorRequest={routeBottomAnchorRequest}
-          hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
-          isInitialHistoryLoading={
-            routeBottomAnchorRequest?.reason === "initial-entry" &&
-            !hasCachedHistory &&
-            !showHistorySyncError
-          }
-          revealInitialHistory={hasCachedHistory || showHistorySyncError}
-          hasActiveComposer={hasActiveComposer}
-          toast={toastApi}
-          onOpenWorkspaceFile={onOpenWorkspaceFile}
-        />
-      </RenderProfile>
+      <TurnChangesSwitch
+        serverId={serverId}
+        cwd={cwd}
+        changes={availableTurnChanges(agentState, draft)}
+      >
+        {agentStreamSection}
+      </TurnChangesSwitch>
       {hasActiveComposer && !draft ? (
         <AgentTracks
           serverId={serverId}
@@ -1256,23 +1332,27 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     </ChatSurface>
   );
 
+  const archivingOverlay = isArchivingCurrentAgent ? (
+    <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
+      <ThemedLoadingSpinner size="large" uniProps={foregroundColorMapping} />
+      <Text style={styles.archivingTitle}>{t("agentPanel.states.archivingTitle")}</Text>
+      <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
+    </View>
+  ) : null;
+  const contentBody = (
+    <View style={styles.root}>
+      {dock}
+      {archivingOverlay}
+    </View>
+  );
   const content = (
+    // oxlint-disable-next-line react/jsx-max-depth -- This inline context provider adds no layout nesting.
     <RewindComposerRestoreProvider
       textSource={agentInputDraft.textSource}
       setText={agentInputDraft.replaceText}
       onRewindComplete={handleRewindComplete}
     >
-      <View style={styles.root}>
-        {dock}
-
-        {isArchivingCurrentAgent ? (
-          <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
-            <ThemedLoadingSpinner size="large" uniProps={foregroundColorMapping} />
-            <Text style={styles.archivingTitle}>{t("agentPanel.states.archivingTitle")}</Text>
-            <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
-          </View>
-        ) : null}
-      </View>
+      {contentBody}
     </RewindComposerRestoreProvider>
   );
   return wrapAgentCommandProvider({
@@ -1544,6 +1624,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
   onAttentionPromptSend,
   onComposerHeightChange,
   onMessageSent,
+  onViewSubmittedMessage,
 }: {
   agentId?: string;
   serverId: string;
@@ -1558,6 +1639,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
   onAttentionPromptSend: () => void;
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
+  onViewSubmittedMessage: (clientMessageId: string) => Promise<boolean>;
 }) {
   if (!agentId) {
     return null;
@@ -1582,6 +1664,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
       onAttentionPromptSend={onAttentionPromptSend}
       onComposerHeightChange={onComposerHeightChange}
       onMessageSent={onMessageSent}
+      onViewSubmittedMessage={onViewSubmittedMessage}
     />
   );
 });
@@ -1598,6 +1681,7 @@ function ActiveAgentComposer({
   onAttentionPromptSend,
   onComposerHeightChange,
   onMessageSent,
+  onViewSubmittedMessage,
 }: {
   agentId: string;
   serverId: string;
@@ -1610,6 +1694,7 @@ function ActiveAgentComposer({
   onAttentionPromptSend: () => void;
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
+  onViewSubmittedMessage: (clientMessageId: string) => Promise<boolean>;
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
@@ -1709,6 +1794,7 @@ function ActiveAgentComposer({
         onAttentionPromptSend={onAttentionPromptSend}
         onComposerHeightChange={onComposerHeightChange}
         onMessageSent={onMessageSent}
+        onViewSubmittedMessage={onViewSubmittedMessage}
         onClientSlashCommand={handleClientSlashCommand}
         isCompactLayout={isCompactComposerLayout}
       />
@@ -1812,6 +1898,13 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     overflow: "hidden",
     ...(isWeb ? { userSelect: "none" as const } : {}),
+  },
+  turnChangesSwitch: { flex: 1, minHeight: 0 },
+  turnChangesHint: { color: theme.colors.foregroundMuted, padding: theme.spacing[3] },
+  turnChangesAction: {
+    flexDirection: "row",
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
   },
   timelineSyncCalloutRail: {
     width: "100%",

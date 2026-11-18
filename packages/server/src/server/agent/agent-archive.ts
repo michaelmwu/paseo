@@ -12,10 +12,12 @@ export function buildArchivedAgentRecord(
   options?: BuildArchivedAgentRecordOptions,
 ): ArchivedStoredAgentRecord {
   const archivedAt = options?.archivedAt ?? new Date().toISOString();
+  const updatedAt = options?.updatedAt ?? record.updatedAt;
   return {
     ...record,
     archivedAt,
-    updatedAt: options?.updatedAt ?? record.updatedAt,
+    // Restoring a failed send's previous archive must not hide the newer unarchive update.
+    updatedAt: Date.parse(updatedAt) < Date.parse(record.updatedAt) ? record.updatedAt : updatedAt,
     lastStatus: normalizeArchivedStatus(record.lastStatus),
     requiresAttention: false,
     attentionReason: null,

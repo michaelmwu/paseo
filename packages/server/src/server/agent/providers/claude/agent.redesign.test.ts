@@ -311,7 +311,11 @@ test("fails an auto mode turn when Claude Code uses Vertex", async () => {
   });
 
   try {
-    const events = await collectUntilTerminal(streamSession(session, "hello"));
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    await expect(session.startTurn("hello")).rejects.toThrow(
+      "Claude Auto mode requires the Anthropic API and is not supported when Claude Code uses Vertex",
+    );
     const failure = events.find(
       (event): event is Extract<AgentStreamEvent, { type: "turn_failed" }> =>
         event.type === "turn_failed",

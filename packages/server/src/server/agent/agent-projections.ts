@@ -92,6 +92,7 @@ export function toStoredAgentRecord(
     updatedAt: agent.updatedAt.toISOString(),
     lastActivityAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
+    ...(agent.latestTurnChanges ? { latestTurnChanges: agent.latestTurnChanges } : {}),
     title: options?.title ?? null,
     labels: agent.labels,
     metadata: agent.metadata,
@@ -120,6 +121,15 @@ function projectUsageScopeKey(agent: ManagedAgent): string | undefined {
   return usageSession ? `${usageSession.sessionKey}:${usageSession.model ?? ""}` : undefined;
 }
 
+function projectActiveTurn(agent: ManagedAgent): AgentSnapshotPayload["activeTurn"] {
+  return agent.activeTurnId
+    ? {
+        turnId: agent.activeTurnId,
+        startedAt: agent.activeTurnStartedAt?.toISOString() ?? null,
+      }
+    : null;
+}
+
 export function toAgentPayload(
   agent: ManagedAgent,
   options?: ProjectionOptions,
@@ -144,12 +154,9 @@ export function toAgentPayload(
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     status: agent.lifecycle,
-    activeTurn: agent.activeTurnId
-      ? {
-          turnId: agent.activeTurnId,
-          startedAt: agent.activeTurnStartedAt?.toISOString() ?? null,
-        }
-      : null,
+    interruptRecoveryPending: agent.session?.hasPendingInterruptRecovery?.(),
+    activeTurn: projectActiveTurn(agent),
+    ...(agent.latestTurnChanges ? { latestTurnChanges: agent.latestTurnChanges } : {}),
     capabilities: cloneCapabilities(agent.capabilities),
     currentModeId: agent.currentModeId,
     availableModes: cloneAvailableModes(agent.availableModes),
@@ -303,6 +310,7 @@ export function buildStoredAgentPayload(
     createdAt: createdAt.toISOString(),
     updatedAt: updatedAt.toISOString(),
     lastUserMessageAt: lastUserMessageAt ? lastUserMessageAt.toISOString() : null,
+    latestTurnChanges: record.latestTurnChanges,
     status: record.lastStatus,
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
@@ -408,7 +416,11 @@ export function selectAgentListItems(
 }
 
 export function toRecentProviderSessionDescriptorPayload(
-  session: ImportableProviderSession & { provider: string },
+  session: ImportableProviderSession & {
+    provider: string;
+    canContinueHere?: boolean;
+    isTargetCwd?: boolean;
+  },
   options: RecentProviderSessionProjectionOptions,
 ): RecentProviderSessionDescriptorPayload {
   return {
@@ -420,6 +432,8 @@ export function toRecentProviderSessionDescriptorPayload(
     firstPromptPreview: session.firstPromptPreview,
     lastPromptPreview: session.lastPromptPreview,
     lastActivityAt: session.lastActivityAt.toISOString(),
+    ...(session.canContinueHere !== undefined ? { canContinueHere: session.canContinueHere } : {}),
+    ...(session.isTargetCwd !== undefined ? { isTargetCwd: session.isTargetCwd } : {}),
   };
 }
 

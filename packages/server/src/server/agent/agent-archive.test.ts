@@ -68,3 +68,13 @@ test("can stamp updatedAt to the archive timestamp", () => {
 
   expect(archived.updatedAt).toBe("2025-01-03T00:00:00.000Z");
 });
+
+test("restoring an earlier archive keeps the latest update timestamp", () => {
+  const archived = buildArchivedAgentRecord(BASE_RECORD, {
+    archivedAt: "2025-01-01T12:00:00.000Z",
+    updatedAt: "2025-01-01T12:00:00.000Z",
+  });
+
+  expect(archived.archivedAt).toBe("2025-01-01T12:00:00.000Z");
+  expect(archived.updatedAt).toBe(BASE_RECORD.updatedAt);
+});

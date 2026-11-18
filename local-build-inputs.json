@@ -1,0 +1,122 @@
+{
+  "release": { "tag": "v0.16.1", "commit": "c09a3d81e772a747dd11bca43d860f3518f07c2d" },
+  "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
+  "rebuildBase": "2baf466c34ec5cfd03b994eff493a0a1e9b9ff86",
+  "alreadyInRelease": [7782, 9580],
+  "mergedPrerequisiteBackports": [
+    { "pr": 9757, "commit": "41c294c7855f3d864337b8628513bf00ece0a644" },
+    { "pr": 9931, "commit": "eabbd3d97c2d6a9a24d72de0bf08db1c7398a8a5" }
+  ],
+  "features": [
+    {
+      "pr": 4052,
+      "branch": "add-project-linking-dialog-duplicate-git-repos",
+      "commit": "ca620522f2efec169f586936c05f37494a02a718"
+    },
+    {
+      "pr": 4627,
+      "branch": "agent-context-attachment-plugin",
+      "commit": "07e750d7c368ed61adaebe4c957a445d43b3b419"
+    },
+    {
+      "pr": 2496,
+      "branch": "session-portability-prototype",
+      "commit": "b370aadf21f0144f4a500797c4b32de2059383c9"
+    },
+    {
+      "pr": 4381,
+      "branch": "feat/project-secrets-import-worktrees",
+      "commit": "c5c0501480d8764e522fa20d0cc91e8b5cde9add"
+    },
+    {
+      "branch": "worktreeinclude-missing-files-conflict-fixed",
+      "commit": "b8be2560ea4ede3272f91fa8c62ebd9960926fd4"
+    },
+    {
+      "pr": 4525,
+      "branch": "redesign-service-definitions",
+      "commit": "46230492dab87096e347940243059a69e9d19a8c"
+    },
+    {
+      "pr": 9332,
+      "branch": "codex/offline-mobile-outbox",
+      "commit": "8562246f1b77d591ccae719a40a3661b69215811"
+    },
+    {
+      "pr": 9548,
+      "branch": "fix/message-receipt-reconciliation",
+      "commit": "ccab6ce52ea5ed448230223ea75c5ff37baa3a10",
+      "includes": [9580],
+      "prerequisiteCommit": "d30aa16bebb180740267178a97baae87a504ca4f"
+    },
+    {
+      "pr": 9550,
+      "branch": "fix/codex-interrupt-retirement",
+      "commit": "4187a78260d2720ba59efc8916d89ac3f736202d",
+      "includes": [9549, 5633],
+      "prerequisiteCommit": "aaa14c1c58ce0ea0b52fe476bbe8c6623289ca24"
+    },
+    {
+      "pr": 9333,
+      "branch": "feat/turn-scoped-changes",
+      "commit": "174df883a5fee1c82e669311eb7513209d41679d"
+    },
+    {
+      "pr": 9334,
+      "branch": "feat/named-port-forwarding",
+      "commit": "7ea5feeb3174ecee0881eb37a14ac427979022a4",
+      "includes": [6534]
+    },
+    { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" }
+  ],
+  "plugins": [
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/action-inbox",
+      "id": "action-inbox",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/pr-watcher",
+      "id": "pr-watcher",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/issue-workflow",
+      "id": "github-issue-workflow",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/remote-browser",
+      "id": "remote-browser",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/agent-context",
+      "id": "agent-context",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/project-environment",
+      "id": "project-environment",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/worktreeinclude",
+      "id": "paseo-worktreeinclude",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/replies",
+      "id": "replies-508",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    }
+  ]
+}

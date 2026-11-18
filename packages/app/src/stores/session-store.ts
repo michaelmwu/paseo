@@ -6,6 +6,7 @@ import type { ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { AgentDirectoryEntry } from "@/types/agent-directory";
 import {
   appendSubmittedUserMessage,
+  isUnreconciledLocalUserMessage,
   handoffCreatedAgentUserMessageToStream,
   removeSubmittedUserMessage,
   type StreamItem,
@@ -36,6 +37,7 @@ import type {
   AgentPersistenceHandle,
 } from "@getpaseo/protocol/agent-types";
 import type {
+  AgentTurnChanges,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -80,9 +82,11 @@ export interface Agent {
   status: AgentLifecycleStatus;
   backgroundWork?: { count: number };
   turn: TurnLiveness;
+  interruptRecoveryPending?: boolean;
   createdAt: Date;
   updatedAt: Date;
   lastUserMessageAt: Date | null;
+  latestTurnChanges?: AgentTurnChanges;
   lastActivityAt: Date;
   capabilities: AgentCapabilityFlags;
   currentModeId: string | null;
@@ -137,6 +141,7 @@ export interface WorkspaceDescriptor {
   archivingAt: string | null;
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
+  launches?: NonNullable<WorkspaceDescriptorPayload["launches"]>;
   gitRuntime?: WorkspaceDescriptorPayload["gitRuntime"];
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
@@ -183,6 +188,12 @@ export function normalizeWorkspaceDescriptor(
     archivingAt: payload.archivingAt ?? null,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => Object.assign({}, s)),
+    // COMPAT(workspaceLaunchManagement): old daemons omit launches. Preserve that absence so
+    // feature consumers can distinguish an old descriptor from a supported daemon with no
+    // configured launches.
+    ...(payload.launches !== undefined
+      ? { launches: payload.launches.map((launch) => Object.assign({}, launch)) }
+      : {}),
     gitRuntime: payload.gitRuntime,
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
@@ -582,6 +593,11 @@ interface SessionStoreActions {
     message: UserMessageItem,
   ) => void;
   acceptAgentMessageSubmission: (
+    serverId: string,
+    agentId: string,
+    clientMessageId: string,
+  ) => void;
+  releaseAgentMessageSubmission: (
     serverId: string,
     agentId: string,
     clientMessageId: string,
@@ -1169,9 +1185,18 @@ export const useSessionStore = create<SessionStore>()(
             head: currentHead,
             message,
           });
+          const existing = [...currentTail, ...currentHead].find(
+            (item) =>
+              item.kind === "user_message" && item.clientMessageId === message.clientMessageId,
+          );
+          const existingTimelineRow =
+            existing?.kind === "user_message" && !isUnreconciledLocalUserMessage(existing);
           const submissions = beginMessageSubmission(
             session.messageSubmissions.get(agentId) ?? [],
-            { clientMessageId: message.clientMessageId },
+            {
+              clientMessageId: message.clientMessageId,
+              ...(existingTimelineRow ? { existingTimelineRow: true as const } : {}),
+            },
           );
           const messageSubmissions = new Map(session.messageSubmissions);
           messageSubmissions.set(agentId, submissions);
@@ -1219,6 +1244,24 @@ export const useSessionStore = create<SessionStore>()(
         });
       },
 
+      // Uncertainty ends the local request spinner, but keeps the stable timeline row.
+      releaseAgentMessageSubmission: (serverId, agentId, clientMessageId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) return prev;
+          const messageSubmissions = new Map(session.messageSubmissions);
+          const remaining = (messageSubmissions.get(agentId) ?? []).filter(
+            (item) => item.clientMessageId !== clientMessageId,
+          );
+          if (remaining.length) messageSubmissions.set(agentId, remaining);
+          else messageSubmissions.delete(agentId);
+          return {
+            ...prev,
+            sessions: { ...prev.sessions, [serverId]: { ...session, messageSubmissions } },
+          };
+        });
+      },
+
       rejectAgentMessageSubmission: (serverId, agentId, clientMessageId) => {
         let outcome: MessageSubmissionRejectionOutcome = "unknown";
         set((prev) => {
@@ -1229,9 +1272,12 @@ export const useSessionStore = create<SessionStore>()(
           const currentSubmissions = session.messageSubmissions.get(agentId) ?? [];
           const result = rejectMessageSubmission(currentSubmissions, clientMessageId);
           outcome = result.outcome;
-          if (outcome === "unknown") return prev;
+          if (outcome === "unknown" && result.submissions === currentSubmissions) return prev;
           const stream =
-            outcome === "rejected"
+            outcome === "rejected" &&
+            !currentSubmissions.some(
+              (item) => item.clientMessageId === clientMessageId && item.existingTimelineRow,
+            )
               ? removeSubmittedUserMessage({
                   tail: currentTail,
                   head: currentHead,

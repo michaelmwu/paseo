@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
+import type { Logger } from "pino";
 
 import { resolveRepositoryDefaultBranch } from "../../../utils/checkout-git.js";
 import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
@@ -62,6 +63,7 @@ type RecoveryPlan =
 type UnavailableRecoveryState = Extract<WorkspaceRecoveryState, { kind: "unavailable" }>;
 
 export function createWorkspaceRecoveryService(deps: {
+  logger: Logger;
   paseoHome: string;
   worktreesRoot?: string;
   getWorkspace: (workspaceId: string) => Promise<PersistedWorkspaceRecord | null>;
@@ -192,6 +194,16 @@ export function createWorkspaceRecoveryService(deps: {
         ...(hasRecordedWorktreePath ? { worktreePath: previousWorktreePath } : {}),
       });
       recreatedWorktreePath = result.worktreePath;
+      if (result.worktreeIncludeSummary.skipped.length > 0) {
+        deps.logger.warn(
+          {
+            materialized: result.worktreeIncludeSummary.materialized,
+            skipped: result.worktreeIncludeSummary.skipped,
+            worktreePath: result.worktreePath,
+          },
+          "Worktree include completed with skipped entries during workspace recovery",
+        );
+      }
     } catch (error) {
       throw toWorktreeRequestError(error);
     }
