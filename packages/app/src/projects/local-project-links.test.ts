@@ -56,6 +56,8 @@ function workspace(input: {
       };
 
   return {
+    createdAt: null,
+    lastUserMessageAt: null,
     id: input.id,
     projectId: input.projectId,
     projectDisplayName: "acme/app",
@@ -67,8 +69,6 @@ function workspace(input: {
     name: "main",
     status: "done",
     statusEnteredAt: null,
-    createdAt: new Date("2026-10-24T00:00:00.000Z"),
-    lastUserMessageAt: null,
     archivingAt: null,
     diffStat: null,
     scripts: [],
@@ -196,6 +196,40 @@ describe("local project links", () => {
       repository: "git.example.test/team/app",
       subdirectory: "Packages/Web",
     });
+  });
+
+  test("keeps literal backslashes distinct from separators in POSIX subdirectories", () => {
+    const literalBackslash = deriveProjectGitIdentity({
+      projectRootPath: "/repos/app/foo\\bar",
+      worktreeRoot: "/repos/app",
+      remoteUrl: "https://git.example.test/team/app.git",
+    });
+    const directorySeparator = deriveProjectGitIdentity({
+      projectRootPath: "/repos/app/foo/bar",
+      worktreeRoot: "/repos/app",
+      remoteUrl: "https://git.example.test/team/app.git",
+    });
+
+    expect(literalBackslash).toMatchObject({ subdirectory: "foo\\bar" });
+    expect(directorySeparator).toMatchObject({ subdirectory: "foo/bar" });
+    expect(sameLocalProjectLinkIdentity(literalBackslash!, directorySeparator!)).toBe(false);
+  });
+
+  test("keeps significant whitespace in POSIX subdirectories", () => {
+    const trailingWhitespace = deriveProjectGitIdentity({
+      projectRootPath: "/repos/app/web ",
+      worktreeRoot: "/repos/app",
+      remoteUrl: "https://git.example.test/team/app.git",
+    });
+    const withoutWhitespace = deriveProjectGitIdentity({
+      projectRootPath: "/repos/app/web",
+      worktreeRoot: "/repos/app",
+      remoteUrl: "https://git.example.test/team/app.git",
+    });
+
+    expect(trailingWhitespace).toMatchObject({ subdirectory: "web " });
+    expect(withoutWhitespace).toMatchObject({ subdirectory: "web" });
+    expect(sameLocalProjectLinkIdentity(trailingWhitespace!, withoutWhitespace!)).toBe(false);
   });
 
   test("uses the main checkout when resolving a managed worktree project", () => {

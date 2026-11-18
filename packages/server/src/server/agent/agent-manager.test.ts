@@ -8563,8 +8563,11 @@ test("failed replacement cancellation preserves an autonomous running state", as
     await running;
 
     await expect(manager.replaceAgentRun(agent.id, "replacement prompt")).rejects.toThrow(
-      `Cannot replace agent ${agent.id} because its active run cancellation was not acknowledged`,
+      `Paseo could not confirm the agent stopped. Your message was not sent. Try Stop, then retry your message.`,
     );
+    await expect(manager.replaceAgentRun(agent.id, "another replacement")).rejects.toMatchObject({
+      deliveryOutcome: "not_submitted",
+    });
     expect(manager.getAgent(agent.id)).toMatchObject({
       lifecycle: "running",
       activeForegroundTurnId: null,
@@ -9905,9 +9908,15 @@ test("canceling a pending Codex start settles as canceled without accepting its 
   );
   const threadLoaded = deferred<{ data: string[] }>();
   const appServer = createFakeCodexAppServer({ "thread/loaded/list": () => threadLoaded.promise });
+  const replacement = createFakeCodexAppServer();
+  const runtimes = [appServer, replacement];
   class ColdStartClient extends TestAgentClient {
     override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
-      return new CodexAppServerAgentSession(config, null, logger, async () => appServer.child);
+      return new CodexAppServerAgentSession(config, null, logger, async () => {
+        const runtime = runtimes.shift();
+        if (!runtime) throw new Error("Unexpected extra runtime");
+        return runtime.child;
+      });
     }
   }
   const manager = new AgentManager({
@@ -9937,7 +9946,7 @@ test("canceling a pending Codex start settles as canceled without accepting its 
     void firstRun.catch(() => undefined);
     await appServer.waitForRequest("thread/loaded/list");
     const senderRejection = expect(senderStart.started).rejects.toThrow(
-      "its prompt was not delivered",
+      "Turn was canceled before starting",
     );
     const cancel = manager.cancelAgentRun(agent.id);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -9968,11 +9977,13 @@ test("canceling a pending Codex start settles as canceled without accepting its 
     expect(appServer.requests().some((request) => request.method === "turn/start")).toBe(false);
 
     const nextRun = manager.runAgent(agent.id, "Next prompt", { clientMessageId: "next-prompt" });
-    await appServer.waitForRequest("turn/start");
-    appServer.startsTurn({ threadId: "thread-1", turnId: "next-turn" });
-    appServer.completeTurn();
+    void nextRun.catch(() => undefined);
+    await replacement.waitForRequest("turn/start");
+    replacement.startsTurn({ threadId: "thread-1", turnId: "next-turn" });
+    replacement.completeTurn();
     await expect(nextRun).resolves.toMatchObject({ canceled: false });
     appServer.assertNoErrors();
+    replacement.assertNoErrors();
   } finally {
     threadLoaded.resolve({ data: ["thread-1"] });
     manager.prepareForShutdown();
@@ -9988,15 +9999,16 @@ test("stopping a Codex replacement of a stalled start clears replacement activit
   const firstInterruptRequested = deferred<void>();
   const replacementLoaded = deferred<{ data: string[] }>();
   const replacementEntered = deferred<void>();
-  let loadCount = 0;
   const appServer = createFakeCodexAppServer({
+    "thread/loaded/list": () => firstLoaded.promise,
+  });
+  const resumed = createFakeCodexAppServer({
     "thread/loaded/list": () => {
-      loadCount += 1;
-      if (loadCount === 1) return firstLoaded.promise;
       replacementEntered.resolve();
       return replacementLoaded.promise;
     },
   });
+  const runtimes = [appServer, resumed];
   class ColdStartSession extends CodexAppServerAgentSession {
     override async interrupt(): Promise<void> {
       const interruption = super.interrupt();
@@ -10006,7 +10018,11 @@ test("stopping a Codex replacement of a stalled start clears replacement activit
   }
   class ColdStartClient extends TestAgentClient {
     override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
-      return new ColdStartSession(config, null, logger, async () => appServer.child);
+      return new ColdStartSession(config, null, logger, async () => {
+        const runtime = runtimes.shift();
+        if (!runtime) throw new Error("Unexpected extra runtime");
+        return runtime.child;
+      });
     }
   }
   const manager = new AgentManager({
@@ -10040,7 +10056,9 @@ test("stopping a Codex replacement of a stalled start clears replacement activit
     expect(manager.hasInFlightRun(agent.id)).toBe(false);
     expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
     expect(appServer.requests().some((request) => request.method === "turn/start")).toBe(false);
+    expect(resumed.requests().some((request) => request.method === "turn/start")).toBe(false);
     appServer.assertNoErrors();
+    resumed.assertNoErrors();
   } finally {
     firstLoaded.resolve({ data: ["thread-1"] });
     replacementLoaded.resolve({ data: ["thread-1"] });
@@ -10062,6 +10080,8 @@ test("a stalled Codex start canceled by its replacement rejects its sender's sta
       return loadCount === 1 ? firstLoaded.promise : { data: ["thread-1"] };
     },
   });
+  const resumed = createFakeCodexAppServer();
+  const runtimes = [appServer, resumed];
   class ColdStartSession extends CodexAppServerAgentSession {
     override async interrupt(): Promise<void> {
       const interruption = super.interrupt();
@@ -10071,7 +10091,11 @@ test("a stalled Codex start canceled by its replacement rejects its sender's sta
   }
   class ColdStartClient extends TestAgentClient {
     override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
-      return new ColdStartSession(config, null, logger, async () => appServer.child);
+      return new ColdStartSession(config, null, logger, async () => {
+        const runtime = runtimes.shift();
+        if (!runtime) throw new Error("Unexpected extra runtime");
+        return runtime.child;
+      });
     }
   }
   const manager = new AgentManager({
@@ -10091,6 +10115,7 @@ test("a stalled Codex start canceled by its replacement rejects its sender's sta
     );
     await appServer.waitForRequest("thread/loaded/list");
     const firstWait = firstStart.started;
+    const firstRejection = expect(firstWait).rejects.toBeInstanceOf(AgentTurnStartCanceledError);
     const replacement = manager.replaceAgentRun(agent.id, "Second prompt", undefined, secondStart);
     await firstInterruptRequested.promise;
     firstLoaded.resolve({ data: ["thread-1"] });
@@ -10099,13 +10124,14 @@ test("a stalled Codex start canceled by its replacement rejects its sender's sta
 
     const secondWait = secondStart.started;
     const replacementDrained = drainAsyncGenerator(replacementStream);
-    await appServer.waitForRequest("turn/start");
-    appServer.startsTurn({ threadId: "thread-1", turnId: "second-turn" });
+    await resumed.waitForRequest("turn/start");
+    resumed.startsTurn({ threadId: "thread-1", turnId: "second-turn" });
     await expect(secondWait).resolves.toBeUndefined();
-    await expect(firstWait).rejects.toThrow("its prompt was not delivered");
-    appServer.completeTurn();
+    await firstRejection;
+    resumed.completeTurn();
     await replacementDrained;
-    expect(appServer.requests().filter((request) => request.method === "turn/start")).toEqual([
+    expect(appServer.requests().filter((request) => request.method === "turn/start")).toEqual([]);
+    expect(resumed.requests().filter((request) => request.method === "turn/start")).toEqual([
       expect.objectContaining({
         params: expect.objectContaining({
           input: [expect.objectContaining({ text: "Second prompt" })],
@@ -10113,6 +10139,7 @@ test("a stalled Codex start canceled by its replacement rejects its sender's sta
       }),
     ]);
     appServer.assertNoErrors();
+    resumed.assertNoErrors();
   } finally {
     firstLoaded.resolve({ data: ["thread-1"] });
     manager.prepareForShutdown();
@@ -10310,7 +10337,7 @@ test("a sender's start wait rejects when Stop cancels its pending stale-session 
     const senderWait = dispatchStarted(
       await startAgentRun(manager, agent.id, "Retry this prompt", logger),
     );
-    const rejection = expect(senderWait).rejects.toThrow("its prompt was not delivered");
+    const rejection = expect(senderWait).rejects.toBeInstanceOf(AgentTurnStartCanceledError);
     releaseStart.resolve();
     await retryEntered.promise;
     await expect(manager.cancelAgentRun(agent.id)).resolves.toEqual({ status: "settled" });
@@ -16135,3 +16162,56 @@ test("cancelAgentRun preserves permission requests from an autonomous successor"
     await fixture.cleanup();
   }
 });
+for (const outcome of ["not_submitted", "unknown"] as const) {
+  test(`sender receipt preserves ${outcome} across provider startup failure`, async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "startup-receipt-outcome-"));
+    const failure = Object.assign(new Error("Native startup response failed"), {
+      deliveryOutcome: outcome,
+    });
+    let starts = 0;
+    class AdmissionClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        const session = new TestAgentSession(config);
+        const start = session.startTurn.bind(session);
+        session.startTurn = async () => {
+          starts += 1;
+          if (starts === 1) throw failure;
+          return start();
+        };
+        return session;
+      }
+    }
+    const manager = new AgentManager({
+      clients: { codex: new AdmissionClient() },
+      registry: new AgentStorage(join(workdir, "agents"), logger),
+      logger,
+    });
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    onTestFinished(async () => {
+      await manager.closeAgent(agent.id);
+      rmSync(workdir, { recursive: true, force: true });
+    });
+    const receipts = new MessageReceipts(join(workdir, "receipts"));
+    const input = {
+      agentId: agent.id,
+      messageId: "startup",
+      request: { text: "Original" },
+      send: async (beforeDispatch: () => Promise<void>) => {
+        await beforeDispatch();
+        const result = await startAgentRun(manager, agent.id, "Original", logger, {
+          runOptions: { clientMessageId: "startup" },
+        });
+        if (result.disposition === "turn_started") await result.started;
+      },
+    };
+    await expect(receipts.send(input)).rejects.toMatchObject({ deliveryOutcome: outcome });
+    expect(await receipts.getStatus(input)).toMatchObject({
+      status: outcome === "unknown" ? "unknown" : "rejected",
+    });
+    if (outcome === "not_submitted") await receipts.send(input);
+    else await expect(receipts.send(input)).rejects.toMatchObject({ deliveryOutcome: "unknown" });
+    expect(starts).toBe(outcome === "not_submitted" ? 2 : 1);
+  });
+}

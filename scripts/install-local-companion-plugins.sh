@@ -30,11 +30,15 @@ PASEO_COMPANION_PINS="$("$PASEO_COMPANION_NODE" -e '
   const manifest = require(process.argv[1]);
   const root = path.dirname(process.argv[1]);
   const config = JSON.parse(fs.readFileSync(path.join(process.env.PASEO_HOME, "config.json"), "utf8"));
-  for (const {repository, id, commit} of manifest.plugins) {
+  for (const {repository, pluginPath = "", id, commit} of manifest.plugins) {
     const name = repository.split("/").at(-1);
-    const directory = path.join(root, ".dev/companions", name);
+    const sourcePath = path.join(name, pluginPath);
+    const directory = path.join(root, ".dev/companions", sourcePath);
     const existing = config.plugins?.[id];
     if (existing) {
+      if (existing.source !== "directory" || typeof existing.path !== "string" || path.resolve(existing.path) !== directory) {
+        throw new Error(`Existing ${id} uses a different source. A settings-preserving source migration is required; this helper will not remove, replace, or reinstall it.`);
+      }
       const files = execFileSync("git", ["-C", directory, "ls-files", "-z"], {encoding:"utf8"}).split("\0").filter(Boolean);
       for (const file of files) {
         if (file !== "paseo-plugin.json" && !/^(index\.(client|server)\.[cm]?[jt]sx?$|(client|server|shared)\/)/.test(file)) continue;
@@ -45,7 +49,7 @@ PASEO_COMPANION_PINS="$("$PASEO_COMPANION_NODE" -e '
         }
       }
     }
-    console.log([name, id, commit, existing ? "reload" : "install"].join("\t"));
+    console.log([sourcePath, id, commit, existing ? "reload" : "install"].join("\t"));
   }
 ' "$PASEO_COMPANION_ROOT/local-build-inputs.json")"
 

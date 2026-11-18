@@ -121,6 +121,15 @@ function projectUsageScopeKey(agent: ManagedAgent): string | undefined {
   return usageSession ? `${usageSession.sessionKey}:${usageSession.model ?? ""}` : undefined;
 }
 
+function projectActiveTurn(agent: ManagedAgent): AgentSnapshotPayload["activeTurn"] {
+  return agent.activeTurnId
+    ? {
+        turnId: agent.activeTurnId,
+        startedAt: agent.activeTurnStartedAt?.toISOString() ?? null,
+      }
+    : null;
+}
+
 export function toAgentPayload(
   agent: ManagedAgent,
   options?: ProjectionOptions,
@@ -145,12 +154,8 @@ export function toAgentPayload(
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     status: agent.lifecycle,
-    activeTurn: agent.activeTurnId
-      ? {
-          turnId: agent.activeTurnId,
-          startedAt: agent.activeTurnStartedAt?.toISOString() ?? null,
-        }
-      : null,
+    interruptRecoveryPending: agent.session?.hasPendingInterruptRecovery?.(),
+    activeTurn: projectActiveTurn(agent),
     ...(agent.latestTurnChanges ? { latestTurnChanges: agent.latestTurnChanges } : {}),
     capabilities: cloneCapabilities(agent.capabilities),
     currentModeId: agent.currentModeId,

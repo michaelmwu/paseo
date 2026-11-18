@@ -33,51 +33,6 @@ const idleClient = (sendAgentMessage = vi.fn(async () => ({}))) => ({
 });
 
 describe("offline message outbox", () => {
-  it("serializes deliveries for one agent without blocking other agents", async () => {
-    const store = await import("./store");
-    const delivery = await import("./delivery");
-    const items = ["older", "newer", "other-agent"].map((id) =>
-      store.createPendingOutboxItem({
-        id,
-        serverId: "host-1",
-        agentId: id === "other-agent" ? "agent-2" : "agent-1",
-        text: id,
-        images: [],
-        attachments: [],
-      }),
-    );
-    for (const item of items) await store.enqueueOutboxItem(item);
-    const encoding = Promise.withResolvers<void>();
-    const entered = Promise.withResolvers<void>();
-    const sendAgentMessage = vi.fn().mockResolvedValue({});
-    const client = idleClient(sendAgentMessage);
-    const older = delivery.deliverOutboxItem({
-      item: items[0]!,
-      client,
-      encode: async () => {
-        entered.resolve();
-        await encoding.promise;
-        return [];
-      },
-    });
-    await entered.promise;
-    const newer = delivery.deliverOutboxItem({ item: items[1]!, client });
-    expect(await newer).toBe(false);
-    try {
-      await delivery.deliverOutboxItem({ item: items[2]!, client });
-      expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual(["other-agent"]);
-    } finally {
-      encoding.resolve();
-      await Promise.all([older, newer]);
-    }
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
-      "other-agent",
-      "older",
-      "newer",
-    ]);
-  });
-
   it("preserves messages saved concurrently by two independent app windows", async () => {
     const first = await import("./store");
     await first.hydrateOutbox();
@@ -152,36 +107,6 @@ describe("offline message outbox", () => {
     expect(sendAgentMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("retains images queued by another window after this window hydrated", async () => {
-    const first = await import("./store");
-    await first.hydrateOutbox();
-    vi.resetModules();
-    const second = await import("./store");
-    await second.enqueueOutboxItem(
-      second.createPendingOutboxItem({
-        id: "other-window",
-        serverId: "host-1",
-        agentId: "agent-1",
-        text: "Send this photo later",
-        images: [
-          {
-            id: "shared-photo",
-            mimeType: "image/png",
-            storageType: "web-indexeddb",
-            storageKey: "shared-photo",
-            createdAt: 1,
-          },
-        ],
-        attachments: [],
-      }),
-    );
-
-    expect(first.useOutboxStore.getState().items).toEqual([]);
-    expect(await first.getOutboxImageIds()).toEqual(new Set(["shared-photo"]));
-    // Reference collection must not adopt another window's delivery ownership.
-    expect(first.useOutboxStore.getState().items).toEqual([]);
-  });
-
   it("waits for the agent to be idle before draining the next queued message", async () => {
     const store = await import("./store");
     for (const id of ["first", "second"])
@@ -216,89 +141,6 @@ describe("offline message outbox", () => {
     await drainPendingOutbox({ serverId: "host-1", client });
     expect(sendAgentMessage).toHaveBeenCalledTimes(2);
     expect(store.useOutboxStore.getState().items).toEqual([]);
-  });
-
-  it("blocks automatic delivery behind a failed message until its retry succeeds", async () => {
-    const store = await import("./store");
-    const delivery = await import("./delivery");
-    for (const [index, id] of ["first", "second", "other-agent"].entries()) {
-      await store.enqueueOutboxItem({
-        ...store.createPendingOutboxItem({
-          id,
-          serverId: "host-1",
-          agentId: id === "other-agent" ? "agent-2" : "agent-1",
-          text: id,
-          images: [],
-          attachments: [],
-        }),
-        createdAt: index,
-      });
-    }
-    const sendAgentMessage = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Acknowledgement lost"))
-      .mockResolvedValue({});
-    const client = idleClient(sendAgentMessage);
-
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
-      "first",
-      "other-agent",
-    ]);
-    expect(store.useOutboxStore.getState().items.map(({ id, status }) => ({ id, status }))).toEqual(
-      [
-        { id: "first", status: "needs_review" },
-        { id: "second", status: "pending" },
-      ],
-    );
-
-    await delivery.deliverOutboxItem({ item: store.useOutboxStore.getState().items[0]!, client });
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
-      "first",
-      "other-agent",
-      "first",
-      "second",
-    ]);
-    expect(store.useOutboxStore.getState().items).toEqual([]);
-  });
-
-  it("blocks queued successors after an interrupted send until that item is discarded", async () => {
-    const first = await import("./store");
-    for (const [index, id] of ["first", "second"].entries()) {
-      await first.enqueueOutboxItem({
-        ...first.createPendingOutboxItem({
-          id,
-          serverId: "host-1",
-          agentId: "agent-1",
-          text: id,
-          images: [],
-          attachments: [],
-        }),
-        createdAt: index,
-      });
-    }
-    await first.updateOutboxItem("first", (item) => ({ ...item, status: "sending" }));
-    vi.resetModules();
-    const restored = await import("./store");
-    await restored.hydrateOutbox();
-    const delivery = await import("./delivery");
-    const client = idleClient();
-
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    expect(client.sendAgentMessage).not.toHaveBeenCalled();
-    expect(restored.useOutboxStore.getState().items[0]?.status).toBe("needs_review");
-
-    await restored.discardOutboxItem("first");
-    await delivery.drainPendingOutbox({ serverId: "host-1", client });
-    expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendAgentMessage).toHaveBeenCalledWith("agent-1", "second", {
-      messageId: "second",
-      images: [],
-      attachments: [],
-    });
-    expect(restored.useOutboxStore.getState().items).toEqual([]);
   });
 
   it("reuses a canonical timeline row when retrying the same message", async () => {
@@ -359,7 +201,7 @@ describe("offline message outbox", () => {
     expect((await second.getOutboxImageIds()).has("photo-1")).toBe(true);
   });
 
-  it("requires manual review after an interrupted send, then retries with the same ID", async () => {
+  it("reconciles an interrupted send after reload without submitting it twice", async () => {
     const store = await import("./store");
     await store.enqueueOutboxItem(
       store.createPendingOutboxItem({
@@ -376,10 +218,16 @@ describe("offline message outbox", () => {
       .mockRejectedValueOnce(new Error("Connection dropped"))
       .mockResolvedValueOnce({});
     const delivery = await import("./delivery");
-    const client = idleClient(sendAgentMessage);
+    const client = {
+      ...idleClient(sendAgentMessage),
+      getAgentMessageDeliveryStatus: vi
+        .fn()
+        .mockResolvedValueOnce({ status: "unknown" })
+        .mockResolvedValueOnce({ status: "accepted" }),
+    };
     await delivery.drainPendingOutbox({ serverId: "host-1", client });
     expect(store.useOutboxStore.getState().items).toMatchObject([
-      { id: "message-2", status: "needs_review", error: "Connection dropped" },
+      { id: "message-2", status: "needs_review" },
     ]);
 
     vi.resetModules();
@@ -391,10 +239,10 @@ describe("offline message outbox", () => {
       item: restored.useOutboxStore.getState().items[0]!,
       client,
     });
-    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
-      "message-2",
-      "message-2",
-    ]);
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual(["message-2"]);
+    expect(client.getAgentMessageDeliveryStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-2", text: "Continue" }),
+    );
     expect(restored.useOutboxStore.getState().items).toEqual([]);
   });
 
@@ -439,7 +287,310 @@ describe("offline message outbox", () => {
       { id: "message-4", status: "sending" },
     ]);
   });
+});
 
+async function saveMessage(id: string) {
+  const store = await import("./store");
+  const item = store.createPendingOutboxItem({
+    id,
+    serverId: "host-1",
+    agentId: "agent-1",
+    text: "Original prompt",
+    images: [],
+    attachments: [],
+  });
+  await store.enqueueOutboxItem(item);
+  return { store, item };
+}
+
+it("keeps slow delivery in flight and resolves its receipt without resending", async () => {
+  const { store, item } = await saveMessage("slow");
+  const client = {
+    ...idleClient(
+      vi.fn(async () => {
+        throw new Error("Timed out waiting for the host");
+      }),
+    ),
+    getAgentMessageDeliveryStatus: vi
+      .fn()
+      .mockResolvedValueOnce({ status: "in_flight" })
+      .mockResolvedValueOnce({ status: "accepted" }),
+  };
+  const delivery = await import("./delivery");
+  await delivery.deliverOutboxItem({ item, client });
+  expect(store.useOutboxStore.getState().items[0]?.status).toBe("in_flight");
+  await delivery.drainPendingOutbox({ serverId: item.serverId, client });
+  expect(store.useOutboxStore.getState().items).toEqual([]);
+  expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+});
+
+it("retries a definite pre-dispatch rejection with exactly the same identity", async () => {
+  const { store, item } = await saveMessage("rejected");
+  const send = vi
+    .fn()
+    .mockRejectedValueOnce(
+      Object.assign(new Error("Not submitted"), {
+        deliveryOutcome: "not_submitted",
+      }),
+    )
+    .mockResolvedValueOnce({});
+  const client = idleClient(send);
+  const { deliverOutboxItem } = await import("./delivery");
+  await deliverOutboxItem({ item, client });
+  expect(store.useOutboxStore.getState().items[0]?.status).toBe("failed");
+  await deliverOutboxItem({ item, client });
+  expect(send.mock.calls.map((call) => call[2].messageId)).toEqual(["rejected", "rejected"]);
+  expect(store.useOutboxStore.getState().items).toEqual([]);
+});
+
+it("classifies image encoding failures as unsent and allows retry", async () => {
+  const { store, item } = await saveMessage("image-error");
+  const client = idleClient();
+  const { deliverOutboxItem } = await import("./delivery");
+  await deliverOutboxItem({
+    item,
+    client,
+    encode: async () => {
+      throw new Error("Cannot read image");
+    },
+  });
+  expect(store.useOutboxStore.getState().items[0]).toMatchObject({
+    status: "failed",
+    error: "Cannot read image",
+  });
+  expect(client.sendAgentMessage).not.toHaveBeenCalled();
+  await deliverOutboxItem({ item, client });
+  expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+});
+
+it("never infers delivery from a timeline row or a missing receipt", async () => {
+  const { store, item } = await saveMessage("uncertain");
+  const client = {
+    ...idleClient(
+      vi.fn(async () => {
+        throw new Error("Disconnected");
+      }),
+    ),
+    getAgentMessageDeliveryStatus: vi.fn(async () => ({
+      status: "unknown" as const,
+      failure: undefined,
+    })),
+  };
+  const delivery = await import("./delivery");
+  await delivery.deliverOutboxItem({ item, client });
+  await delivery.deliverOutboxItem({ item, client });
+  expect(store.useOutboxStore.getState().items[0]?.status).toBe("needs_review");
+  const { useSessionStore } = await import("@/stores/session-store");
+  expect(
+    useSessionStore.getState().sessions[item.serverId]?.agentStreamTail.get(item.agentId),
+  ).toMatchObject([{ clientMessageId: item.id }]);
+  expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+});
+
+it("queues a definite retry visibly while the agent is busy", async () => {
+  const { store, item } = await saveMessage("busy");
+  await store.updateOutboxItem(item.id, (current) => ({ ...current, status: "failed" }));
+  const client = {
+    ...idleClient(),
+    fetchAgent: async () => ({ agent: { status: "running" as const } }),
+  };
+  const { deliverOutboxItem } = await import("./delivery");
+  await deliverOutboxItem({ item, client });
+  expect(store.useOutboxStore.getState().items[0]?.status).toBe("pending");
+  expect(client.sendAgentMessage).not.toHaveBeenCalled();
+});
+
+it("preserves the original wire image payload for read-only reconciliation after reload", async () => {
+  const { store, item } = await saveMessage("image-wire");
+  const images = [{ data: "original-payload", mimeType: "image/png" }];
+  let connected = true;
+  const client = {
+    ...idleClient(
+      vi.fn(async () => {
+        connected = false;
+        throw new Error("Connection lost");
+      }),
+    ),
+    get isConnected() {
+      return connected;
+    },
+    getAgentMessageDeliveryStatus: vi.fn(async () => ({
+      status: "accepted" as const,
+      failure: undefined,
+    })),
+  };
+  const delivery = await import("./delivery");
+  await delivery.deliverOutboxItem({ item, client, encode: async () => images });
+  expect(store.useOutboxStore.getState().items[0]?.wireImages).toEqual(images);
+  connected = true;
+  vi.resetModules();
+  const restored = await import("./store");
+  await restored.hydrateOutbox();
+  await (await import("./delivery")).drainPendingOutbox({ serverId: item.serverId, client });
+  expect(client.getAgentMessageDeliveryStatus).toHaveBeenCalledWith(
+    expect.objectContaining({ images }),
+  );
+  expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+  expect(restored.useOutboxStore.getState().items).toEqual([]);
+});
+
+describe("retained local bundle safeguards", () => {
+  it("serializes deliveries for one agent without blocking other agents", async () => {
+    const store = await import("./store");
+    const delivery = await import("./delivery");
+    const items = ["older", "newer", "other-agent"].map((id) =>
+      store.createPendingOutboxItem({
+        id,
+        serverId: "host-1",
+        agentId: id === "other-agent" ? "agent-2" : "agent-1",
+        text: id,
+        images: [],
+        attachments: [],
+      }),
+    );
+    for (const item of items) await store.enqueueOutboxItem(item);
+    const encoding = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const sendAgentMessage = vi.fn().mockResolvedValue({});
+    const client = idleClient(sendAgentMessage);
+    const older = delivery.deliverOutboxItem({
+      item: items[0]!,
+      client,
+      encode: async () => {
+        entered.resolve();
+        await encoding.promise;
+        return [];
+      },
+    });
+    await entered.promise;
+    const newer = delivery.deliverOutboxItem({ item: items[1]!, client });
+    expect(await newer).toBe(false);
+    try {
+      await delivery.deliverOutboxItem({ item: items[2]!, client });
+      expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual(["other-agent"]);
+    } finally {
+      encoding.resolve();
+      await Promise.all([older, newer]);
+    }
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "other-agent",
+      "older",
+      "newer",
+    ]);
+  });
+  it("retains images queued by another window after this window hydrated", async () => {
+    const first = await import("./store");
+    await first.hydrateOutbox();
+    vi.resetModules();
+    const second = await import("./store");
+    await second.enqueueOutboxItem(
+      second.createPendingOutboxItem({
+        id: "other-window",
+        serverId: "host-1",
+        agentId: "agent-1",
+        text: "Send this photo later",
+        images: [
+          {
+            id: "shared-photo",
+            mimeType: "image/png",
+            storageType: "web-indexeddb",
+            storageKey: "shared-photo",
+            createdAt: 1,
+          },
+        ],
+        attachments: [],
+      }),
+    );
+
+    expect(first.useOutboxStore.getState().items).toEqual([]);
+    expect(await first.getOutboxImageIds()).toEqual(new Set(["shared-photo"]));
+    // Reference collection must not adopt another window's delivery ownership.
+    expect(first.useOutboxStore.getState().items).toEqual([]);
+  });
+  it("blocks automatic delivery behind a failed message until its retry succeeds", async () => {
+    const store = await import("./store");
+    const delivery = await import("./delivery");
+    for (const [index, id] of ["first", "second", "other-agent"].entries()) {
+      await store.enqueueOutboxItem({
+        ...store.createPendingOutboxItem({
+          id,
+          serverId: "host-1",
+          agentId: id === "other-agent" ? "agent-2" : "agent-1",
+          text: id,
+          images: [],
+          attachments: [],
+        }),
+        createdAt: index,
+      });
+    }
+    const sendAgentMessage = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Message was not submitted"), { deliveryOutcome: "not_submitted" }),
+      )
+      .mockResolvedValue({});
+    const client = idleClient(sendAgentMessage);
+
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "first",
+      "other-agent",
+    ]);
+    expect(store.useOutboxStore.getState().items.map(({ id, status }) => ({ id, status }))).toEqual(
+      [
+        { id: "first", status: "failed" },
+        { id: "second", status: "pending" },
+      ],
+    );
+
+    await delivery.deliverOutboxItem({ item: store.useOutboxStore.getState().items[0]!, client });
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(sendAgentMessage.mock.calls.map((call) => call[2].messageId)).toEqual([
+      "first",
+      "other-agent",
+      "first",
+      "second",
+    ]);
+    expect(store.useOutboxStore.getState().items).toEqual([]);
+  });
+  it("blocks queued successors after an interrupted send until that item is discarded", async () => {
+    const first = await import("./store");
+    for (const [index, id] of ["first", "second"].entries()) {
+      await first.enqueueOutboxItem({
+        ...first.createPendingOutboxItem({
+          id,
+          serverId: "host-1",
+          agentId: "agent-1",
+          text: id,
+          images: [],
+          attachments: [],
+        }),
+        createdAt: index,
+      });
+    }
+    await first.updateOutboxItem("first", (item) => ({ ...item, status: "sending" }));
+    vi.resetModules();
+    const restored = await import("./store");
+    await restored.hydrateOutbox();
+    const delivery = await import("./delivery");
+    const client = idleClient();
+
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(client.sendAgentMessage).not.toHaveBeenCalled();
+    expect(restored.useOutboxStore.getState().items[0]?.status).toBe("needs_review");
+
+    await restored.discardOutboxItem("first");
+    await delivery.drainPendingOutbox({ serverId: "host-1", client });
+    expect(client.sendAgentMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendAgentMessage).toHaveBeenCalledWith("agent-1", "second", {
+      messageId: "second",
+      images: [],
+      attachments: [],
+    });
+    expect(restored.useOutboxStore.getState().items).toEqual([]);
+  });
   it("rejects attachment collection when a persisted peer item is unreadable", async () => {
     const store = await import("./store");
     await store.hydrateOutbox();

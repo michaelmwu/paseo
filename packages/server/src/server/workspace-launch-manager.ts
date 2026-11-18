@@ -1,7 +1,9 @@
 import pLimit from "p-limit";
+import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type { TerminalSession } from "../terminal/terminal.js";
+import { NoTerminalWorkerAvailableError } from "../terminal/terminal-worker-pool.js";
 import type {
   WorkspaceLaunchEndpointPayload,
   WorkspaceLaunchPayload,
@@ -127,6 +129,7 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
   private readonly runtimes = new Map<string, Map<string, WorkspaceLaunchRuntime>>();
   private readonly activeLaunches = new Map<string, string>();
   private readonly operationChains = new Map<string, Promise<unknown>>();
+  private readonly pendingLaunchCreations = new Map<string, string>();
   private readonly endpointProbe: WorkspaceLaunchEndpointProbe;
   private readonly endpointProbeLimit = pLimit(LAUNCH_ENDPOINT_PROBE_CONCURRENCY);
   private readonly now: () => number;
@@ -235,6 +238,7 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
     }
     const unavailableError = terminalManager.getUnavailableError?.();
     if (unavailableError) throw unavailableError;
+    await this.cleanupPendingLaunchCreation(context.workspaceId);
 
     const closingLaunches = this.getClosingTerminals(context.workspaceId).filter(
       (terminal) => terminal.workspaceLaunch,
@@ -249,19 +253,18 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
     if (activeLaunchName === launchName && activeRuntime?.lifecycle === "running") {
       return this.toPayload(context, launchName);
     }
-    await this.stopSupersededScript(context, launchName);
-
-    const suppressedServiceNames = await this.getSuppressedServiceNames(
+    const suppressedServiceNames = this.getSuppressedServiceNames(
       context,
       configResult.config,
       launchName,
     );
-    await releaseWorkspaceServicePorts(context.workspaceId, Array.from(suppressedServiceNames));
     const configuredServicePorts = await this.getConfiguredServicePorts(
       context,
       configResult.config,
       suppressedServiceNames,
     );
+    await this.stopSupersededScript(context, launchName);
+    await releaseWorkspaceServicePorts(context.workspaceId, Array.from(suppressedServiceNames));
     const environment =
       this.deps.workspaceRuntimeEnvironment.get(context.workspaceId) ??
       (await this.deps.workspaceRuntimeEnvironment.ensure({
@@ -312,12 +315,14 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
     try {
       return await this.startPreparedLaunch(prepared);
     } catch (error) {
+      await this.cleanupPendingLaunchCreation(prepared.context.workspaceId);
       if (!superseded) {
         throw error;
       }
       try {
         await this.startPreparedLaunch(superseded);
       } catch (restoreError) {
+        await this.cleanupPendingLaunchCreation(prepared.context.workspaceId);
         throw new Error(
           `Failed to start launch '${prepared.launchName}' (${String(error)}) and restore launch '${superseded.launchName}'`,
           { cause: restoreError },
@@ -336,10 +341,12 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
       throw new Error("Workspace launches are not available on this daemon");
     }
     const previousRuntime = this.runtimes.get(context.workspaceId)?.get(launchName);
-    if (previousRuntime?.lifecycle === "stopped" && previousRuntime.terminalId) {
-      terminalManager.killTerminal(previousRuntime.terminalId);
-    }
+    // A rejected IPC request can still have created a live terminal. Keep its
+    // identity until creation or compensating cleanup is confirmed.
+    const terminalId = randomUUID();
+    this.pendingLaunchCreations.set(context.workspaceId, terminalId);
     const terminal = await terminalManager.createTerminal({
+      id: terminalId,
       cwd: context.workspaceDirectory,
       workspaceId: context.workspaceId,
       name: `launch:${launchName}`,
@@ -357,6 +364,7 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
       },
       workspacePortBlock: { portBase: environment.portBase, portCount: environment.portCount },
     });
+    this.pendingLaunchCreations.delete(context.workspaceId);
     const runtime: WorkspaceLaunchRuntime = {
       launchName,
       command,
@@ -375,6 +383,9 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
     this.runtimes.set(context.workspaceId, workspaceRuntimes);
     this.activeLaunches.set(context.workspaceId, launchName);
     this.listenForRuntimeExit(runtime, terminal);
+    if (previousRuntime?.lifecycle === "stopped" && previousRuntime.terminalId) {
+      terminalManager.killTerminal(previousRuntime.terminalId);
+    }
 
     try {
       if (this.isCurrentRunningRuntime(runtime)) {
@@ -435,6 +446,25 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
     return closing.filter((terminal) => terminal.workspaceId === workspaceId);
   }
 
+  private async cleanupPendingLaunchCreation(workspaceId: string): Promise<void> {
+    const terminalId = this.pendingLaunchCreations.get(workspaceId);
+    if (!terminalId) return;
+    const terminalManager = this.deps.terminalManager;
+    if (!terminalManager)
+      throw new Error("Cannot confirm launch cleanup without a terminal worker");
+    try {
+      await terminalManager.killTerminalAndWait(terminalId);
+    } catch (error) {
+      // An empty pool has already confirmed that the owning worker is gone.
+      if (!(error instanceof NoTerminalWorkerAvailableError)) {
+        throw new Error("Cannot confirm launch cleanup; retry before starting another launch", {
+          cause: error,
+        });
+      }
+    }
+    this.pendingLaunchCreations.delete(workspaceId);
+  }
+
   private async getWorkspaceTerminals(workspaceId: string): Promise<TerminalSession[]> {
     const terminalManager = this.deps.terminalManager;
     if (!terminalManager) return [];
@@ -448,6 +478,7 @@ export class WorkspaceLaunchManager implements WorkspaceLaunchService {
   }
 
   private async disposeWorkspaceInternal(workspaceId: string): Promise<void> {
+    await this.cleanupPendingLaunchCreation(workspaceId);
     const runtimes = this.runtimes.get(workspaceId);
     const terminalManager = this.deps.terminalManager;
     const unavailableError = terminalManager?.getUnavailableError?.();

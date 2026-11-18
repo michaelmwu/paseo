@@ -260,7 +260,7 @@ describe("workspace replica authority", () => {
       primaryServerId,
       loadingServerId,
     ]);
-    const projects = selectWorkspaceStructureProjects(state, directoryServerIds, [
+    const projects = selectWorkspaceStructureProjects(state, directoryServerIds, undefined, [
       {
         id: "local-link",
         members: [
@@ -639,7 +639,7 @@ it("a prompt changes only its project's structure and output preserves both proj
   const b = { ...createWorkspace({ id: "b", projectId: "p" }), createdAt: new Date("2026-02-01") };
   const c = { ...createWorkspace({ id: "c", projectId: "q" }), createdAt: new Date("2026-02-01") };
   const projects = new Map([a, c].map((w) => [w.projectId, projectDescriptorFromTestWorkspace(w)]));
-  const select = createWorkspaceStructureProjectsSelector([SERVER_ID], [], "lastPrompt");
+  const select = createWorkspaceStructureProjectsSelector([SERVER_ID], "lastPrompt", []);
   const state = (workspaces: WorkspaceDescriptor[]) => ({
     sessions: { [SERVER_ID]: { projects, workspaces: new Map(workspaces.map((w) => [w.id, w])) } },
   });

@@ -205,13 +205,19 @@ export const es: TranslationResources = {
   },
   composer: {
     outbox: {
-      pending: "Guardado en este dispositivo. Se enviará cuando el host vuelva a conectarse.",
+      pending: "Guardado en este dispositivo. Esperando al host o al agente.",
       sending: "Enviando…",
-      needsReview: "Revisa la entrega. Puedes reintentar con el mismo ID de mensaje o descartarlo.",
+      needsReview: "Entrega sin confirmar. Comprueba el estado antes de otra acción.",
       retry: "Reintentar envío",
       discard: "Descartar mensaje guardado",
       attachmentMessage: "Mensaje con archivos adjuntos",
+
+      failed: "No entregado. Reintenta este mensaje guardado.",
+      inFlight: "El host sigue procesando el mensaje. Comprobando automáticamente…",
+      checking: "Comprobando la entrega…",
+      check: "Comprobar la entrega",
     },
+    viewMessage: "Buscar mensaje",
     placeholders: {
       desktop: "Envíe un mensaje al agente, etiquete@fileso use/commandsy/skills",
       mobile: "Mensaje,@files,/commands",
@@ -274,6 +280,10 @@ export const es: TranslationResources = {
       removeReview: "Eliminar archivo adjunto de reseña",
     },
     errors: {
+      messageLookupFailed:
+        "No se pudo actualizar la conversación. La entrega sigue sin confirmarse. Vuelve a conectarte e intenta buscar el mensaje de nuevo.",
+      messageNotFound:
+        "No se encontró este mensaje en el historial disponible. La entrega sigue sin confirmarse.",
       failedToSend: "No se pudo enviar el mensaje",
       failedToCreateAgent: "No se pudo crear el agente",
       noHostSelected: "Ningún anfitrión seleccionado",

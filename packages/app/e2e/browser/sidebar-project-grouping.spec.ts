@@ -481,7 +481,6 @@ test.describe("Sidebar project grouping", () => {
     await expect(sheet.getByTestId("project-link-project-link-e2e")).toBeVisible();
     await expect(primaryUnlink).toBeEnabled();
   });
-
   test("keeps saved project links reachable after their host project is removed", async ({
     page,
     crossHostProject,

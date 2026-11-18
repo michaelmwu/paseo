@@ -207,13 +207,19 @@ export const fr: TranslationResources = {
   },
   composer: {
     outbox: {
-      pending: "Enregistré sur cet appareil. Envoi à la reconnexion de l’hôte.",
+      pending: "Enregistré sur cet appareil. En attente de l’hôte ou de l’agent.",
       sending: "Envoi en cours…",
-      needsReview: "Vérifiez la livraison. Réessayez avec le même ID ou supprimez le message.",
+      needsReview: "Livraison non confirmée. Vérifiez son état avant toute autre action.",
       retry: "Réessayer l’envoi",
       discard: "Supprimer le message enregistré",
       attachmentMessage: "Message avec pièces jointes",
+
+      failed: "Non livré. Réessayez ce message enregistré.",
+      inFlight: "L’hôte traite encore ce message. Vérification automatique…",
+      checking: "Vérification de la livraison…",
+      check: "Vérifier la livraison",
     },
+    viewMessage: "Rechercher le message",
     placeholders: {
       desktop: "Écrivez à l’agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
@@ -276,6 +282,10 @@ export const fr: TranslationResources = {
       removeReview: "Retirer la revue jointe",
     },
     errors: {
+      messageLookupFailed:
+        "Impossible d’actualiser la conversation. La livraison reste incertaine. Reconnectez-vous et recherchez le message à nouveau.",
+      messageNotFound:
+        "Ce message est introuvable dans l’historique disponible. Sa livraison reste incertaine.",
       failedToSend: "Impossible d’envoyer le message",
       failedToCreateAgent: "Impossible de créer l’agent",
       noHostSelected: "Aucun hôte sélectionné",

@@ -62,8 +62,8 @@ try {
     source: { kind: "directory", path: cwd },
     title: "Compiled daemon smoke",
   });
-  for (const { repository, id } of inputs.plugins) {
-    const directory = path.join(root, ".dev/companions", repository.split("/").at(-1));
+  for (const { repository, pluginPath = "", id } of inputs.plugins) {
+    const directory = path.join(root, ".dev/companions", repository.split("/").at(-1), pluginPath);
     const plugin = await observer.installDirectoryPlugin(directory, id);
     assert.equal(plugin.status, "running", JSON.stringify(plugin));
     assert.equal(plugin.error, undefined, JSON.stringify(plugin));
@@ -80,7 +80,46 @@ try {
     url: "http://127.0.0.1:" + pageServer.address().port,
   });
   assert.equal(browserResult.title, "Paseo bundle smoke");
-  assert.ok(browserResult.image.length > 100);
+  const browserStreamController = new AbortController();
+  let browserFrame;
+  let browserStreamId;
+  const browserStream = observer.observePluginRpc(
+    "remote-browser",
+    "browser.stream",
+    { workspaceId: workspace.id },
+    { signal: browserStreamController.signal },
+  );
+  const stopBrowserStream = browserStream.subscribe({
+    snapshot() {},
+    binary(frame) {
+      browserFrame = frame;
+    },
+    update(message) {
+      if (message.type !== "plugin.rpc.event") return;
+      const event = message.payload.event;
+      if (event instanceof Uint8Array) browserFrame = event;
+      else browserStreamId = event.streamId;
+    },
+  });
+  try {
+    await browserStream.ready;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (browserFrame) break;
+      await delay(100);
+    }
+    assert.ok(browserFrame?.byteLength > 100, "Browser stream did not deliver a JPEG frame");
+    assert.equal(browserFrame[4], 0xff);
+    assert.equal(browserFrame[5], 0xd8);
+    assert.equal(typeof browserStreamId, "string");
+    await observer.invokePluginRpc("remote-browser", "browser.ack", {
+      streamId: browserStreamId,
+      sequence: new DataView(browserFrame.buffer, browserFrame.byteOffset, 4).getUint32(0),
+    });
+  } finally {
+    stopBrowserStream();
+    browserStreamController.abort();
+    await browserStream.release();
+  }
   const terminal = await workspace.terminals.create({
     command: process.execPath,
     args: ["-e", "console.log('PASEO_PATCHED_V016_OK'); setInterval(() => {}, 1000)"],
@@ -156,6 +195,7 @@ try {
       build: root,
       installed,
       browserRpc: "passed",
+      browserStream: "passed",
     }),
   );
 } catch (error) {

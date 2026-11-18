@@ -159,8 +159,8 @@ function hasPendingWorkspaceHydration(
 export function selectWorkspaceStructureProjects(
   state: SessionsSnapshot,
   serverIds: readonly string[],
-  localProjectLinks: Iterable<LocalProjectLink> = [],
   workspaceSort?: WorkspaceSort,
+  localProjectLinks: Iterable<LocalProjectLink> = [],
 ): WorkspaceStructureProject[] {
   const unhydratedProjectLinkServerIds = serverIds.filter((serverId) =>
     hasPendingWorkspaceHydration(state.sessions[serverId]),
@@ -203,8 +203,8 @@ export function selectWorkspaceStructureProjects(
 
 export function createWorkspaceStructureProjectsSelector(
   serverIds: readonly string[],
-  localProjectLinks: readonly LocalProjectLink[] = [],
   workspaceSort?: WorkspaceSort,
+  localProjectLinks: readonly LocalProjectLink[] = [],
 ): (state: SessionsSnapshot) => WorkspaceStructureProject[] {
   let previousInputs: Array<{
     hasPendingWorkspaceHydration: boolean;
@@ -236,8 +236,8 @@ export function createWorkspaceStructureProjectsSelector(
     const next = selectWorkspaceStructureProjects(
       state,
       serverIds,
-      localProjectLinks,
       workspaceSort,
+      localProjectLinks,
     );
     const previousByKey = new Map(previousProjects?.map((project) => [project.viewKey, project]));
     previousProjects = next.map((project) => {

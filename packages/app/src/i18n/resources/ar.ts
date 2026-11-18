@@ -198,13 +198,19 @@ export const ar: TranslationResources = {
   },
   composer: {
     outbox: {
-      pending: "حُفظت على هذا الجهاز. ستُرسل عند إعادة اتصال المضيف.",
+      pending: "تم الحفظ على هذا الجهاز. بانتظار جاهزية المضيف أو الوكيل.",
       sending: "جارٍ الإرسال…",
-      needsReview: "تحقق من حالة التسليم. أعد المحاولة بمعرّف الرسالة نفسه أو احذفها.",
+      needsReview: "لم يتم تأكيد التسليم. تحقق من الحالة قبل أي إجراء آخر.",
       retry: "إعادة محاولة الإرسال",
       discard: "حذف الرسالة المحفوظة",
       attachmentMessage: "رسالة مع مرفقات",
+
+      failed: "لم يتم التسليم. أعد إرسال هذه الرسالة المحفوظة.",
+      inFlight: "لا يزال المضيف يعالج الرسالة. جارٍ التحقق تلقائيًا…",
+      checking: "جارٍ التحقق من التسليم…",
+      check: "التحقق من حالة التسليم",
     },
+    viewMessage: "البحث عن الرسالة",
     placeholders: {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
@@ -267,6 +273,9 @@ export const ar: TranslationResources = {
       removeReview: "إزالة مرفق المراجعة",
     },
     errors: {
+      messageLookupFailed:
+        "تعذر تحديث المحادثة. لا يزال التسليم غير مؤكد. أعد الاتصال وحاول البحث عن الرسالة مرة أخرى.",
+      messageNotFound: "تعذر العثور على هذه الرسالة في السجل المتاح. لا يزال التسليم غير مؤكد.",
       failedToSend: "فشل في إرسال الرسالة",
       failedToCreateAgent: "فشل في إنشاء الوكيل",
       noHostSelected: "لم يتم تحديد مضيف",

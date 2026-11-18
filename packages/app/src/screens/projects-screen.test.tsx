@@ -130,7 +130,6 @@ vi.mock("react-i18next", () => ({
     },
   }),
 }));
-
 vi.mock("react-native-reanimated", () => ({
   default: { View: "div" },
   useAnimatedStyle: (factory: () => unknown) => factory(),

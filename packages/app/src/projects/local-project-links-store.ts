@@ -16,7 +16,11 @@ const LOCAL_PROJECT_LINKS_STORAGE_KEY = "local-project-links";
 
 const ProjectLinkPlacementRefSchema = z.strictObject({
   serverId: z.string().trim().min(1),
-  projectId: z.string().trim().min(1),
+  // Project IDs can be retained legacy remote/path-shaped values, so whitespace is significant.
+  projectId: z
+    .string()
+    .min(1)
+    .refine((projectId) => projectId.trim().length > 0),
 });
 
 const LocalProjectLinkIdentitySchema = z.strictObject({
@@ -85,6 +89,23 @@ export function linkLocalProjects(input: {
   ];
 }
 
+function isLocalProjectLinkRequestSatisfied(input: {
+  links: readonly LocalProjectLink[];
+  members: readonly ProjectLinkPlacementRef[];
+  identity: LocalProjectLinkIdentity;
+}): boolean {
+  const members = normalizeMembers(input.members);
+  return (
+    members.length >= 2 &&
+    hasDistinctServers(members) &&
+    input.links.some(
+      (link) =>
+        sameLocalProjectLinkIdentity(link.identity, input.identity) &&
+        members.every((member) => findLocalProjectLink([link], member) !== null),
+    )
+  );
+}
+
 export function unlinkLocalProject(input: {
   links: readonly LocalProjectLink[];
   placement: ProjectLinkPlacementRef;
@@ -101,7 +122,9 @@ export function unlinkLocalProject(input: {
 export function createLocalProjectLinksStore(
   storage: PersistStorage<LocalProjectLinksPersistedState>,
 ) {
+  let hydrationError: unknown;
   let resolveHydration: () => void;
+  let mutationTail = Promise.resolve();
   const hydration = new Promise<void>((resolve) => {
     resolveHydration = resolve;
   });
@@ -112,25 +135,42 @@ export function createLocalProjectLinksStore(
         const updateLinks = async (
           update: (links: readonly LocalProjectLink[]) => LocalProjectLink[],
         ): Promise<void> => {
-          // Validated storage deliberately skips writes during its initial read. Wait until that
-          // read has settled so this update applies to the saved links and can be acknowledged.
-          await hydration;
-          const previousLinks = get().links;
-          try {
-            // Zustand's persist middleware returns the storage write from this wrapped set call.
-            // Await it so callers do not acknowledge a device-local link before it is durable.
-            await Promise.resolve(set({ links: update(previousLinks) }));
-          } catch (error) {
-            // The storage still holds the prior value when its write rejects. Restore the in-memory
-            // view as well, and ignore a second storage failure while preserving the original error.
-            await Promise.resolve(set({ links: previousLinks })).catch(() => undefined);
-            throw error;
-          }
+          const operation = mutationTail.then(async () => {
+            // Validated storage deliberately skips writes during its initial read. Wait until that
+            // read has settled so this update applies to the saved links and can be acknowledged.
+            await hydration;
+            // A write after a failed read would replace saved links that were never loaded.
+            if (hydrationError != null) throw hydrationError;
+            const previousLinks = get().links;
+            const nextLinks = update(previousLinks);
+            try {
+              // Zustand's persist middleware returns the storage write from this wrapped set call.
+              // Await it so callers do not acknowledge a device-local link before it is durable.
+              await Promise.resolve(set({ links: nextLinks }));
+            } catch (error) {
+              // The storage still holds the prior value when its write rejects. Restore the in-memory
+              // view as well, and ignore a second storage failure while preserving the original error.
+              await Promise.resolve(set({ links: previousLinks })).catch(() => undefined);
+              throw error;
+            }
+            return undefined;
+          });
+          // Every mutation must observe a settled predecessor. Otherwise a failed earlier write can
+          // restore stale links over a later mutation that already reported success.
+          mutationTail = operation.catch(() => undefined);
+          return operation;
         };
 
         return {
           links: [],
-          linkProjects: (input) => updateLinks((links) => linkLocalProjects({ ...input, links })),
+          linkProjects: (input) =>
+            updateLinks((links) => {
+              const nextLinks = linkLocalProjects({ ...input, links });
+              if (!isLocalProjectLinkRequestSatisfied({ ...input, links: nextLinks })) {
+                throw new Error("The selected projects can no longer be linked.");
+              }
+              return nextLinks;
+            }),
           unlinkProject: (placement) =>
             updateLinks((links) => unlinkLocalProject({ links, placement })),
         };
@@ -139,7 +179,10 @@ export function createLocalProjectLinksStore(
         name: LOCAL_PROJECT_LINKS_STORAGE_KEY,
         storage,
         partialize: (state) => ({ links: state.links }),
-        onRehydrateStorage: () => () => resolveHydration(),
+        onRehydrateStorage: () => (_state, error) => {
+          hydrationError = error;
+          resolveHydration();
+        },
       },
     ),
   );
@@ -154,8 +197,8 @@ function normalizeMembers(members: readonly ProjectLinkPlacementRef[]): ProjectL
   const normalized: ProjectLinkPlacementRef[] = [];
   for (const member of members) {
     const serverId = member.serverId.trim();
-    const projectId = member.projectId.trim();
-    if (!serverId || !projectId) continue;
+    const projectId = member.projectId;
+    if (!serverId || !projectId.trim()) continue;
     const normalizedMember = { serverId, projectId };
     const key = projectLinkPlacementKey(normalizedMember);
     if (seen.has(key)) continue;

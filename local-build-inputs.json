@@ -1,7 +1,7 @@
 {
   "release": { "tag": "v0.16.1", "commit": "c09a3d81e772a747dd11bca43d860f3518f07c2d" },
   "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
-  "rebuildBase": "1eb6ef6985785196ece351e202878f28d43f91d4",
+  "rebuildBase": "2baf466c34ec5cfd03b994eff493a0a1e9b9ff86",
   "alreadyInRelease": [7782, 9580],
   "mergedPrerequisiteBackports": [
     { "pr": 9757, "commit": "41c294c7855f3d864337b8628513bf00ece0a644" },
@@ -11,7 +11,7 @@
     {
       "pr": 4052,
       "branch": "add-project-linking-dialog-duplicate-git-repos",
-      "commit": "a9d4a682877d556a857f52b1354e884d037efe71"
+      "commit": "ca620522f2efec169f586936c05f37494a02a718"
     },
     {
       "pr": 4627,
@@ -35,24 +35,24 @@
     {
       "pr": 4525,
       "branch": "redesign-service-definitions",
-      "commit": "fbba8b0559eecd0d4febef22fac4885fe72877f2"
+      "commit": "46230492dab87096e347940243059a69e9d19a8c"
     },
     {
       "pr": 9332,
       "branch": "codex/offline-mobile-outbox",
-      "commit": "c41c71400d7acaea0399d3e5b91e43684089e77b"
+      "commit": "8562246f1b77d591ccae719a40a3661b69215811"
     },
     {
       "pr": 9548,
       "branch": "fix/message-receipt-reconciliation",
-      "commit": "0d4b149e239dbb969303937a333c6e344aef8bad",
+      "commit": "ccab6ce52ea5ed448230223ea75c5ff37baa3a10",
       "includes": [9580],
       "prerequisiteCommit": "d30aa16bebb180740267178a97baae87a504ca4f"
     },
     {
       "pr": 9550,
       "branch": "fix/codex-interrupt-retirement",
-      "commit": "6776c4dbffedf5c94a0e7396f6d93fa6255d2edf",
+      "commit": "4187a78260d2720ba59efc8916d89ac3f736202d",
       "includes": [9549, 5633],
       "prerequisiteCommit": "aaa14c1c58ce0ea0b52fe476bbe8c6623289ca24"
     },
@@ -71,39 +71,52 @@
   ],
   "plugins": [
     {
-      "repository": "508-dev/paseo-action-inbox",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/action-inbox",
       "id": "action-inbox",
-      "commit": "ea9d65b2d2522e075fe5ce78af9acad1aa254366"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "508-dev/paseo-pr-watcher",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/pr-watcher",
       "id": "pr-watcher",
-      "commit": "bc22f8dd34e6efa1990aea3b0355c65671fe76b7"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "508-dev/paseo-issue-workflow",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/issue-workflow",
       "id": "github-issue-workflow",
-      "commit": "c0531834646c0f1907b106e087fc97f94faebb8f"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "508-dev/paseo-remote-browser",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/remote-browser",
       "id": "remote-browser",
-      "commit": "3d6bea3d9c3ffbeb3ac598350718edb5d914166e"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "508-dev/paseo-agent-context",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/agent-context",
       "id": "agent-context",
-      "commit": "f5fae145ad028671b658b6c2a5addafdd89e86e3"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "508-dev/paseo-project-environment",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/project-environment",
       "id": "project-environment",
-      "commit": "ceefd8213ca87dce6cfc0b9f35c9158ed1c16bff"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     },
     {
-      "repository": "cprecioso/paseo-worktreeinclude",
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/worktreeinclude",
       "id": "paseo-worktreeinclude",
-      "commit": "d32b1a4d1eeced93c964073813be5289d6150171"
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/replies",
+      "id": "replies-508",
+      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
     }
   ]
 }

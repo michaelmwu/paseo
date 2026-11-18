@@ -101,7 +101,7 @@ export function useWorkspaceStructure(
 ): WorkspaceStructure {
   const localProjectLinks = useLocalProjectLinksStore((state) => state.links);
   const selectProjects = useMemo(
-    () => createWorkspaceStructureProjectsSelector(serverIds, localProjectLinks, workspaceSort),
+    () => createWorkspaceStructureProjectsSelector(serverIds, workspaceSort, localProjectLinks),
     [localProjectLinks, serverIds, workspaceSort],
   );
   const projects = useStoreWithEqualityFn(

@@ -1,3 +1,4 @@
+import { deliveryFailureOutcome } from "../message-receipts/outcome.js";
 import { messageFingerprint } from "../message-receipts/fingerprint.js";
 import {
   MessageAcceptanceStore,
@@ -102,6 +103,7 @@ import {
   type ForegroundPromptStart,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
+  type TrackedAgentRun,
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { parseAgentMessage, projectAgentMessages } from "./agent-messages/index.js";
@@ -165,11 +167,20 @@ export class AgentManagerShuttingDownError extends Error {
 }
 
 export class AgentRunCancellationError extends Error {
+  readonly deliveryOutcome?: "not_submitted";
+
   constructor(agentId: string, action: "reload" | "replace" | "rewind" | "stop") {
-    super(
-      `Cannot ${action} agent ${agentId} because its active run cancellation was not acknowledged`,
-    );
+    const reason = "Paseo could not confirm the agent stopped.";
+    const message = {
+      stop: `${reason} Try Stop again.`,
+      replace: `${reason} Your message was not sent. Try Stop, then retry your message.`,
+      reload: `Cannot reload agent ${agentId}. ${reason} Try Stop first.`,
+      rewind: `Cannot rewind agent ${agentId}. ${reason} Try Stop first.`,
+    }[action];
+    super(message);
     this.name = "AgentRunCancellationError";
+    // Replacement stops here, before reserving or submitting the new prompt.
+    if (action === "replace") this.deliveryOutcome = "not_submitted";
   }
 }
 
@@ -1445,6 +1456,10 @@ export class AgentManager {
 
   async hasAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<boolean> {
     return (await this.messageAcceptanceStore?.has(input)) ?? false;
+  }
+
+  async forgetAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<void> {
+    await this.messageAcceptanceStore?.forget(input);
   }
 
   listProviderSubagents(parentAgentId: string): ProviderSubagentDescriptor[] {
@@ -3283,6 +3298,11 @@ export class AgentManager {
       if (error instanceof AgentTurnStartCanceledError) {
         if (!pendingRun.settled) {
           await params.onCanceledBeforeStart?.();
+          this.runs.settleForegroundStart(pendingRun, {
+            status: "failed",
+            error: error.message,
+            cause: error,
+          });
           if (options?.clientMessageId) {
             this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
               messageId: options.clientMessageId,
@@ -3314,13 +3334,23 @@ export class AgentManager {
       }
       agent.pendingReplacement = false;
       const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
-      this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
+      this.runs.settleForegroundStart(pendingRun, {
+        status: "failed",
+        error: errorMsg,
+        ...(error instanceof Error ? { cause: error } : {}),
+      });
       try {
         // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
         if (options?.clientMessageId) {
-          this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
-            messageId: options.clientMessageId,
-          });
+          this.recordSubmittedPrompt(
+            agent,
+            prompt,
+            options.clientMessageId,
+            deliveryFailureOutcome(error) === "unknown" ? "unknown" : "rejected",
+            {
+              messageId: options.clientMessageId,
+            },
+          );
         }
         await this.handleStreamEvent(agent, {
           type: "turn_failed",
@@ -4093,8 +4123,10 @@ export class AgentManager {
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
-    return this.runForegroundMutation(agentId, () => {
-      this.requireSessionAgent(agentId).pendingReplacement = false;
+    return this.runForegroundMutation(agentId, async (): Promise<AgentRunCancellationResult> => {
+      const agent = this.requireAgent(agentId);
+      if (!agent.session) return { status: "not_running" };
+      agent.pendingReplacement = false;
       return this.cancelAgentRunNow(agentId);
     });
   }
@@ -4105,6 +4137,9 @@ export class AgentManager {
       this.runs.getRun(agentId) ??
       (agent.lifecycle === "running" ? this.runs.trackAutonomousRun(agentId, null) : null);
     if (!run) {
+      if (agent.session.hasPendingInterruptRecovery?.()) {
+        return this.retryInterruptRecovery(agent);
+      }
       return { status: "not_running" };
     }
 
@@ -4122,44 +4157,15 @@ export class AgentManager {
     });
 
     if (!interruptAcknowledged) {
-      return { status: settlement === "completed" ? "settled" : "refused" };
+      return {
+        status:
+          settlement === "completed" && !agent.session.hasPendingInterruptRecovery?.()
+            ? "settled"
+            : "refused",
+      };
     }
 
-    const runTurnId = this.runs.getTurnId(agentId);
-    if (settlement === "timed_out" && runTurnId) {
-      this.logger.warn(
-        { agentId, turnId: runTurnId, kind: run.kind },
-        "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
-      );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
-        turnId: runTurnId,
-      });
-      await run.settledPromise;
-    } else if (settlement === "timed_out" && run.kind === "foreground") {
-      this.logger.warn(
-        { agentId, kind: run.kind },
-        "cancelAgentRun: acknowledged pending turn still active after timeout, clearing it",
-      );
-      this.runs.settleForegroundRun(agentId, run.token);
-      if (!agent.pendingReplacement) {
-        agent.lifecycle = "idle";
-        this.touchUpdatedAt(agent);
-        this.emitState(agent);
-      }
-    } else if (settlement === "timed_out" && run.kind === "autonomous") {
-      this.logger.warn(
-        { agentId, kind: run.kind },
-        "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
-      );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
-      });
-    }
+    if (settlement === "timed_out") await this.settleAcknowledgedInterrupt(agent, run);
 
     if (agent.pendingPermissions.size > 0) {
       this.resolvePendingPermissionsForAgent(
@@ -4172,6 +4178,62 @@ export class AgentManager {
       this.emitState(agent);
     }
     return { status: "settled" };
+  }
+
+  private async settleAcknowledgedInterrupt(
+    agent: ActiveManagedAgent,
+    run: TrackedAgentRun,
+  ): Promise<void> {
+    const agentId = agent.id;
+    // A terminal event can make room for a successor while Stop awaits provider acknowledgement.
+    if (this.runs.getRun(agentId) !== run) {
+      return;
+    }
+
+    const runTurnId = this.runs.getTurnId(agentId);
+    if (runTurnId) {
+      this.logger.warn(
+        { agentId, turnId: runTurnId, kind: run.kind },
+        "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
+      );
+      await this.dispatchSessionEvent(agent, {
+        type: "turn_canceled",
+        provider: agent.provider,
+        reason: "interrupted",
+        turnId: runTurnId,
+      });
+      await run.settledPromise;
+    } else if (run.kind === "foreground") {
+      this.logger.warn(
+        { agentId, kind: run.kind },
+        "cancelAgentRun: acknowledged pending turn still active after timeout, clearing it",
+      );
+      this.runs.settleForegroundRun(agentId, run.token);
+      if (!agent.pendingReplacement) {
+        agent.lifecycle = "idle";
+        this.touchUpdatedAt(agent);
+        this.emitState(agent);
+      }
+    } else if (run.kind === "autonomous") {
+      this.logger.warn(
+        { agentId, kind: run.kind },
+        "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
+      );
+      await this.dispatchSessionEvent(agent, {
+        type: "turn_canceled",
+        provider: agent.provider,
+        reason: "interrupted",
+      });
+    }
+  }
+
+  private async retryInterruptRecovery(
+    agent: ActiveManagedAgent,
+  ): Promise<AgentRunCancellationResult> {
+    const stopped = await this.interruptSession(agent.session, agent.id);
+    this.touchUpdatedAt(agent);
+    this.emitState(agent);
+    return { status: stopped ? "settled" : "refused" };
   }
 
   private async cancelAgentRunBefore(
@@ -4303,6 +4365,14 @@ export class AgentManager {
     this.pendingTurnChanges.delete(agentId);
     this.discardRetainedAgentState(agentId);
     await this.deleteCommittedTimeline(agentId);
+    try {
+      await this.messageAcceptanceStore?.forgetAgent(agentId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId },
+        "Could not clean message acceptance records for the removed agent",
+      );
+    }
   }
 
   notifyAgentRemoved(agent: Pick<StoredAgentRecord, "id" | "workspaceId" | "internal">): void {
@@ -5908,7 +5978,7 @@ export class AgentManager {
     agent: ActiveManagedAgent,
     prompt: AgentPromptInput,
     clientMessageId: string,
-    outcome: "accepted" | "rejected",
+    outcome: "accepted" | "rejected" | "unknown",
     options?: { messageId?: string; providerMessageId?: string; turnId?: string },
   ): void {
     const items = projectAgentMessages({
@@ -5919,7 +5989,7 @@ export class AgentManager {
     });
     for (const item of items) {
       // Human attempts stay in history on rejection; delivery notifications require acceptance.
-      if (outcome === "rejected" && item.type !== "user_message") continue;
+      if (outcome !== "accepted" && item.type !== "user_message") continue;
       this.recordSubmittedPromptItem(agent, item, options);
     }
   }
