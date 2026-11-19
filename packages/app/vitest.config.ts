@@ -219,7 +219,7 @@ export default defineConfig({
       "react/jsx-dev-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
       "react-native-gesture-handler > invariant",
-      // Loaded by the reanimated-web-style-helpers plugin, which the dependency scan does not see.
+      // Loaded by the Reanimated web helpers used in browser tests.
       "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
       "react-native-web/dist/exports/StyleSheet/preprocess",
     ],

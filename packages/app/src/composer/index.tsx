@@ -331,13 +331,22 @@ interface RenderLeftContentArgs {
   focusInput: () => void;
   isCompactLayout: boolean;
   showAgentControls: boolean;
+  showToolbar: boolean;
 }
 
 function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
-  const { agentControls, agentId, serverId, focusInput, isCompactLayout } = args;
+  const { agentControls, agentId, serverId, focusInput, isCompactLayout, showToolbar } = args;
   if (!args.showAgentControls) return null;
   if (resolveAgentControlsMode(agentControls) === "draft" && agentControls) {
-    return <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />;
+    return (
+      <DraftAgentControls
+        {...agentControls}
+        draftId={agentId}
+        serverId={serverId}
+        isCompactLayout={isCompactLayout}
+        showToolbar={showToolbar}
+      />
+    );
   }
   return (
     <AgentControls
@@ -345,6 +354,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
       serverId={serverId}
       onDropdownClose={focusInput}
       isCompactLayout={isCompactLayout}
+      showToolbar={showToolbar}
     />
   );
 }
@@ -1370,14 +1380,17 @@ export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   // user's own pane: closing the panel does not bring focus back.
   const isCompact = useIsCompactFormFactor();
   const paneHost = usePaneHost();
-  const overlayPanelRequested = usePanelStore((state) =>
-    isMobilePanelCoveringHost(state.mobilePanel.target, paneHost),
-  );
-  const coveredByOverlayPanel = isCompact && overlayPanelRequested;
+  const mobilePanelTarget = usePanelStore((state) => state.mobilePanel.target);
+  const coveredByOverlayPanel = isCompact && isMobilePanelCoveringHost(mobilePanelTarget, paneHost);
+  // Search from the sidebar uses the center pane as its context.
+  const commandCenterPanel = mobilePanelTarget === "agent-list" ? "agent" : mobilePanelTarget;
+  const coveredForCommandCenter =
+    isCompact && isMobilePanelCoveringHost(commandCenterPanel, paneHost);
   return (
     <ComposerKeyboardScopeProvider
       isPaneFocused={isPaneFocused}
       isActiveComposer={isPaneFocused && !coveredByOverlayPanel}
+      isCommandCenterTarget={isPaneFocused && !coveredForCommandCenter}
     >
       <OverlayDismissalScope>
         <RenderProfile id="ComposerContent">
@@ -1689,6 +1702,7 @@ function ComposerContentImpl({
       isLive: isInputLive,
       revealed: inputRevealed,
       isRevealed: isInputRevealed,
+      isFocused: () => messageInputRef.current?.isFocused() ?? false,
       focus: takeInputFocus,
       textSource,
       setText: replaceUserInput,
@@ -2574,6 +2588,7 @@ function ComposerContentImpl({
       focusInput,
       isCompactLayout,
       showAgentControls: mode.showAgentControls,
+      showToolbar: !isFullscreen,
     });
     return controls ? (
       <ComposerInputProvider value={composerInput}>{controls}</ComposerInputProvider>
@@ -2584,6 +2599,7 @@ function ComposerContentImpl({
     composerInput,
     focusInput,
     isCompactLayout,
+    isFullscreen,
     mode.showAgentControls,
     serverId,
   ]);

@@ -2,6 +2,7 @@ import { MessageAcceptanceStore } from "./message-receipts/acceptance.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { sendPromptToAgent, unarchiveAgentState } from "./agent/agent-prompt.js";
+import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import {
   createFinishSubscriptions,
@@ -129,7 +130,7 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
   );
 }
 
-import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
+import { VoiceAssistantWebSocketServer, isDaemonOriginAllowed } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { createGitHubService } from "../services/github-service.js";
@@ -851,7 +852,7 @@ export async function createPaseoDaemon(
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && (allowedOrigins.has("*") || allowedOrigins.has(origin))) {
+    if (origin && isDaemonOriginAllowed(origin, req.headers.host ?? null, allowedOrigins)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -1550,7 +1551,27 @@ export async function createPaseoDaemon(
   });
   await scheduleService.start();
 
+  const changeRequestWatches = createChangeRequestWatches({
+    source: github.changeRequests,
+    backgroundWork: agentManager,
+    paseoHome: config.paseoHome,
+    logger,
+    isActive: async (agentId) => {
+      const record = await agentStorage.get(agentId);
+      return record ? !record.archivedAt : Boolean(agentManager.getAgent(agentId));
+    },
+    messages: () => {
+      if (!wsServer) throw new Error("Daemon is not accepting agent messages");
+      return wsServer.agentMessages;
+    },
+  });
+
   agentManager.setAgentArchivedCallback(async (agentId) => {
+    await changeRequestWatches
+      .archive(agentId)
+      .catch((err) =>
+        logger.warn({ err, agentId }, "Could not remove archived agent's change request watches"),
+      );
     try {
       await scheduleService.completeForAgent(agentId);
     } catch (error) {
@@ -1616,6 +1637,7 @@ export async function createPaseoDaemon(
   const createAgentToolHostDependencies = (
     runtime: PaseoToolRuntimeContext,
   ): PaseoToolHostDependencies => ({
+    changeRequestWatches,
     finishSubscriptions: () => finishSubscriptions,
     agentMessages: () => {
       if (!wsServer) throw new Error("Daemon is not accepting agent messages");
@@ -1995,6 +2017,7 @@ export async function createPaseoDaemon(
             providerSnapshotManager.settlePluginProviders();
             restartRecovery.resumePending();
             await finishSubscriptions.start();
+            await changeRequestWatches.start();
             wsServer.beginAcceptingConnections();
             const relaySecurityLogger = logger.child({ module: "relay-security" });
             relayRuntime = createRelayRuntime({
@@ -2085,6 +2108,7 @@ export async function createPaseoDaemon(
     await idleRuntimeCleanup.close();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
+    await changeRequestWatches.close();
     await finishSubscriptions.close();
     await wsServer?.agentMessages.close();
     agentManager.prepareForShutdown();

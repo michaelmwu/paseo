@@ -1,12 +1,9 @@
 {
-  "release": { "tag": "v0.16.1", "commit": "c09a3d81e772a747dd11bca43d860f3518f07c2d" },
-  "retainedBundle": "d4ec9d26cdf50625d83831419ffd4fcd404933a7",
-  "rebuildBase": "2baf466c34ec5cfd03b994eff493a0a1e9b9ff86",
-  "alreadyInRelease": [7782, 9580],
-  "mergedPrerequisiteBackports": [
-    { "pr": 9757, "commit": "41c294c7855f3d864337b8628513bf00ece0a644" },
-    { "pr": 9931, "commit": "eabbd3d97c2d6a9a24d72de0bf08db1c7398a8a5" }
-  ],
+  "release": { "tag": "v0.17.0-beta.1", "commit": "6c89950b2ef77efee47b127d09d05eb347d25f33" },
+  "retainedBundle": "29f961ad190d71767d760c696ed94c685034c4bf",
+  "rebuildBase": "29f961ad190d71767d760c696ed94c685034c4bf",
+  "alreadyInRelease": [7782, 9580, 9757, 9931],
+  "mergedPrerequisiteBackports": [],
   "features": [
     {
       "pr": 4052,
@@ -35,7 +32,7 @@
     {
       "pr": 4525,
       "branch": "redesign-service-definitions",
-      "commit": "46230492dab87096e347940243059a69e9d19a8c"
+      "commit": "5ae973538aeac2b2682b01374e3f55241bbcf239"
     },
     {
       "pr": 9332,
@@ -52,19 +49,19 @@
     {
       "pr": 9550,
       "branch": "fix/codex-interrupt-retirement",
-      "commit": "4187a78260d2720ba59efc8916d89ac3f736202d",
+      "commit": "b135ee8fbce9f48bc3b3346e5b643804e8a759ab",
       "includes": [9549, 5633],
       "prerequisiteCommit": "aaa14c1c58ce0ea0b52fe476bbe8c6623289ca24"
     },
     {
       "pr": 9333,
       "branch": "feat/turn-scoped-changes",
-      "commit": "174df883a5fee1c82e669311eb7513209d41679d"
+      "commit": "5c40d9dc0874d89238c2fdd89750ba0ae776a9dd"
     },
     {
       "pr": 9334,
       "branch": "feat/named-port-forwarding",
-      "commit": "7ea5feeb3174ecee0881eb37a14ac427979022a4",
+      "commit": "ffcd2c78aeb75a0536890ea120f9fbb95b16d65c",
       "includes": [6534]
     },
     { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" }
@@ -74,49 +71,49 @@
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/action-inbox",
       "id": "action-inbox",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/pr-watcher",
       "id": "pr-watcher",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/issue-workflow",
       "id": "github-issue-workflow",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/remote-browser",
       "id": "remote-browser",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/agent-context",
       "id": "agent-context",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/project-environment",
       "id": "project-environment",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/worktreeinclude",
       "id": "paseo-worktreeinclude",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     },
     {
       "repository": "508-dev/paseo-plugins",
       "pluginPath": "plugins/replies",
       "id": "replies-508",
-      "commit": "a5a78ada816cc05cc192686d903911c22255b0c4"
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
     }
   ]
 }

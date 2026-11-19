@@ -437,6 +437,7 @@ function buildResumeStartInput(input: {
     systemPrompt: composeSystemPromptParts(
       input.resumeConfig.config.systemPrompt,
       input.resumeConfig.config.daemonAppendSystemPrompt,
+      ...(input.resumeConfig.config.pluginAppendSystemPrompt ?? []),
     ),
   };
 }
@@ -1592,7 +1593,6 @@ export class OmpAgentSession implements AgentSession {
       this.emit({
         type: "timeline",
         provider: this.provider,
-        turnId: this.currentTurnIdForEvent(),
         item: {
           type: "notification",
           level:
@@ -1670,7 +1670,30 @@ export class OmpAgentSession implements AgentSession {
     });
   }
 
+  // OMP changes the level on its own, e.g. `/switch @role` or a model switch that carries a level.
+  private handleThinkingLevelChanged(event: OmpRuntimeEvent): boolean {
+    if (event.type !== "thinking_level_changed") {
+      return false;
+    }
+    const thinkingLevel = normalizeOmpThinkingOption(event.configured ?? event.thinkingLevel);
+    if (!thinkingLevel || thinkingLevel === this.lastKnownThinkingOptionId) {
+      return true;
+    }
+    this.lastKnownThinkingOptionId = thinkingLevel;
+    this.config.thinkingOptionId = thinkingLevel;
+    this.state = { ...this.state, thinkingLevel };
+    this.emit({
+      type: "thinking_option_changed",
+      provider: this.provider,
+      thinkingOptionId: thinkingLevel,
+    });
+    return true;
+  }
+
   private handleExtraRuntimeEvent(event: OmpRuntimeEvent): boolean {
+    if (this.handleThinkingLevelChanged(event)) {
+      return true;
+    }
     if (event.type === "model_changed") {
       void this.refreshState()
         .then(() =>
@@ -2349,7 +2372,11 @@ export class OmpAgentClient implements AgentClient {
       noSession: config.internal === true,
       modeId: launchMode.modeId,
       extraArgs: launchMode.extraArgs,
-      systemPrompt: composeSystemPromptParts(config.systemPrompt, config.daemonAppendSystemPrompt),
+      systemPrompt: composeSystemPromptParts(
+        config.systemPrompt,
+        config.daemonAppendSystemPrompt,
+        ...(config.pluginAppendSystemPrompt ?? []),
+      ),
       env: launchContext?.env,
     };
     const runtimeSession = await this.resolveRuntime(config.providerOptions).startSession(

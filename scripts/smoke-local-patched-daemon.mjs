@@ -12,7 +12,7 @@ import {
 import { DaemonClient } from "../packages/client/dist/daemon-client.js";
 
 const root = path.resolve(import.meta.dirname, "..");
-const home = await mkdtemp(path.join(tmpdir(), "paseo-v016-smoke-"));
+const home = await mkdtemp(path.join(tmpdir(), "paseo-v017-smoke-"));
 let instance;
 let sdk;
 let observer;
@@ -50,7 +50,7 @@ try {
   observer = new DaemonClient({ url, clientId: "compiled-daemon-smoke-observer" });
   await observer.connect();
   const info = observer.getLastServerInfoMessage();
-  assert.equal(info.version, "0.16.1");
+  assert.equal(info.version, "0.17.0-beta.1");
   assert.equal(info.features.idleRuntimeCleanupSetting, true);
   sdk = createPaseoClient({ url });
   await sdk.connect();

@@ -38,6 +38,7 @@ import type {
 } from "@getpaseo/protocol/agent-types";
 import type {
   AgentTurnChanges,
+  AgentBackgroundWorkSummary,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -80,7 +81,7 @@ export interface Agent {
   id: string;
   provider: AgentProvider;
   status: AgentLifecycleStatus;
-  backgroundWork?: { count: number };
+  backgroundWork?: AgentBackgroundWorkSummary;
   turn: TurnLiveness;
   interruptRecoveryPending?: boolean;
   createdAt: Date;

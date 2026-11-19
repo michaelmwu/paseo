@@ -13,7 +13,6 @@ import {
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useWindowLayout, resolveWorkspaceActionPlacement } from "@/window-layout";
 import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
-import type { LayoutChangeEvent } from "react-native";
 import { ExplorerSidebarDock } from "@/screens/workspace/explorer-sidebar";
 import { ForgeShorthandProvider } from "@/git/forge-shorthand";
 import { ExplorerFrame } from "./explorer-sidebar/frame";
@@ -813,9 +812,7 @@ function WorkspacePanelSurface({
   children,
   tabIds,
   workspaceKey,
-  onLayout,
 }: {
-  onLayout: (event: LayoutChangeEvent) => void;
   workspaceKey: string;
   launcher: NewTabLauncher;
   children: ReactNode;
@@ -826,9 +823,7 @@ function WorkspacePanelSurface({
     <WorkspaceComposerEditingSessionsProvider workspaceKey={workspaceKey} tabIds={tabIds}>
       <NewTabLauncherProvider value={launcher}>
         <SheetHostScope enabled={!isCompact}>
-          <View style={styles.threePaneRow} onLayout={onLayout}>
-            {children}
-          </View>
+          <View style={styles.threePaneRow}>{children}</View>
         </SheetHostScope>
       </NewTabLauncherProvider>
     </WorkspaceComposerEditingSessionsProvider>
@@ -1069,7 +1064,6 @@ function WorkspaceScreenContent({
     resolveWorkspaceActionPlacement(useWindowLayout()) === "vertical-bar";
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
-  const workspacePanelActive = usePanelStore((state) => state.mobilePanel.target === "agent");
   const canRenderDesktopPaneSplits = supportsDesktopPaneSplits();
   const layoutMode = useWorkspaceLayoutStore((state) => state.layoutMode);
   const hasMacTrafficLights = useHasWindowChromeObstruction("top-left");
@@ -3482,7 +3476,8 @@ function WorkspaceScreenContent({
       return (
         <CompactWorkspaceHeader
           headerVariant={actionsOnly ? "full" : "compact"}
-          actionsActive={isRouteFocused && (!isMobile || workspacePanelActive)}
+          isRouteFocused={isRouteFocused}
+          isCompact={isMobile}
           tabSwitcher={tabSwitcher}
           isLoading={isWorkspaceHeaderLoading}
           title={workspaceHeaderTitle}
@@ -3563,7 +3558,6 @@ function WorkspaceScreenContent({
       workspaceDirectory,
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
-      workspacePanelActive,
       workspaceLaunches,
       workspaceLaunchManagementAvailable,
     ],
@@ -3751,11 +3745,6 @@ function WorkspaceScreenContent({
     </DesktopCenterColumnChrome>
   );
 
-  const [workspaceViewportWidth, setWorkspaceViewportWidth] = useState(0);
-  const measureWorkspaceWidth = useCallback(
-    (event: LayoutChangeEvent) => setWorkspaceViewportWidth(event.nativeEvent.layout.width),
-    [],
-  );
   const sharedExplorer = useMemo(() => {
     if (!workspaceLayout || !explorerSidebarPaneId || !persistenceKey) return null;
     const explorerPane = findPaneById(workspaceLayout.root, explorerSidebarPaneId);
@@ -3794,7 +3783,6 @@ function WorkspaceScreenContent({
         presentation={isMobile ? "overlay" : "dock"}
         isWorkspaceActive={isRouteFocused}
         persistenceKey={persistenceKey}
-        containerWidth={workspaceViewportWidth}
         isOpen={isExplorerSidebarShowing && !desktopFocusModeEnabled}
       >
         {dock}
@@ -3829,7 +3817,6 @@ function WorkspaceScreenContent({
     handleReorderTabsInPane,
     buildDesktopPaneContentModel,
     renderExplorerSidebarHeaderAction,
-    workspaceViewportWidth,
     desktopFocusModeEnabled,
   ]);
 
@@ -3887,7 +3874,6 @@ function WorkspaceScreenContent({
           isRouteFocused={isRouteFocused}
         />
         <WorkspacePanelSurface
-          onLayout={measureWorkspaceWidth}
           launcher={newTabLauncher}
           workspaceKey={workspacePanelKey}
           tabIds={workspacePanelTabIds}

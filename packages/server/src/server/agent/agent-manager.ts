@@ -76,6 +76,7 @@ import {
   applyProviderOptionsPatch,
   exposeFeatureValuesToHook,
   convertLegacyOptions,
+  convertLegacyClaudeUltracode,
   MalformedLegacyOptionError,
   resolveAdapter,
   foldHookFeatureValues,
@@ -127,7 +128,13 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
-import { AgentBackgroundWorkStore, type AgentBackgroundWorkItem } from "./background-work/index.js";
+import {
+  AgentBackgroundWorkStore,
+  isDaemonBackgroundWorkItem,
+  type AgentBackgroundWorkItem,
+  type DaemonBackgroundWorkInput,
+  type DaemonBackgroundWorkKey,
+} from "./background-work/index.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import { buildSessionConfig, extractAttention } from "../persistence-hooks.js";
 
@@ -215,6 +222,7 @@ interface StopAgentBackgroundWorkOptions {
   agentId: string;
   itemId: string;
   stopToken: string;
+  canManageAutomation?: boolean;
 }
 
 async function resolveResumePurpose(
@@ -352,6 +360,8 @@ export type AgentAttentionCallback = (params: {
   agentId: string;
   provider: AgentProvider;
   reason: "finished" | "error" | "permission";
+  /** When the agent's current unread attention started; null when the agent is read. */
+  attentionTimestamp: Date | null;
 }) => void;
 
 export type AgentArchivedCallback = (agentId: string) => Promise<void> | void;
@@ -629,9 +639,11 @@ function attachManagedTurnIdentity(
       return turnId ? { event: { ...event, turnId }, turnId } : { event, turnId };
     }
     case "timeline": {
-      // Live provider items belong to the foreground turn that owns their dispatch.
-      // Provider history deliberately keeps absent IDs because it has no daemon turn identity.
-      const turnId = agent.activeForegroundTurnId ?? agent.activeTurnId ?? undefined;
+      // A notice with no open run is a display turn of its own.
+      const turnId =
+        agent.activeForegroundTurnId ??
+        agent.activeTurnId ??
+        (event.item.type === "notification" ? randomUUID() : undefined);
       return turnId ? { event: { ...event, turnId }, turnId } : { event, turnId };
     }
     default:
@@ -665,7 +677,12 @@ function normalizePersistenceForConfig(
   if (!handle) {
     return null;
   }
-  const { mcpServers: _launchMcpServers, ...metadata } = handle.metadata ?? {};
+  const {
+    mcpServers: _launchMcpServers,
+    pluginAppendSystemPrompt: _pluginAppendSystemPrompt,
+    daemonAppendSystemPrompt: _daemonAppendSystemPrompt,
+    ...metadata
+  } = handle.metadata ?? {};
   return {
     ...handle,
     metadata: {
@@ -1468,35 +1485,54 @@ export class AgentManager {
   }
 
   listAgentBackgroundWork(agentId: string): AgentBackgroundWorkItem[] {
-    this.requirePublicAgent(agentId);
+    const agent = this.agents.get(agentId);
+    if (agent?.internal || (!agent && !this.backgroundWork.summary(agentId))) {
+      throw new Error(`Unknown agent '${agentId}'`);
+    }
     return this.backgroundWork.list(agentId);
+  }
+
+  setDaemonBackgroundWork(input: DaemonBackgroundWorkInput): void {
+    this.publishBackgroundWork(input.agentId, this.backgroundWork.setDaemonBackgroundWork(input));
+  }
+
+  removeDaemonBackgroundWork(key: DaemonBackgroundWorkKey): void {
+    this.publishBackgroundWork(key.agentId, this.backgroundWork.removeDaemonBackgroundWork(key));
   }
 
   async stopAgentBackgroundWork({
     agentId,
     itemId,
     stopToken,
+    canManageAutomation,
   }: StopAgentBackgroundWorkOptions): Promise<void> {
+    if (isDaemonBackgroundWorkItem({ id: itemId })) {
+      if (this.agents.get(agentId)?.internal) throw new Error(`Unknown agent '${agentId}'`);
+      if (!canManageAutomation)
+        throw new Error("Managing automation is required to stop daemon background work");
+      await this.backgroundWork.stopDaemon(agentId, itemId, stopToken);
+      return;
+    }
     this.requirePublicAgent(agentId);
     // Inventory events share the session queue; drain events already received before
     // authorizing the token, including a reconnect's ownership revocation.
     await this.sessionEventTails.get(agentId)?.catch(() => undefined);
-    const agent = this.requirePublicAgent(agentId);
-    if (!agent.session || !agent.session.stopBackgroundWork)
-      throw new Error("Background work cannot be stopped");
-    const item = this.backgroundWork.list(agentId).find((entry) => entry.id === itemId);
-    if (!item?.canStop || item.stopToken !== stopToken)
-      throw new Error("Background work is no longer available to stop");
-    await agent.session.stopBackgroundWork(itemId);
+    const { session } = this.requirePublicAgent(agentId);
+    if (!session?.stopBackgroundWork) throw new Error("Background work cannot be stopped");
+    const providerItemId = this.backgroundWork.authorizeProviderStop(agentId, itemId, stopToken);
+    await session.stopBackgroundWork(providerItemId);
   }
 
-  getAgentBackgroundWorkSummary(agentId: string): { count: number } | undefined {
+  getAgentBackgroundWorkSummary(agentId: string) {
     return this.backgroundWork.summary(agentId);
   }
 
-  private clearBackgroundWork(agentId: string): void {
-    const items = this.backgroundWork.clear(agentId);
+  private publishBackgroundWork(agentId: string, items: AgentBackgroundWorkItem[] | null): void {
     if (items) this.dispatch({ type: "background_work", agentId, items });
+  }
+
+  private clearProviderBackgroundWork(agentId: string): void {
+    this.publishBackgroundWork(agentId, this.backgroundWork.clear(agentId));
   }
 
   listProviderSubagentActivity(): ProviderSubagentDescriptor[] {
@@ -1771,13 +1807,15 @@ export class AgentManager {
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       launchedOptions,
       ...options,
-      // The caller read its metadata and attention before this turn in the lane; a setMetadata
-      // or attention clear queued ahead of it has saved a newer record, the one the open hooks saw.
+      // The caller read metadata and attention before entering the lane.
       ...(record ? { metadata: record.metadata, attention: extractAttention(record) } : {}),
       latestTurnChanges: record?.latestTurnChanges,
       workspaceId,
       launchEnv,
-      persistence: handle,
+      persistence:
+        purpose === "interactive" && session.persistenceUpdatedOnResume
+          ? (session.describePersistence() ?? handle)
+          : handle,
       restoring: true,
     });
   }
@@ -2048,7 +2086,7 @@ export class AgentManager {
       await this.closeReloadedSession(existing.session, agentId);
       await this.drainSessionEvents(agentId);
       this.cancelRunningProviderSubagents(agentId);
-      this.clearBackgroundWork(agentId);
+      this.clearProviderBackgroundWork(agentId);
       closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
       await this.persistSnapshot(closedExisting);
       this.assertAcceptingAgentRegistrations();
@@ -2305,7 +2343,7 @@ export class AgentManager {
     await this.drainSessionEvents(agentId);
     this.cancelRunningProviderSubagents(agentId);
     // close() drops the session's subscribers before the provider could report an empty list.
-    this.clearBackgroundWork(agentId);
+    this.clearProviderBackgroundWork(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
 
     let persistError: unknown;
@@ -3269,15 +3307,15 @@ export class AgentManager {
     });
   }
 
-  private async startPendingForegroundTurn(params: {
-    agent: ActiveManagedAgent;
-    agentId: string;
-    pendingRun: PendingForegroundRun;
-    prompt: AgentPromptInput;
-    options?: AgentRunOptions;
-    onCanceledBeforeStart?: () => Promise<void>;
-  }): Promise<string | null> {
-    const { agent, agentId, pendingRun, prompt, options } = params;
+  private admitPendingForegroundTurn(
+    agentId: string,
+    pendingRun: PendingForegroundRun,
+    promptStart?: ForegroundPromptStart,
+  ): boolean {
+    if (promptStart?.admit?.() === false) {
+      this.runs.settleForegroundRun(agentId, pendingRun.token);
+      return false;
+    }
     if (
       pendingRun.settled ||
       this.canceledPendingRuns.has(pendingRun) ||
@@ -3286,6 +3324,20 @@ export class AgentManager {
       this.runs.settleForegroundRun(agentId, pendingRun.token);
       throw new Error(`Agent ${agentId} run was canceled before its turn started`);
     }
+    return true;
+  }
+
+  private async startPendingForegroundTurn(params: {
+    agent: ActiveManagedAgent;
+    agentId: string;
+    pendingRun: PendingForegroundRun;
+    prompt: AgentPromptInput;
+    options?: AgentRunOptions;
+    promptStart?: ForegroundPromptStart;
+    onCanceledBeforeStart?: () => Promise<void>;
+  }): Promise<string | null> {
+    const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
+    if (!this.admitPendingForegroundTurn(agentId, pendingRun, promptStart)) return null;
     try {
       const result = await agent.session.startTurn(prompt, options);
       if (this.messageAcceptanceStore)
@@ -3382,8 +3434,10 @@ export class AgentManager {
     pendingRun: PendingForegroundRun;
     prompt: AgentPromptInput;
     options?: AgentRunOptions;
+    promptStart?: ForegroundPromptStart;
   }): Promise<string | null> {
     const { agent, agentId } = params;
+    if (agent.internal) return this.startPendingForegroundTurn(params);
     let before: string | null = null;
     try {
       before = await (this.captureTurnWorktreeOverride ?? captureTurnWorktree)(agent.cwd);
@@ -3408,6 +3462,7 @@ export class AgentManager {
           : undefined,
       });
       if (turnId === null) {
+        if (before) await this.discardPendingTurnCapture(agent.cwd, agentId);
         return null;
       }
       // A stale comparison must not be presented as the turn that just started.
@@ -3543,6 +3598,7 @@ export class AgentManager {
         pendingRun,
         prompt,
         options,
+        promptStart,
       });
       if (turnId === null) {
         const canceledEvent: AgentStreamEvent = {
@@ -4196,11 +4252,14 @@ export class AgentManager {
         { agentId, turnId: runTurnId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
-        turnId: runTurnId,
+      await this.dispatchSessionEventInOrder({
+        agentId,
+        event: {
+          type: "turn_canceled",
+          provider: agent.provider,
+          reason: "interrupted",
+          turnId: runTurnId,
+        },
       });
       await run.settledPromise;
     } else if (run.kind === "foreground") {
@@ -4219,10 +4278,13 @@ export class AgentManager {
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
+      await this.dispatchSessionEventInOrder({
+        agentId,
+        event: {
+          type: "turn_canceled",
+          provider: agent.provider,
+          reason: "interrupted",
+        },
       });
     }
   }
@@ -4967,7 +5029,7 @@ export class AgentManager {
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
-    this.clearBackgroundWork(agentId);
+    this.clearProviderBackgroundWork(agentId);
   }
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
@@ -4989,6 +5051,17 @@ export class AgentManager {
     agent.unsubscribeSession = unsubscribe;
   }
 
+  // Child activity, runtime inventory, and updates to existing rows survive a failed start.
+  private isIndependentOfPendingStart(agentId: string, event: AgentStreamEvent): boolean {
+    if (event.type === "provider_subagent" || event.type === "background_work") return true;
+    const turnId = getAgentStreamEventTurnId(event);
+    return (
+      event.type === "timeline" &&
+      turnId != null &&
+      this.timelineStore.hasItemInTurn(agentId, event.item, turnId)
+    );
+  }
+
   private enqueueSessionEvent(agentId: string, event: AgentStreamEvent): void {
     this.logger.trace(
       {
@@ -5006,10 +5079,23 @@ export class AgentManager {
       return;
     }
     const pendingRun = this.runs.getPendingRun(agentId);
-    if (pendingRun?.start.status === "pending") {
+    if (
+      pendingRun?.start.status === "pending" &&
+      !this.isIndependentOfPendingStart(agentId, event)
+    ) {
       pendingRun.stagedEvents.push(event);
       return;
     }
+    void this.dispatchSessionEventInOrder({ agentId, event });
+  }
+
+  private dispatchSessionEventInOrder({
+    agentId,
+    event,
+  }: {
+    agentId: string;
+    event: AgentStreamEvent;
+  }): Promise<void> {
     const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -5048,6 +5134,7 @@ export class AgentManager {
         this.sessionEventTails.delete(agentId);
       }
     });
+    return next;
   }
 
   /**
@@ -5082,8 +5169,12 @@ export class AgentManager {
         event.items === null
           ? this.backgroundWork.clear(agent.id)
           : this.backgroundWork.apply(agent.id, event.items);
-      if (items) this.dispatch({ type: "background_work", agentId: agent.id, items });
+      this.publishBackgroundWork(agent.id, items);
       return;
+    }
+    // Resolve notice membership before selecting the foreground run's waiters.
+    if (event.type === "timeline" && event.item.type === "notification") {
+      event = attachManagedTurnIdentity(agent, event, false).event;
     }
     const turnId = getAgentStreamEventTurnId(event);
     const matchingWaiters = this.runs.getMatchingWaiters(agent, turnId);
@@ -5425,7 +5516,8 @@ export class AgentManager {
     if (
       eventTurnId &&
       isTurnTerminalEvent(event) &&
-      this.runs.hasFinalizedTurn(agent, eventTurnId)
+      this.runs.hasFinalizedTurn(agent, eventTurnId) &&
+      this.runs.getTurnId(agent.id) !== eventTurnId
     ) {
       return false;
     }
@@ -5853,7 +5945,11 @@ export class AgentManager {
       this.openActiveTurn(agent, eventTurnId, new Date());
     }
     agent.lastError = undefined;
-    agent.attention = { requiresAttention: false };
+    // Nobody read the agent, so an unread finish stays unread. Clearing it would make every
+    // turn the agent starts on its own, such as a reaction to background output, notify again.
+    if (agent.attention.requiresAttention && agent.attention.attentionReason === "error") {
+      agent.attention = { requiresAttention: false };
+    }
     agent.lifecycle = "running";
     this.emitState(agent);
   }
@@ -6161,11 +6257,16 @@ export class AgentManager {
       return;
     }
 
+    const finished = previousStatus === "running" && currentStatus === "idle";
     if (agent.attention.requiresAttention) {
+      // The unread finish stays the same; the notifier knows whether the user was told about it.
+      if (finished && agent.attention.attentionReason === "finished") {
+        this.broadcastAgentAttention(agent, "finished");
+      }
       return;
     }
 
-    if (previousStatus === "running" && currentStatus === "idle") {
+    if (finished) {
       agent.attention = {
         requiresAttention: true,
         attentionReason: "finished",
@@ -6302,6 +6403,9 @@ export class AgentManager {
       agentId: agent.id,
       provider: agent.provider,
       reason,
+      attentionTimestamp: agent.attention.requiresAttention
+        ? agent.attention.attentionTimestamp
+        : null,
     });
   }
 
@@ -6497,7 +6601,15 @@ export class AgentManager {
 
   private withConvertedOptions(config: AgentSessionConfig): AgentSessionConfig {
     const providerOptions = this.convertLegacyOptions(config.provider, config.providerOptions);
-    return providerOptions === config.providerOptions ? config : { ...config, providerOptions };
+    return this.convertLegacySessionConfig(
+      providerOptions === config.providerOptions ? config : { ...config, providerOptions },
+    );
+  }
+
+  convertLegacySessionConfig<T extends Parameters<typeof convertLegacyClaudeUltracode>[0]>(
+    config: T,
+  ): T {
+    return convertLegacyClaudeUltracode(config, this.adapterOf(config.provider));
   }
 
   private async prepareSessionConfig(
@@ -6559,6 +6671,7 @@ export class AgentManager {
     // A plugin changing during this open must still make the resulting session stale.
     const generation = this.sessionOpenGeneration;
     this.detachPluginTools(agentId);
+    let appendSystemPrompt: string[] | undefined;
     let mcpServers: AgentSessionConfig["mcpServers"];
     let mcpServerOwners: Record<string, string> | undefined;
     if (this.pluginLifecycle) {
@@ -6580,12 +6693,14 @@ export class AgentManager {
       env = transformed.env;
       if (request.purpose === "interactive") {
         this.attachedPluginTools.set(agentId, transformed.tools as AttachedAgentTool[]);
+        appendSystemPrompt = transformed.appendSystemPrompt;
         mcpServers = transformed.mcpServers;
         mcpServerOwners = transformed.mcpServerOwners;
       }
     }
     const context: AgentLaunchContext = {
       agentId,
+      ...pluginPromptContext(appendSystemPrompt),
       mcpServers,
       mcpServerOwners,
       env: {
@@ -6632,6 +6747,7 @@ export class AgentManager {
         throw new Error(`MCP server '${name}' from plugin ${owner} collides with ${existingOwner}`);
       }
     }
+    launchConfig = { ...launchConfig, pluginAppendSystemPrompt: launchContext.appendSystemPrompt };
     const merged =
       Object.keys(launchContext.mcpServers ?? {}).length > 0
         ? {
@@ -6768,4 +6884,10 @@ export function commandMayHaveChangedExternalState(command: string): boolean {
     // ahead/behind counts can drift stale until the next refresh.
     /\bgit\s+fetch\b/.test(normalized)
   );
+}
+
+function pluginPromptContext(
+  appendSystemPrompt: string[] | undefined,
+): Pick<AgentLaunchContext, "appendSystemPrompt"> {
+  return appendSystemPrompt?.length ? { appendSystemPrompt } : {};
 }

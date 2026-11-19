@@ -24,7 +24,10 @@ import { isAbsolute } from "node:path";
 import { CreationService, type CreatedAgent } from "./creation/index.js";
 import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
 import type { MessageReceipts } from "./message-receipts/index.js";
-import type { AgentBackgroundWorkItem } from "./agent/background-work/index.js";
+import {
+  isDaemonBackgroundWorkItem,
+  type AgentBackgroundWorkItem,
+} from "./agent/background-work/index.js";
 import { handleLocalFilesRequest } from "./session/local-files/local-files-session.js";
 import equal from "fast-deep-equal";
 import { WorkspaceSetupObservation } from "./workspace-setup-observation.js";
@@ -1457,6 +1460,8 @@ export class Session {
             type: "browser.host.register.request" as const,
             requestId: uuidv4(),
             hostKind: host.data.hostKind,
+            label: host.data.label,
+            instanceId: host.data.instanceId,
             supportedCommands: host.data.supportedCommands,
           };
           void this.delivery
@@ -2199,7 +2204,12 @@ export class Session {
         }
 
         if (event.type === "background_work") {
-          this.forwardBackgroundWork(event);
+          void this.forwardBackgroundWork(event.agentId).catch((error) =>
+            this.sessionLogger.error(
+              { err: error, agentId: event.agentId },
+              "Failed to emit background work update",
+            ),
+          );
           return;
         }
 
@@ -2282,16 +2292,34 @@ export class Session {
     this.forwardProviderSubagentUpdate(event);
   }
 
-  private forwardBackgroundWork(
-    event: Extract<AgentManagerEvent, { type: "background_work" }>,
-  ): void {
-    const agent = this.agentManager.getAgent(event.agentId);
-    if (agent?.internal) return;
+  private async forwardBackgroundWork(agentId: string): Promise<void> {
+    const target = await this.resolveBackgroundWorkAgent(agentId);
+    if ("error" in target) return;
+    const { agent, record } = target;
+    // The inventory may have changed while resolving a dormant agent.
+    const items = this.agentManager.getAgentBackgroundWorkSummary(agentId)
+      ? this.agentManager.listAgentBackgroundWork(agentId)
+      : [];
     this.emit({
       type: "agent.background_work.update",
-      payload: { agentId: event.agentId, items: event.items },
+      payload: { agentId, items: this.projectBackgroundWorkItems(items) },
     });
-    if (agent) void this.agentUpdates.forwardLiveAgent(agent);
+    if (agent) await this.agentUpdates.forwardLiveAgent(agent);
+    else if (record) await this.agentUpdates.forwardStoredAgent(record);
+  }
+
+  private projectBackgroundWorkItems(items: AgentBackgroundWorkItem[]): AgentBackgroundWorkItem[] {
+    if (
+      this.authorization.allowsPermission("automation.manage") &&
+      this.authorization.allowsInbound({ type: "agent.background_work.stop.request" })
+    ) {
+      return items;
+    }
+    return items.map((item) => {
+      if (!isDaemonBackgroundWorkItem(item)) return item;
+      const { canStop: _canStop, stopToken: _stopToken, ...visible } = item;
+      return visible;
+    });
   }
 
   private emitProviderSubagentWorkspaceUpdate(event: ProviderSubagentManagerEvent): void {
@@ -2326,10 +2354,12 @@ export class Session {
   }
 
   private async enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload> {
-    payload.backgroundWork = this.agentManager.getAgentBackgroundWorkSummary(payload.id);
     const storedRecord = await this.agentStorage.get(payload.id);
     payload.title = storedRecord?.title ?? null;
     payload.archivedAt = storedRecord?.archivedAt ?? null;
+    if (!payload.internal && !storedRecord?.internal && !payload.archivedAt) {
+      payload.backgroundWork = this.agentManager.getAgentBackgroundWorkSummary(payload.id);
+    }
     return payload;
   }
 
@@ -2341,8 +2371,11 @@ export class Session {
     record: StoredAgentRecord,
     registeredProviderIds = new Set(this.providerSnapshotManager.listRegisteredProviderIds()),
   ): AgentSnapshotPayload {
-    return buildStoredAgentPayload(record, registeredProviderIds, (provider, own) =>
-      this.agentManager.effectiveOptionsFor(provider, own),
+    return buildStoredAgentPayload(
+      record,
+      registeredProviderIds,
+      (provider, own) => this.agentManager.effectiveOptionsFor(provider, own),
+      this.agentManager.getAgentBackgroundWorkSummary(record.id),
     );
   }
 
@@ -2567,6 +2600,8 @@ export class Session {
       unregister = this.browserToolsBroker.registerClient({
         id: owner.id,
         hostKind: request.hostKind,
+        label: request.label,
+        instanceId: request.instanceId,
         supportedCommands: request.supportedCommands,
         sendBrowserAutomationRequest: (message) => owner.emit(message),
       });
@@ -3340,6 +3375,8 @@ export class Session {
         return this.checkoutSession.handleStatusRequest(msg);
       case "checkout.commits.list.request":
         return this.checkoutSession.handleCommitsListRequest(msg);
+      case "checkout.worktrees.list.request":
+        return this.checkoutSession.handleWorktreesListRequest(msg);
       case "checkout.commits.file_diff.request":
         return this.checkoutSession.handleCommitFileDiffRequest(msg, this.delivery.requestSignal);
       case "validate_branch_request":
@@ -8975,10 +9012,13 @@ export class Session {
   ): Promise<void> {
     let error: string | null = null;
     try {
+      const target = await this.resolveBackgroundWorkAgent(msg.agentId);
+      if ("error" in target) throw new Error(target.error);
       await this.agentManager.stopAgentBackgroundWork({
         agentId: msg.agentId,
         itemId: msg.itemId,
         stopToken: msg.stopToken,
+        canManageAutomation: this.authorization.allowsPermission("automation.manage"),
       });
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -9020,23 +9060,27 @@ export class Session {
     }
   }
 
-  // Background work lives only in memory, so an agent that is not loaded has none.
-  // Answering from storage keeps a read from resuming a dormant agent.
   private async readAgentBackgroundWork(agentId: string): Promise<AgentBackgroundWorkItem[]> {
-    if (this.agentManager.getAgent(agentId)) {
-      if (!this.agentManager.getAgentBackgroundWorkSummary(agentId)) {
-        throw new Error("Background work inventory is unavailable");
-      }
-      return this.agentManager.listAgentBackgroundWork(agentId);
+    const target = await this.resolveBackgroundWorkAgent(agentId);
+    if ("error" in target) throw new Error(target.error);
+    if (!this.agentManager.getAgentBackgroundWorkSummary(agentId)) {
+      throw new Error("Background work inventory is unavailable");
     }
+    return this.projectBackgroundWorkItems(this.agentManager.listAgentBackgroundWork(agentId));
+  }
+
+  private async resolveBackgroundWorkAgent(
+    agentId: string,
+  ): Promise<{ agent: ManagedAgent | null; record: StoredAgentRecord | null } | { error: string }> {
     const record = await this.agentStorage.get(agentId);
-    if (!record || record.internal) {
-      throw new Error(`Unknown agent '${agentId}'`);
+    const agent = this.agentManager.getAgent(agentId);
+    if ((!agent && !record) || agent?.internal || record?.internal) {
+      return { error: `Unknown agent '${agentId}'` };
     }
-    if (record.archivedAt) {
-      throw new Error(`Agent is archived: ${agentId}`);
+    if (record?.archivedAt) {
+      return { error: `Agent is archived: ${agentId}` };
     }
-    throw new Error("Background work inventory is unavailable");
+    return { agent, record };
   }
 
   private async handleProviderSubagentTimelineRequest(
@@ -9332,7 +9376,12 @@ export class Session {
           logger: this.sessionLogger,
         });
         if (result.disposition === "turn_started") {
-          await waitForAgentRunStartWithTimeout(this.agentManager, agentId, result.started);
+          await waitForAgentRunStartWithTimeout(
+            this.agentManager,
+            agentId,
+            result.started,
+            this.delivery.requestSignal,
+          );
         }
       };
       const messageId = msg.messageId;

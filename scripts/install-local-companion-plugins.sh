@@ -7,10 +7,10 @@ PASEO_COMPANION_CLI="$PASEO_COMPANION_ROOT/packages/cli/dist/index.js"
 export PASEO_HOME=/home/michaelmwu/.paseo
 
 test "$(id -un)" = michaelmwu
-test "$("$PASEO_COMPANION_NODE" "$PASEO_COMPANION_CLI" --version)" = '0.16.1'
+test "$("$PASEO_COMPANION_NODE" "$PASEO_COMPANION_CLI" --version)" = '0.17.0-beta.1'
 PASEO_COMPANION_STATUS="$("$PASEO_COMPANION_NODE" "$PASEO_COMPANION_CLI" daemon status --home "$PASEO_HOME")"
-if ! grep -Fxq 'daemonVersion: 0.16.1' <<< "$PASEO_COMPANION_STATUS"; then
-  echo 'Deploy the patched 0.16.1 daemon before installing these plugins.' >&2
+if ! grep -Fxq 'daemonVersion: 0.17.0-beta.1' <<< "$PASEO_COMPANION_STATUS"; then
+  echo 'Deploy the patched 0.17.0-beta.1 daemon before installing these plugins.' >&2
   exit 1
 fi
 "$PASEO_COMPANION_NODE" -e '
