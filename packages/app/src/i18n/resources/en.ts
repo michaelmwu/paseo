@@ -3016,6 +3016,8 @@ export const en = {
         closeCurrentTab: "Close current tab",
         jumpToWorkspace: "Jump to workspace",
         jumpToTab: "Jump to tab",
+        goBack: "Go back",
+        goForward: "Go forward",
         previousWorkspace: "Previous workspace",
         nextWorkspace: "Next workspace",
         previousTab: "Previous tab",

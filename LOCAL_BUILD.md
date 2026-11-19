@@ -11,20 +11,21 @@ unchanged. This is a fork deployment record, not an aggregate upstream proposal.
 
 [local-build-inputs.json](local-build-inputs.json) records complete source revisions.
 
-| Feature                                             | Revision    |
-| --------------------------------------------------- | ----------- |
-| Project linking #4052, live linked branch           | `ca620522f` |
-| Transcript attachment contract #4627                | `07e750d7c` |
-| Cross-host/native continuation #2496, linked branch | `b370aadf2` |
-| Project local-file import #4381, linked branch      | `c5c050148` |
-| Worktreeinclude conflict repairs, not #2419         | `b8be2560e` |
-| Workspace launches #4525                            | `5ae973538` |
-| Offline outbox #9332                                | `8562246f1` |
-| Receipt reconciliation #9548                        | `ccab6ce52` |
-| Codex interruption recovery #9550                   | `b135ee8fb` |
-| Per-turn changes #9333                              | `5c40d9dc0` |
-| Browser tunnel/named forwarding #9334               | `ffcd2c78a` |
-| Desktop element picker #3190                        | `595852d3c` |
+| Feature                                                 | Revision    |
+| ------------------------------------------------------- | ----------- |
+| Project linking #4524 (historical #4052), linked branch | `ca620522f` |
+| Transcript attachment contract #4627                    | `07e750d7c` |
+| Cross-host/native continuation #2496, linked branch     | `b370aadf2` |
+| Project local-file import #4381, linked branch          | `c5c050148` |
+| Worktreeinclude conflict repairs, not #2419             | `b8be2560e` |
+| Workspace launches #4525                                | `5ae973538` |
+| Offline outbox #9332                                    | `8562246f1` |
+| Receipt reconciliation #9548                            | `ccab6ce52` |
+| Codex interruption recovery #9550                       | `b135ee8fb` |
+| Per-turn changes #9333                                  | `5c40d9dc0` |
+| Browser tunnel/named forwarding #9334                   | `ffcd2c78a` |
+| Desktop element picker #3190                            | `595852d3c` |
+| Back/Forward tab and plugin-screen history #10173       | `5471a0a86` |
 
 Closed historical PR diffs are not replayed over their live linked branches.
 Feature-only refreshes exclude unrelated main history from PR branch merges.
@@ -39,6 +40,33 @@ checks, fresh cross-window attachment references and per-agent FIFO barriers.
 Turn snapshots serialize with Stop and skip disposable internal agents. A canceled
 unsaved Codex thread is replaced rather than resumed; fixtures model that boundary.
 Worktree branch rollback and remote setup stay inside their cleanup ownership.
+
+## Recent PR audit
+
+[local-build-pr-audit.json](local-build-pr-audit.json) records all 32 Paseo PRs
+authored by michaelmwu and updated since November 1, 2026, including closed PRs.
+The GitHub query was fully paginated. The audit compares exact source heads and
+dependencies, rather than assuming every authored PR belongs in this bundle.
+
+After adding #10173, nine current heads are selected and three other PR heads
+are included through dependencies: #9547 and #9552 through #9332, and #9549
+through #9550. #4524 is the current PR for the live branch recorded historically
+as #4052; it is already included, not a missing second implementation.
+
+The remaining open source heads are not newly selected: #10093, #10084, #10083,
+#9957, #9946, #9820, #9713, #9522, #9520, #9469, #9321, #8202, #7684, #5931
+and #5339. Some overlap selected work; #5339's older repeated-interrupt design
+is not stacked over the selected #9550 retirement path. Source exclusion does
+not prove every overlapping fix is absent. These findings are not an instruction
+to apply all 15 PRs.
+
+Closed #9538, #9518, #9517, #5321 and #5259 are not replayed. Previously requested
+historical linked branches remain intact. #5259 is superseded by #7782 in the release.
+
+#10173 is a client feature: Back/Forward retrace tabs and full-page plugin screens
+in one app window. A daemon replacement alone cannot add it to an official mobile
+or desktop client; use a matching patched client. No production web UI or client
+installation is enabled by this build.
 
 ## Companion plugins
 
@@ -81,6 +109,9 @@ Logs are in this artifact's ignored `.dev/` directory.
 
 - Server dependency stack, server and CLI compile.
 - Full workspace typecheck, lint and formatting pass.
+- #10173 integration: six history/keyboard/plugin-routing suites pass 290 tests;
+  the isolated Chromium traversal spec passes across tabs, hosts, plugin-screen
+  parameters and Settings detours. Packaged Electron and native apps are not run.
 - Launch/receipt/delivery/turn-change/archive/projection tests: 113 pass.
 - Codex process recovery tests: 29 pass.
 - Sender receipt/start/capture/admission regressions: 21 targeted cases pass;

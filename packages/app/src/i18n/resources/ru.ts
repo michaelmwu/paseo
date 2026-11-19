@@ -2935,6 +2935,8 @@ export const ru: TranslationResources = {
         closeCurrentTab: "Закрыть текущую вкладку",
         jumpToWorkspace: "Перейти к рабочему пространству",
         jumpToTab: "Перейти на вкладку",
+        goBack: "Назад",
+        goForward: "Вперёд",
         previousWorkspace: "Предыдущее рабочее пространство",
         nextWorkspace: "Следующее рабочее пространство",
         previousTab: "Предыдущая вкладка",

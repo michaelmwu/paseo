@@ -2929,6 +2929,8 @@ export const ptBR: TranslationResources = {
         closeCurrentTab: "Fechar aba atual",
         jumpToWorkspace: "Ir para workspace",
         jumpToTab: "Ir para aba",
+        goBack: "Voltar",
+        goForward: "Avançar",
         previousWorkspace: "Workspace anterior",
         nextWorkspace: "Próximo workspace",
         previousTab: "Aba anterior",

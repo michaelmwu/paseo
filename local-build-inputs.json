@@ -6,7 +6,8 @@
   "mergedPrerequisiteBackports": [],
   "features": [
     {
-      "pr": 4052,
+      "pr": 4524,
+      "historicalPr": 4052,
       "branch": "add-project-linking-dialog-duplicate-git-repos",
       "commit": "ca620522f2efec169f586936c05f37494a02a718"
     },
@@ -64,7 +65,12 @@
       "commit": "ffcd2c78aeb75a0536890ea120f9fbb95b16d65c",
       "includes": [6534]
     },
-    { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" }
+    { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" },
+    {
+      "pr": 10173,
+      "branch": "giant-starfish",
+      "commit": "5471a0a86c9a367de404cd6852ec5930955056ce"
+    }
   ],
   "plugins": [
     {
