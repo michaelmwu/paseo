@@ -75,6 +75,11 @@
       "pr": 10256,
       "branch": "prototype/remote-workspace-deeplink",
       "commit": "664eb46fef3f0351931db0cab5a63ffb800212cb"
+    },
+    {
+      "pr": 10320,
+      "branch": "feat/restricted-host-instructions",
+      "commit": "ab2dc2c3711ee468c5719f0046b74a781906206d"
     }
   ],
   "plugins": [

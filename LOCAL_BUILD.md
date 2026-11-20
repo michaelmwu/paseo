@@ -27,6 +27,7 @@ unchanged. This is a fork deployment record, not an aggregate upstream proposal.
 | Desktop element picker #3190                            | `595852d3c` |
 | Back/Forward tab and plugin-screen history #10173       | `5471a0a86` |
 | Desktop remote workspace links #10256                   | `664eb46fe` |
+| Cross-host instruction persistence checkpoint #10320    | `ab2dc2c37` |
 
 Closed historical PR diffs are not replayed over their live linked branches.
 Feature-only refreshes exclude unrelated main history from PR branch merges.
@@ -46,8 +47,8 @@ Worktree branch rollback and remote setup stay inside their cleanup ownership.
 
 [local-build-pr-audit.json](local-build-pr-audit.json) records all 32 Paseo PRs
 authored by michaelmwu and updated since November 1, 2026, including closed PRs.
-The November 20 query was fully paginated; the later requested addition #10256
-is recorded separately in the inputs above. The audit compares exact source heads and
+The November 20 query was fully paginated; the later requested additions #10256
+and #10320 are recorded separately in the inputs above. The audit compares exact source heads and
 dependencies, rather than assuming every authored PR belongs in this bundle.
 
 After adding #10173, nine current heads are selected and three other PR heads
@@ -83,6 +84,12 @@ The source PR remains a prototype with unresolved review feedback about
 superseded Add Host sessions, newer agent intents and embedded-browser link
 forwarding. These edge cases are not repaired or validated by this daemon build;
 OS URL activation is not exercised here.
+
+#10320 adds private inbox/outbox persistence for instruction grants, approvals,
+dispatch claims, replies, retry identity and cancellation. It is an infrastructure
+checkpoint, not a working cross-host instruction feature. Relay admission, agent
+dispatch and Desktop setup are pending; this build does not wire or enable them.
+No live instruction state is created while building or testing the checkpoint.
 
 ## Companion plugins
 
@@ -125,6 +132,9 @@ Logs are in this artifact's ignored `.dev/` directory.
 
 - Server dependency stack, server and CLI compile.
 - Full workspace typecheck, lint and formatting pass.
+- #10320 persistence checkpoint: both focused inbox/outbox suites pass eight
+  cases covering private grant storage, approval, deduplication, revocation,
+  expiry, ambiguous dispatch recovery, scoped replies and offline cancellation.
 - #10256 integration: seven URI, legacy-agent-link, dispatch, approval and
   Add Host suites pass 30 tests; the app's directory-sync suite passes 35.
   Desktop main-process compilation also passes. OS URL activation and a
