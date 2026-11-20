@@ -3598,8 +3598,27 @@ export const SubscriptionReleaseResponseSchema = z.object({
   payload: z.object({ requestId: z.string(), subscriptionId: z.string() }),
 });
 
+export const HostInstructionWorkspacePolicySchema = z.enum(["ask", "unattended", "blocked"]);
+export const HostInstructionWorkspaceOverridesSchema = z
+  .array(
+    z.object({
+      workspaceId: z.string().min(1).max(256),
+      policy: HostInstructionWorkspacePolicySchema,
+    }),
+  )
+  .max(200);
+export type HostInstructionWorkspaceOverrides = z.infer<
+  typeof HostInstructionWorkspaceOverridesSchema
+>;
+
 export const HostInstructionsCommandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }),
+  z.object({
+    action: z.literal("set_policy"),
+    sourceId: z.string().min(1).max(256),
+    policy: z.enum(["ask", "unattended"]),
+    workspaceOverrides: HostInstructionWorkspaceOverridesSchema,
+  }),
   z.object({
     action: z.literal("grant"),
     sourceId: z.string().min(1).max(256),
@@ -3611,8 +3630,8 @@ export const HostInstructionsCommandSchema = z.discriminatedUnion("action", [
     destinationId: z.string().min(1).max(256),
     offer: z.string().max(16_384),
     token: z.string().max(128),
-    agentId: z.string().min(1).max(256),
-    workspaceId: z.string().min(1).max(256),
+    agentId: z.string().min(1).max(256).optional(),
+    workspaceId: z.string().min(1).max(256).optional(),
   }),
   z.object({
     action: z.literal("decide"),
@@ -3620,7 +3639,11 @@ export const HostInstructionsCommandSchema = z.discriminatedUnion("action", [
     id: z.uuid(),
     approve: z.boolean(),
   }),
-  z.object({ action: z.literal("revoke"), id: z.uuid() }),
+  z.object({
+    action: z.literal("revoke"),
+    id: z.uuid(),
+    keepConversationGrants: z.boolean().optional(),
+  }),
 ]);
 export type HostInstructionsCommand = z.infer<typeof HostInstructionsCommandSchema>;
 export const HostInstructionsRequestSchema = z.object({
@@ -3633,7 +3656,22 @@ export const HostInstructionsResponseSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     registration: z
-      .object({ id: z.string(), offer: z.string(), token: z.string(), workspaceId: z.string() })
+      .object({
+        id: z.string(),
+        offer: z.string(),
+        token: z.string(),
+        workspaceId: z.string().optional(),
+      })
+      .optional(),
+    hostPolicies: z
+      .array(
+        z.object({
+          id: z.string(),
+          sourceId: z.string(),
+          policy: z.enum(["ask", "unattended"]),
+          workspaceOverrides: HostInstructionWorkspaceOverridesSchema,
+        }),
+      )
       .optional(),
     grants: z
       .array(
@@ -4096,6 +4134,7 @@ export const ServerInfoStatusPayloadSchema = z
         providersSnapshot: z.boolean().optional(),
         connectedHosts: z.boolean().optional(),
         hostInstructions: z.boolean().optional(),
+        hostInstructionWorkspacePolicies: z.boolean().optional(),
         hostMultiplexing: z.boolean().optional(),
         // COMPAT(usageSetting): added in v0.14, remove after 2027-05-01.
         usageSetting: z.boolean().optional(),

@@ -27,7 +27,7 @@ unchanged. This is a fork deployment record, not an aggregate upstream proposal.
 | Desktop element picker #3190                            | `595852d3c` |
 | Back/Forward tab and plugin-screen history #10173       | `5471a0a86` |
 | Desktop remote workspace links #10256                   | `664eb46fe` |
-| Approved conversation instructions over relay #10320    | `614bb1739` |
+| Host instruction defaults/workspace overrides #10320    | `c84679f11` |
 
 Closed historical PR diffs are not replayed over their live linked branches.
 Feature-only refreshes exclude unrelated main history from PR branch merges.
@@ -85,16 +85,19 @@ superseded Add Host sessions, newer agent intents and embedded-browser link
 forwarding. These edge cases are not repaired or validated by this daemon build;
 OS URL activation is not exercised here.
 
-#10320 now wires private inbox/outbox persistence to a separate protected relay
+#10320 wires private inbox/outbox persistence to a separate protected relay
 identity, destination approval, existing-conversation dispatch, agent tools and
-the Connections settings UI. Ask each time is the default; grants are directional
-and revocable. Busy conversations wait for their active turn. Workspace-wide
-grants and creating agents through restricted links remain out of scope.
+the Connections settings UI. Sender-wide defaults allow workspace overrides to
+inherit, ask, allow unattended instructions or block the sender. Ask each time is
+the default. Existing conversation grants are retained and follow the sender's
+workspace overrides. Grants are directional and revocable; busy conversations
+wait for their active turn. Creating agents through restricted links remains
+out of scope.
 
-Both daemons need the patch. The setup and approval UI requires a matching patched
+Both daemons need the workspace-policy patch. The setup and approval UI requires a matching patched
 client; replacing only the daemon does not update an official client's Settings.
 No production grants or registrations are created by this rebuild. The new RPCs
-and optional `hostInstructions` feature flag are additive. Only capable clients
+and optional `hostInstructions`/`hostInstructionWorkspacePolicies` flags are additive. Only capable clients
 request the new messages; existing wire schemas and flows remain accepted.
 
 ## Companion plugins
@@ -138,12 +141,14 @@ Logs are in this artifact's ignored `.dev/` directory.
 
 - Server dependency stack, server and CLI compile.
 - Full workspace typecheck, lint and formatting pass.
-- Updated #10320: three focused inbox/outbox/prompt suites pass 17 tests.
-  The targeted two-daemon protected-relay test passes approval, exactly-once
-  observed dispatch, ordinary-session rejection and post-revocation rejection.
+- Updated #10320: three focused inbox/outbox/prompt suites pass 18 tests,
+  including tightening queued work after workspace policy changes. The targeted
+  two-daemon protected-relay test passes discovery, a workspace approval override,
+  one observed dispatch, workspace blocking, ordinary-session rejection and
+  post-revocation rejection.
   The isolated browser Settings smoke passes: the Connections section renders
-  the instruction controls with Ask each time selected and Allow disabled until
-  a source host and conversation are selected.
+  the instruction controls with Ask each time selected and Save instruction
+  policy disabled without a source; the save button sits below the policy field.
 - #10256 integration: seven URI, legacy-agent-link, dispatch, approval and
   Add Host suites pass 30 tests; the app's directory-sync suite passes 35.
   Desktop main-process compilation also passes. OS URL activation and a
@@ -165,7 +170,9 @@ Logs are in this artifact's ignored `.dev/` directory.
   including real Chrome, and PR watcher compatibility/workspace 13 pass.
 - Compiled isolated supervisor smoke: all eight plugins running, browser navigation,
   streamed JPEG frames and acknowledgement, real PTY output, launch port leases
-  after restart and retained launch output pass. No real model call is required.
+  after restart and retained launch output pass. Host instruction capability flags
+  and an empty grants/requests/host-policies directory pass as well. No real model
+  call is required.
 
 The smoke command targets a temporary home and random loopback port:
 

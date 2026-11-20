@@ -53,7 +53,9 @@ try {
   assert.equal(info.version, "0.17.0-beta.1");
   assert.equal(info.features.idleRuntimeCleanupSetting, true);
   assert.equal(info.features.hostInstructions, true);
+  assert.equal(info.features.hostInstructionWorkspacePolicies, true);
   const instructionDirectory = await observer.manageHostInstructions({ action: "list" });
+  assert.deepEqual(instructionDirectory.hostPolicies, []);
   assert.deepEqual(instructionDirectory.grants, []);
   assert.deepEqual(instructionDirectory.requests, []);
   sdk = createPaseoClient({ url });

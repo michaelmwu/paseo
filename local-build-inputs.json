@@ -79,7 +79,7 @@
     {
       "pr": 10320,
       "branch": "feat/restricted-host-instructions",
-      "commit": "614bb1739e1bbf27137fcf951d5744dba1b1cb41"
+      "commit": "c84679f1109264221a185692a85ac0c5ffa0183f"
     }
   ],
   "plugins": [
