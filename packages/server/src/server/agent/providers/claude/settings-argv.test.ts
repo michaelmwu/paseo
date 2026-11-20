@@ -32,7 +32,10 @@ test("the real SDK passes the user's settings file contents alongside Paseo flag
       providerOptions: { extraArgs: { settings: settingsPath } },
     });
     try {
-      await session.startTurn("hello");
+      // The argv-only fixture exits without speaking the SDK's control protocol.
+      await expect(session.startTurn("hello")).rejects.toThrow(
+        "Query closed before response received",
+      );
     } finally {
       await session.close();
     }

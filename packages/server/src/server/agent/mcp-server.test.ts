@@ -1692,6 +1692,7 @@ describe("create_agent MCP tool", () => {
     const workdir = await mkdtemp(join(tmpdir(), "mcp-public-helper-removal-"));
     const storage = new AgentStorage(join(workdir, "agents"), logger);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: createTestAgentClients(),
       registry: storage,
       logger,
@@ -2961,6 +2962,7 @@ describe("create_agent MCP tool", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const childClient = new HeldTurnAgentClient("codex", false, { finishTurnsDuringStart: true });
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: { claude: parentClient, codex: childClient },
       registry: storage,
       logger,
@@ -3177,6 +3179,7 @@ describe("create_agent MCP tool", () => {
     const workdir = await mkdtemp(join(tmpdir(), "mcp-workspace-inherit-"));
     const storage = new AgentStorage(join(workdir, "agents"), logger);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: createTestAgentClients(),
       registry: storage,
       logger,
@@ -3709,7 +3712,12 @@ describe("send_agent_prompt MCP tool", () => {
       const client = new HeldTurnAgentClient("codex", true, {
         steerResult: available ? "accepted" : "unavailable",
       });
-      const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+      const manager = new AgentManager({
+        captureTurnWorktree: async () => null,
+        clients: { codex: client },
+        registry: storage,
+        logger,
+      });
       try {
         const parent = await manager.createAgent(
           { provider: "codex", cwd: existingCwd },
@@ -3783,7 +3791,12 @@ describe("send_agent_prompt MCP tool", () => {
       const storage = new AgentStorage(join(workdir, "agents"), logger);
       const options: HeldTurnOptions = {};
       const client = new HeldTurnAgentClient("codex", true, options);
-      const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+      const manager = new AgentManager({
+        captureTurnWorktree: async () => null,
+        clients: { codex: client },
+        registry: storage,
+        logger,
+      });
       let mcpClient: Client | undefined;
       try {
         const parent = await manager.createAgent(
@@ -3867,7 +3880,12 @@ describe("send_agent_prompt MCP tool", () => {
         finishDuringSteer: false,
         rejectSteer: true,
       });
-      const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+      const manager = new AgentManager({
+        captureTurnWorktree: async () => null,
+        clients: { codex: client },
+        registry: storage,
+        logger,
+      });
       let mcpClient: Client | undefined;
       try {
         const parent = await manager.createAgent(
@@ -4086,6 +4104,7 @@ describe("send_agent_prompt MCP tool", () => {
       const parentClient = new HeldTurnAgentClient("claude", false);
       const childClient = new HeldTurnAgentClient("codex", true);
       const agentManager = new AgentManager({
+        captureTurnWorktree: async () => null,
         clients: { claude: parentClient, codex: childClient },
         registry: storage,
         logger,
@@ -4165,6 +4184,7 @@ describe("send_agent_prompt MCP tool", () => {
       const parentClient = new HeldTurnAgentClient("claude", false);
       const childClient = new HeldTurnAgentClient("codex", true);
       const agentManager = new AgentManager({
+        captureTurnWorktree: async () => null,
         clients: { claude: parentClient, codex: childClient },
         registry: storage,
         logger,
@@ -4252,6 +4272,7 @@ describe("send_agent_prompt MCP tool", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const childClient = new HeldTurnAgentClient("codex", true);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: { claude: parentClient, codex: childClient },
       registry: storage,
       logger,
@@ -4307,6 +4328,7 @@ describe("send_agent_prompt MCP tool", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const childClient = new HeldTurnAgentClient("codex", true);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: { claude: parentClient, codex: childClient },
       registry: storage,
       logger,
@@ -4374,6 +4396,7 @@ describe("send_agent_prompt MCP tool", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const childClient = new HeldTurnAgentClient("codex", true);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: { claude: parentClient, codex: childClient },
       registry: storage,
       logger,
@@ -4435,6 +4458,7 @@ describe("send_agent_prompt MCP tool", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const childClient = new HeldTurnAgentClient("codex", true);
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: { claude: parentClient, codex: childClient },
       registry: storage,
       logger,
@@ -4509,6 +4533,7 @@ describe("send_agent_prompt MCP tool to an OMP child", () => {
     const parentClient = new HeldTurnAgentClient("claude", false);
     const omp = new FakeOmp();
     const agentManager = new AgentManager({
+      captureTurnWorktree: async () => null,
       clients: {
         claude: parentClient,
         omp: new OmpAgentClient({
@@ -4621,6 +4646,14 @@ describe("send_agent_prompt MCP tool to an OMP child", () => {
         expect(ompSession.abortRequested).toBe(false);
         expect(agentManager.getAgent(childId)?.lifecycle).toBe("running");
 
+        const ordinaryPrompt = ompSession.nextPrompt();
+        ompSession.finishTurn();
+        await ordinaryPrompt;
+        ompSession.beginTurn();
+        await ordinary.dispatched;
+        expect(ordinaryBeforeDispatch).toBe(1);
+        expect(ompSession.prompts).toHaveLength(2);
+        expect(ompSession.prompts[1]!.message).toContain("ordinary follow-up");
         ompSession.finishTurn();
         await ordinary.dispatched;
         expect(ordinaryBeforeDispatch).toBe(1);
@@ -6902,6 +6935,7 @@ describe("local durable finish subscription MCP wiring", () => {
       const parentClient = new HeldTurnAgentClient("claude", false);
       const childClient = new HeldTurnAgentClient("codex", true);
       const manager = new AgentManager({
+        captureTurnWorktree: async () => null,
         clients: { claude: parentClient, codex: childClient },
         registry: storage,
         logger,
@@ -6976,7 +7010,12 @@ describe("local durable finish subscription MCP wiring", () => {
     const workdir = await mkdtemp(join(tmpdir(), "mcp-registration-failure-"));
     const storage = new AgentStorage(join(workdir, "agents"), logger);
     const client = new HeldTurnAgentClient("codex", true);
-    const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+    const manager = new AgentManager({
+      captureTurnWorktree: async () => null,
+      clients: { codex: client },
+      registry: storage,
+      logger,
+    });
     const subscriptions = createJsonFinishSubscriptionStore(workdir);
     let mcp: Client | undefined;
     try {

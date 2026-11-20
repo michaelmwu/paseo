@@ -11,6 +11,7 @@ import {
   validateBranchSlug,
   type CreatedWorktree,
 } from "../utils/worktree.js";
+import type { WorktreeIncludeSummary } from "../utils/worktree-include/index.js";
 import {
   resolveWorktreeCreationIntent,
   type ResolveWorktreeCreationIntentInput,
@@ -46,6 +47,7 @@ export interface CreateWorktreeCoreDeps {
 
 export interface CreateWorktreeCoreResult {
   worktree: CreatedWorktree;
+  worktreeIncludeSummary?: WorktreeIncludeSummary;
   intent: WorktreeCreationIntent;
   repoRoot: string;
   created: boolean;
@@ -149,15 +151,18 @@ async function createWorktreeCoreWithPriority(
   normalizedSlug = validateWorktreeSlug(transformed.slug);
   intent = creationIntentFromRequest(transformed, intent);
 
+  const { worktreeIncludeSummary, ...worktree } = await createWorktree({
+    cwd: repoRoot,
+    includeSourceRoot: sourceCheckout,
+    worktreeSlug: normalizedSlug,
+    worktreePath: transformed.path,
+    source: intent,
+    paseoHome: input.paseoHome,
+    worktreesRoot: input.worktreesRoot,
+  });
   return {
-    worktree: await createWorktree({
-      cwd: repoRoot,
-      worktreeSlug: normalizedSlug,
-      worktreePath: transformed.path,
-      source: intent,
-      paseoHome: input.paseoHome,
-      worktreesRoot: input.worktreesRoot,
-    }),
+    worktree,
+    worktreeIncludeSummary,
     intent,
     repoRoot,
     created: true,

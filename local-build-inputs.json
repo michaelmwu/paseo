@@ -1,0 +1,135 @@
+{
+  "release": { "tag": "v0.17.0-beta.1", "commit": "6c89950b2ef77efee47b127d09d05eb347d25f33" },
+  "retainedBundle": "29f961ad190d71767d760c696ed94c685034c4bf",
+  "rebuildBase": "29f961ad190d71767d760c696ed94c685034c4bf",
+  "alreadyInRelease": [7782, 9580, 9757, 9931],
+  "mergedPrerequisiteBackports": [],
+  "features": [
+    {
+      "pr": 4524,
+      "historicalPr": 4052,
+      "branch": "add-project-linking-dialog-duplicate-git-repos",
+      "commit": "ca620522f2efec169f586936c05f37494a02a718"
+    },
+    {
+      "pr": 4627,
+      "branch": "agent-context-attachment-plugin",
+      "commit": "07e750d7c368ed61adaebe4c957a445d43b3b419"
+    },
+    {
+      "pr": 2496,
+      "branch": "session-portability-prototype",
+      "commit": "b370aadf21f0144f4a500797c4b32de2059383c9"
+    },
+    {
+      "pr": 4381,
+      "branch": "feat/project-secrets-import-worktrees",
+      "commit": "c5c0501480d8764e522fa20d0cc91e8b5cde9add"
+    },
+    {
+      "branch": "worktreeinclude-missing-files-conflict-fixed",
+      "commit": "b8be2560ea4ede3272f91fa8c62ebd9960926fd4"
+    },
+    {
+      "pr": 4525,
+      "branch": "redesign-service-definitions",
+      "commit": "5ae973538aeac2b2682b01374e3f55241bbcf239"
+    },
+    {
+      "pr": 9332,
+      "branch": "codex/offline-mobile-outbox",
+      "commit": "8562246f1b77d591ccae719a40a3661b69215811"
+    },
+    {
+      "pr": 9548,
+      "branch": "fix/message-receipt-reconciliation",
+      "commit": "ccab6ce52ea5ed448230223ea75c5ff37baa3a10",
+      "includes": [9580],
+      "prerequisiteCommit": "d30aa16bebb180740267178a97baae87a504ca4f"
+    },
+    {
+      "pr": 9550,
+      "branch": "fix/codex-interrupt-retirement",
+      "commit": "b135ee8fbce9f48bc3b3346e5b643804e8a759ab",
+      "includes": [9549, 5633],
+      "prerequisiteCommit": "aaa14c1c58ce0ea0b52fe476bbe8c6623289ca24"
+    },
+    {
+      "pr": 9333,
+      "branch": "feat/turn-scoped-changes",
+      "commit": "5c40d9dc0874d89238c2fdd89750ba0ae776a9dd"
+    },
+    {
+      "pr": 9334,
+      "branch": "feat/named-port-forwarding",
+      "commit": "ffcd2c78aeb75a0536890ea120f9fbb95b16d65c",
+      "includes": [6534]
+    },
+    { "pr": 3190, "commit": "595852d3c656630d3d786dfa68f6c7dd99ac4019" },
+    {
+      "pr": 10173,
+      "branch": "giant-starfish",
+      "commit": "5471a0a86c9a367de404cd6852ec5930955056ce"
+    },
+    {
+      "pr": 10256,
+      "branch": "prototype/remote-workspace-deeplink",
+      "commit": "664eb46fef3f0351931db0cab5a63ffb800212cb"
+    },
+    {
+      "pr": 10320,
+      "branch": "feat/restricted-host-instructions",
+      "commit": "c84679f1109264221a185692a85ac0c5ffa0183f"
+    }
+  ],
+  "plugins": [
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/action-inbox",
+      "id": "action-inbox",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/pr-watcher",
+      "id": "pr-watcher",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/issue-workflow",
+      "id": "github-issue-workflow",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/remote-browser",
+      "id": "remote-browser",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/agent-context",
+      "id": "agent-context",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/project-environment",
+      "id": "project-environment",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/worktreeinclude",
+      "id": "paseo-worktreeinclude",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    },
+    {
+      "repository": "508-dev/paseo-plugins",
+      "pluginPath": "plugins/replies",
+      "id": "replies-508",
+      "commit": "57cc6986dfc0aca97f397d07b141bf51051d233c"
+    }
+  ]
+}
