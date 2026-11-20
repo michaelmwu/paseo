@@ -26,6 +26,7 @@ unchanged. This is a fork deployment record, not an aggregate upstream proposal.
 | Browser tunnel/named forwarding #9334                   | `ffcd2c78a` |
 | Desktop element picker #3190                            | `595852d3c` |
 | Back/Forward tab and plugin-screen history #10173       | `5471a0a86` |
+| Desktop remote workspace links #10256                   | `664eb46fe` |
 
 Closed historical PR diffs are not replayed over their live linked branches.
 Feature-only refreshes exclude unrelated main history from PR branch merges.
@@ -45,7 +46,8 @@ Worktree branch rollback and remote setup stay inside their cleanup ownership.
 
 [local-build-pr-audit.json](local-build-pr-audit.json) records all 32 Paseo PRs
 authored by michaelmwu and updated since November 1, 2026, including closed PRs.
-The GitHub query was fully paginated. The audit compares exact source heads and
+The November 20 query was fully paginated; the later requested addition #10256
+is recorded separately in the inputs above. The audit compares exact source heads and
 dependencies, rather than assuming every authored PR belongs in this bundle.
 
 After adding #10173, nine current heads are selected and three other PR heads
@@ -67,6 +69,20 @@ historical linked branches remain intact. #5259 is superseded by #7782 in the re
 in one app window. A daemon replacement alone cannot add it to an official mobile
 or desktop client; use a matching patched client. No production web UI or client
 installation is enabled by this build.
+
+#10256 accepts `paseo://h/<server-id>/open-workspace?path=<encoded-path>` in
+the matching patched Desktop client. The renderer waits for the named host's
+live workspace directory and asks before registering a missing project. Unknown
+hosts use Add Host; link payloads do not supply credentials. The beta integration
+preserves browser-tunnel cleanup and #10173 visit history. Daemon replacement
+alone does not register or enable these Desktop links. The integration uses an
+Electron-only listener with a no-op browser/native export, so other clients do
+not mount its host subscriptions or Add Host flow.
+
+The source PR remains a prototype with unresolved review feedback about
+superseded Add Host sessions, newer agent intents and embedded-browser link
+forwarding. These edge cases are not repaired or validated by this daemon build;
+OS URL activation is not exercised here.
 
 ## Companion plugins
 
@@ -109,6 +125,10 @@ Logs are in this artifact's ignored `.dev/` directory.
 
 - Server dependency stack, server and CLI compile.
 - Full workspace typecheck, lint and formatting pass.
+- #10256 integration: seven URI, legacy-agent-link, dispatch, approval and
+  Add Host suites pass 30 tests; the app's directory-sync suite passes 35.
+  Desktop main-process compilation also passes. OS URL activation and a
+  packaged Electron app are not exercised.
 - #10173 integration: six history/keyboard/plugin-routing suites pass 290 tests;
   the isolated Chromium traversal spec passes across tabs, hosts, plugin-screen
   parameters and Settings detours. Packaged Electron and native apps are not run.

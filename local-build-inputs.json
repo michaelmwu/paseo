@@ -70,6 +70,11 @@
       "pr": 10173,
       "branch": "giant-starfish",
       "commit": "5471a0a86c9a367de404cd6852ec5930955056ce"
+    },
+    {
+      "pr": 10256,
+      "branch": "prototype/remote-workspace-deeplink",
+      "commit": "664eb46fef3f0351931db0cab5a63ffb800212cb"
     }
   ],
   "plugins": [
