@@ -51,6 +51,7 @@ import {
 } from "@/runtime/host-runtime";
 import { ProvidersSection } from "@/screens/settings/providers-section";
 import { HostUsageSection } from "@/usage";
+import { HostInstructionsSection } from "./host-instructions-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
 import { SettingsSection } from "@/components/settings/headings/settings-section";
 import { useSessionStore } from "@/stores/session-store";
@@ -260,6 +261,7 @@ export function HostConnectionsPage({ serverId }: { serverId: string }) {
     <View>
       <HostConnectionError serverId={serverId} />
       <ConnectionsSection host={host} />
+      <HostInstructionsSection host={host} />
     </View>
   );
 }

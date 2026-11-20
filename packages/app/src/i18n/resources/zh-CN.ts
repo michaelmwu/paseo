@@ -2961,6 +2961,7 @@ export const zhCN: TranslationResources = {
         removeErrorMessage: "无法移除连接",
         timeout: "超时",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "配对设备",
         rowTitle: "配对设备",

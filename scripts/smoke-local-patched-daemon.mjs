@@ -52,6 +52,10 @@ try {
   const info = observer.getLastServerInfoMessage();
   assert.equal(info.version, "0.17.0-beta.1");
   assert.equal(info.features.idleRuntimeCleanupSetting, true);
+  assert.equal(info.features.hostInstructions, true);
+  const instructionDirectory = await observer.manageHostInstructions({ action: "list" });
+  assert.deepEqual(instructionDirectory.grants, []);
+  assert.deepEqual(instructionDirectory.requests, []);
   sdk = createPaseoClient({ url });
   await sdk.connect();
   const config = await sdk.config.get();
@@ -189,6 +193,7 @@ try {
       version: info.version,
       listen: instance.listen,
       idleRuntimeCleanup: config.config.idleRuntimeCleanup,
+      hostInstructions: "passed",
       terminal: "passed",
       launchRecovery: "passed",
       retainedOutput: "passed",

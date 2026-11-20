@@ -27,7 +27,7 @@ unchanged. This is a fork deployment record, not an aggregate upstream proposal.
 | Desktop element picker #3190                            | `595852d3c` |
 | Back/Forward tab and plugin-screen history #10173       | `5471a0a86` |
 | Desktop remote workspace links #10256                   | `664eb46fe` |
-| Cross-host instruction persistence checkpoint #10320    | `ab2dc2c37` |
+| Approved conversation instructions over relay #10320    | `614bb1739` |
 
 Closed historical PR diffs are not replayed over their live linked branches.
 Feature-only refreshes exclude unrelated main history from PR branch merges.
@@ -85,11 +85,17 @@ superseded Add Host sessions, newer agent intents and embedded-browser link
 forwarding. These edge cases are not repaired or validated by this daemon build;
 OS URL activation is not exercised here.
 
-#10320 adds private inbox/outbox persistence for instruction grants, approvals,
-dispatch claims, replies, retry identity and cancellation. It is an infrastructure
-checkpoint, not a working cross-host instruction feature. Relay admission, agent
-dispatch and Desktop setup are pending; this build does not wire or enable them.
-No live instruction state is created while building or testing the checkpoint.
+#10320 now wires private inbox/outbox persistence to a separate protected relay
+identity, destination approval, existing-conversation dispatch, agent tools and
+the Connections settings UI. Ask each time is the default; grants are directional
+and revocable. Busy conversations wait for their active turn. Workspace-wide
+grants and creating agents through restricted links remain out of scope.
+
+Both daemons need the patch. The setup and approval UI requires a matching patched
+client; replacing only the daemon does not update an official client's Settings.
+No production grants or registrations are created by this rebuild. The new RPCs
+and optional `hostInstructions` feature flag are additive. Only capable clients
+request the new messages; existing wire schemas and flows remain accepted.
 
 ## Companion plugins
 
@@ -132,9 +138,12 @@ Logs are in this artifact's ignored `.dev/` directory.
 
 - Server dependency stack, server and CLI compile.
 - Full workspace typecheck, lint and formatting pass.
-- #10320 persistence checkpoint: both focused inbox/outbox suites pass eight
-  cases covering private grant storage, approval, deduplication, revocation,
-  expiry, ambiguous dispatch recovery, scoped replies and offline cancellation.
+- Updated #10320: three focused inbox/outbox/prompt suites pass 17 tests.
+  The targeted two-daemon protected-relay test passes approval, exactly-once
+  observed dispatch, ordinary-session rejection and post-revocation rejection.
+  The isolated browser Settings smoke passes: the Connections section renders
+  the instruction controls with Ask each time selected and Allow disabled until
+  a source host and conversation are selected.
 - #10256 integration: seven URI, legacy-agent-link, dispatch, approval and
   Add Host suites pass 30 tests; the app's directory-sync suite passes 35.
   Desktop main-process compilation also passes. OS URL activation and a

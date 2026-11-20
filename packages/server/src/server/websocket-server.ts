@@ -1,3 +1,4 @@
+import type { HostInstructionsRuntime } from "./host-instructions/runtime.js";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -195,6 +196,7 @@ interface WebSocketServerConfig {
   daemonStatusRpc?: boolean;
   relayConfig?: boolean;
   startPaused?: boolean;
+  hostInstructions?: HostInstructionsRuntime;
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
@@ -594,6 +596,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
+  private readonly hostInstructions: HostInstructionsRuntime | undefined;
   private readonly connectedHosts: ConnectedHosts;
 
   toolHosts() {
@@ -810,6 +813,7 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.paseoHome = paseoHome;
+    this.hostInstructions = wsConfig.hostInstructions;
     this.connectedHosts = new ConnectedHosts(paseoHome, { serverId, label: getHostName() });
     this.passwordHash = auth?.password;
     this.daemonConfigStore = daemonConfigStore;
@@ -1718,6 +1722,7 @@ export class VoiceAssistantWebSocketServer {
       downloadTokenStore: this.downloadTokenStore,
       pushNotifications: this.pushNotifications,
       paseoHome: this.paseoHome,
+      hostInstructions: this.hostInstructions,
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
@@ -2075,6 +2080,7 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         connectedHosts: true,
+        hostInstructions: this.hostInstructions !== undefined,
         hostMultiplexing: true,
         // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.
         relayProtectedSecurity: true,

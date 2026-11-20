@@ -3057,6 +3057,7 @@ export const ru: TranslationResources = {
         removeErrorMessage: "Не удалось удалить подключение",
         timeout: "Время ожидания истекло",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Подключение устройств",
         rowTitle: "Подключить устройство",
