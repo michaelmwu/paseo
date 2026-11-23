@@ -23,7 +23,7 @@ test -x "$PASEO_BUILD_NODE"
 test -s "$PASEO_BUILD_CLI"
 test -s "$PASEO_BUILD_ROOT/packages/server/dist/scripts/supervisor-entrypoint.js"
 test -x "$PASEO_BUILD_ROOT/packages/cli/bin/paseo"
-test "$("$PASEO_BUILD_NODE" "$PASEO_BUILD_CLI" --version)" = '0.17.0-beta.1'
+test "$("$PASEO_BUILD_NODE" "$PASEO_BUILD_CLI" --version)" = '0.17.3'
 if [[ -d "$PASEO_BUILD_LINK" && ! -L "$PASEO_BUILD_LINK" ]]; then
   echo "$PASEO_BUILD_LINK is a directory; refusing to replace it." >&2
   exit 1
@@ -61,7 +61,7 @@ sudo systemctl restart paseo.service
 
 for PASEO_BUILD_ATTEMPT in {1..30}; do
   if PASEO_BUILD_STATUS="$("$PASEO_BUILD_NODE" "$PASEO_BUILD_CLI" daemon status --home "$PASEO_BUILD_HOME")" \
-    && grep -Fxq 'daemonVersion: 0.17.0-beta.1' <<< "$PASEO_BUILD_STATUS"; then
+    && grep -Fxq 'daemonVersion: 0.17.3' <<< "$PASEO_BUILD_STATUS"; then
     printf '%s\n' "$PASEO_BUILD_STATUS"
     exit 0
   fi
@@ -70,5 +70,5 @@ done
 
 sudo systemctl --no-pager --full status paseo.service || true
 sudo journalctl -u paseo.service -n 30 --no-pager
-echo 'The new daemon did not report version 0.17.0-beta.1. Inspect the service output above.' >&2
+echo 'The new daemon did not report version 0.17.3. Inspect the service output above.' >&2
 exit 1

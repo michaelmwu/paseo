@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -38,7 +39,7 @@ export function DraftAttachmentActions({
   if (!onOpenImportSheet && pluginAttachments.newAgentShortcutItems.length === 0) return null;
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} dataSet={CHAT_COLUMN_RAIL_DATASET}>
       <View ref={anchorRef} style={styles.content}>
         {onOpenImportSheet ? <ComposerImportPill onPress={onOpenImportSheet} /> : null}
         {pluginAttachments.newAgentShortcutItems.map((item) => (

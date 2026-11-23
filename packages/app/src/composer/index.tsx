@@ -11,6 +11,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { Alert } from "@/components/ui/alert";
 import {
   View,
   Pressable,
@@ -33,6 +34,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   controlSizingForLayout,
@@ -149,6 +151,7 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { AfterPaintPublication } from "@/composer/after-paint-publication";
 import { isWeb, isNative } from "@/constants/platform";
 import type { ForgeSearchItem } from "@getpaseo/protocol/messages";
+import type { AgentMetric } from "@getpaseo/protocol/agent-types";
 import type {
   AttachmentMetadata,
   ComposerAttachment,
@@ -309,16 +312,27 @@ function buildRealtimeVoiceButtonStyle(pressed: boolean, voiceButtonDisabled: bo
   );
 }
 
+const EMPTY_METRICS: AgentMetric[] = [];
+
+function selectComposerAgent(
+  state: ReturnType<typeof useSessionStore.getState>,
+  serverId: string,
+  agentId: string,
+) {
+  const session = state.sessions[serverId];
+  return session?.agents.get(agentId) ?? session?.agentDetails.get(agentId) ?? null;
+}
+
 function buildAgentStateSelector(serverId: string, agentId: string) {
   return (state: ReturnType<typeof useSessionStore.getState>) => {
-    const session = state.sessions[serverId];
-    const agent = session?.agents.get(agentId) ?? session?.agentDetails.get(agentId) ?? null;
+    const agent = selectComposerAgent(state, serverId, agentId);
     return {
       status: agent?.status ?? null,
       interruptRecoveryPending: agent?.interruptRecoveryPending === true,
       contextWindowMaxTokens: agent?.lastUsage?.contextWindowMaxTokens ?? null,
       contextWindowUsedTokens: agent?.lastUsage?.contextWindowUsedTokens ?? null,
       totalCostUsd: agent?.lastUsage?.totalCostUsd ?? null,
+      sessionMetrics: agent?.sessionMetrics ?? EMPTY_METRICS,
       model: agent?.model ?? null,
     };
   };
@@ -1142,6 +1156,8 @@ interface ComposerProps {
    * `inputMode`.
    */
   editingSession?: ComposerEditingSession;
+  /** Caller-owned submission error rendered in the composer's shared error slot. */
+  error?: string | null;
 }
 
 const EMPTY_ARRAY: readonly QueuedMessage[] = [];
@@ -1446,6 +1462,7 @@ function ComposerContentImpl({
   isCompactLayout: isCompactLayoutOverride,
   inputMode = "chat",
   editingSession: providedEditingSession,
+  error: externalError,
   readOnly = false,
   submitLabel,
   placeholder,
@@ -2449,6 +2466,7 @@ function ComposerContentImpl({
             maxTokens={agentState.contextWindowMaxTokens}
             usedTokens={agentState.contextWindowUsedTokens}
             totalCostUsd={agentState.totalCostUsd}
+            sessionMetrics={agentState.sessionMetrics}
             toolbarRing={TOOLBAR_RINGS[controlSizing]}
           />
         </View>
@@ -2460,6 +2478,7 @@ function ComposerContentImpl({
       agentState.contextWindowMaxTokens,
       agentState.contextWindowUsedTokens,
       agentState.totalCostUsd,
+      agentState.sessionMetrics,
       controlSizing,
     ],
   );
@@ -2803,14 +2822,13 @@ function ComposerContentImpl({
   // Focusing the composer on a touch screen raises the on-screen keyboard over the conversation.
   const messageInputAutoFocus = autoFocus && isDesktopWebBreakpoint && hasFinePointer;
   const submitLoadingPressHandler = isAgentRunning ? handleCancelAgent : undefined;
+  const displayError = externalError || sendError?.message;
   const sendErrorNode = useMemo(
     () =>
-      sendError ? (
+      displayError ? (
         <View>
-          <Text accessibilityRole="alert" style={styles.sendErrorText}>
-            {sendError.message}
-          </Text>
-          {sendError.clientMessageId && onViewSubmittedMessage ? (
+          <Alert variant="error" size="sm" description={displayError} testID="composer-error" />
+          {!externalError && sendError?.clientMessageId && onViewSubmittedMessage ? (
             <Button
               variant="ghost"
               size="sm"
@@ -2832,7 +2850,15 @@ function ComposerContentImpl({
           ) : null}
         </View>
       ) : null,
-    [sendError, onViewSubmittedMessage, viewSubmittedMessage, handleViewSubmittedMessage, t],
+    [
+      displayError,
+      externalError,
+      sendError,
+      onViewSubmittedMessage,
+      viewSubmittedMessage,
+      handleViewSubmittedMessage,
+      t,
+    ],
   );
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
@@ -2857,7 +2883,10 @@ function ComposerContentImpl({
       >
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}
-        <View style={inputAreaContainerStyle}>
+        <View
+          style={inputAreaContainerStyle}
+          dataSet={isFullscreen ? undefined : CHAT_COLUMN_RAIL_DATASET}
+        >
           <View style={inputAreaContentStyle}>
             {isFullscreen ? null : queueList}
             {isFullscreen ? null : outboxList}

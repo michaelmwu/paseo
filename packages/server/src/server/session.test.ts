@@ -543,6 +543,10 @@ test("routes plugin requests and releases its owned catalog subscription on clea
       return request;
     },
     emit: () => {},
+    hasWorktreeManager: () => false,
+    createWorktree: async () => null,
+    removeWorktree: async () => null,
+    restoreWorktree: async () => null,
     listPlugins: async () => [plugin],
     getLogs: () => [
       {
@@ -684,6 +688,10 @@ test("leaves out the client bundles a catalog request already holds", async () =
   const pluginRuntime: NonNullable<SessionOptions["pluginRuntime"]> = {
     before: async (_name, request) => request,
     emit: () => {},
+    hasWorktreeManager: () => false,
+    createWorktree: async () => null,
+    removeWorktree: async () => null,
+    restoreWorktree: async () => null,
     listPlugins: async () => [],
     getLogs: () => [],
     installDirectory: async () => {
@@ -6955,4 +6963,78 @@ test("an unknown target reports that a message was not submitted", async () => {
   } finally {
     await session.cleanup();
   }
+});
+
+test("deduplicates repeated command names in list_commands_response for live agents and drafts", async () => {
+  const duplicateCommands = [
+    {
+      name: "goal",
+      description: "Run until goal is finished",
+      argumentHint: "",
+      kind: "command" as const,
+    },
+    {
+      name: "plan",
+      description: "Plan carefully before executing a task.",
+      argumentHint: "",
+      kind: "command" as const,
+    },
+    {
+      name: "plan",
+      description: "Local plan skill description",
+      argumentHint: "",
+      kind: "skill" as const,
+    },
+  ];
+  const expected = [duplicateCommands[0], duplicateCommands[1]];
+
+  const liveMessages: SessionOutboundMessage[] = [];
+  const liveSession = createSessionForTest({
+    messages: liveMessages,
+    agentManager: {
+      waitForAgentClose: async () => undefined,
+      getAgent: () =>
+        ({
+          id: "agent-1",
+          session: { listCommands: async () => duplicateCommands },
+        }) as never,
+    },
+  });
+  await liveSession.handleMessage({
+    type: "list_commands_request",
+    agentId: "agent-1",
+    requestId: "req-live",
+  });
+  expect(findByType(liveMessages, "list_commands_response")).toMatchObject({
+    payload: {
+      agentId: "agent-1",
+      requestId: "req-live",
+      error: null,
+      commands: expected,
+    },
+  });
+
+  const draftMessages: SessionOutboundMessage[] = [];
+  const draftSession = createSessionForTest({
+    messages: draftMessages,
+    agentManager: {
+      getAgent: () => undefined,
+      listDraftCommands: async () => duplicateCommands,
+    },
+    agentStorage: { get: async () => null },
+  });
+  await draftSession.handleMessage({
+    type: "list_commands_request",
+    agentId: "draft-1",
+    requestId: "req-draft",
+    draftConfig: { provider: "antigravity", cwd: "/tmp/repo" },
+  });
+  expect(findByType(draftMessages, "list_commands_response")).toMatchObject({
+    payload: {
+      agentId: "draft-1",
+      requestId: "req-draft",
+      error: null,
+      commands: expected,
+    },
+  });
 });

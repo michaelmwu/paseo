@@ -1,5 +1,8 @@
-import { messageFingerprint } from "../message-receipts/fingerprint.js";
-import { prepareAgentMessage, type AgentPromptSource } from "./agent-messages/index.js";
+import {
+  prepareAgentMessage,
+  type AgentMessageDelivery,
+  type AgentPromptSource,
+} from "./agent-messages/index.js";
 import type { Logger } from "pino";
 
 import type { AgentPromptInput, AgentRunOptions } from "./agent-sdk-types.js";
@@ -26,6 +29,9 @@ export type AgentRunController = Pick<
 };
 
 export class AgentTurnBusyError extends Error {}
+
+/** The turn a steer targeted ended or changed before the provider took the steer. */
+export class AgentTurnChangedError extends Error {}
 
 export interface StartAgentRunOptions {
   allowOutOfBand?: boolean;
@@ -291,6 +297,11 @@ export interface SendPromptToAgentParams {
   logger: Logger;
 }
 
+/** A prompt that does not wait its turn. Messages queued for the agent go with it. */
+export interface SendDirectPromptParams extends SendPromptToAgentParams {
+  agentMessages: Pick<AgentMessageDelivery, "sendDirect">;
+}
+
 export interface StartCreatedAgentInitialPromptParams {
   agentStorage: AgentStorage;
   agentManager: AgentManager;
@@ -376,30 +387,40 @@ async function resolvePromptSource(
  * chat mentions, notify-on-finish) MUST go through this so behavior can never
  * drift between them.
  *
+ * The prompt does not wait in the agent's message queue, and it does not jump it either:
+ * messages already queued for the agent are delivered ahead of it in the same provider prompt.
+ *
  * When `unarchive` is false and the agent is archived, the call is a silent
  * no-op (returns the normal turn-start disposition) — the agent is not run.
  */
 export async function sendPromptToAgent(
-  params: SendPromptToAgentParams,
+  params: SendDirectPromptParams,
 ): Promise<PromptDispatchResult> {
-  const source = await resolvePromptSource(params.source, params.agentManager, params.agentStorage);
-  const delivery = prepareAgentMessage(params.prompt, source, params.messageId);
-  return sendPreparedPromptToAgent({
-    ...params,
-    prompt: delivery.prompt,
-    runOptions: delivery.messageId
-      ? {
-          ...params.runOptions,
-          clientMessageId: delivery.messageId,
-          submittedMessages: [
-            {
-              clientMessageId: delivery.messageId,
-              promptFingerprint: messageFingerprint(params.prompt),
-            },
-          ],
-        }
-      : params.runOptions,
-  });
+  const { agentMessages, source, messageId, ...send } = params;
+  return agentMessages.sendDirect(
+    {
+      recipientId: params.agentId,
+      prompt: params.prompt,
+      source: await resolvePromptSource(source, params.agentManager, params.agentStorage),
+      messageId,
+      sessionMode: params.sessionMode,
+      unarchive: params.unarchive,
+    },
+    (joined) =>
+      sendPreparedPromptToAgent({
+        ...send,
+        prompt: joined.prompt,
+        sessionMode: joined.sessionMode,
+        unarchive: joined.unarchive,
+        runOptions: joined.messageId
+          ? {
+              ...send.runOptions,
+              clientMessageId: joined.messageId,
+              submittedMessages: joined.submittedMessages,
+            }
+          : { ...send.runOptions, submittedMessages: joined.submittedMessages },
+      }),
+  );
 }
 
 /** Dispatch daemon-prepared context without reclassifying it as human input. */

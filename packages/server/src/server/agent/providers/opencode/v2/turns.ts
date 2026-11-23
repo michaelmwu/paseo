@@ -16,6 +16,7 @@ import { toDiagnosticErrorMessage } from "../../diagnostic-utils.js";
 import { renderPromptAttachmentAsText } from "../../../prompt-attachments.js";
 
 import { usageFromV2 } from "./mapping.js";
+import { latestTurnMetrics } from "./metrics.js";
 
 import { commands } from "./commands.js";
 
@@ -306,6 +307,7 @@ export class SessionTurns {
         provider: "opencode",
         turnId: turn.id,
         usage: usageFromV2(info),
+        metrics: latestTurnMetrics(history),
       });
   }
   private async readExecution(): Promise<ExecutionEvent | null> {

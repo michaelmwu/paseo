@@ -1,15 +1,13 @@
 import type { ComposerOptionControls } from "@/agent-controls/option-controls";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
-import { Keyboard, StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Keyboard, StyleSheet as RNStyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { StyleSheet } from "react-native-unistyles";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { type ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
 import { DraftAttachmentActions } from "@/composer/draft/attachment-actions";
-import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
@@ -535,13 +533,6 @@ export function WorkspaceDraftComposer({
   );
   return (
     <View style={animatedStaticStyles.inputAreaWrapper} onLayout={onInputAreaLayout}>
-      {formErrorMessage ? (
-        <View style={styles.formErrorRow}>
-          <View style={styles.formError}>
-            <Text style={styles.errorText}>{formErrorMessage}</Text>
-          </View>
-        </View>
-      ) : null}
       {!isComposerFullscreen && !isSubmitting ? (
         <DraftAttachmentActions
           serverId={serverId}
@@ -575,6 +566,7 @@ export function WorkspaceDraftComposer({
         commandDraft={composerState.commandDraft}
         agentControls={composerAgentControls}
         isCompactLayout={isCompactComposerLayout}
+        error={formErrorMessage || null}
       />
     </View>
   );
@@ -588,43 +580,3 @@ const animatedStaticStyles = RNStyleSheet.create({
     flexGrow: 1,
   },
 });
-
-const styles = StyleSheet.create((theme) => ({
-  formErrorRow: {
-    width: "100%",
-    paddingHorizontal: theme.spacing[4],
-    alignItems: "center",
-  },
-  importPillRow: {
-    width: "100%",
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    paddingBottom: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    alignItems: "center",
-  },
-  importPillContent: {
-    width: "100%",
-    maxWidth: theme.contentMaxWidth,
-    flexDirection: "row",
-  },
-  formError: {
-    width: "100%",
-    maxWidth: theme.contentMaxWidth,
-    marginBottom: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.surface2,
-    borderWidth: 1,
-    borderColor: theme.colors.destructive,
-  },
-  errorText: {
-    color: theme.colors.destructive,
-  },
-}));

@@ -475,6 +475,18 @@ Workspace records decide ownership, including explicit non-ownership after recov
 ownership checks prefer the marker-verified worktree root over the legacy
 path shape: a plugin can place a worktree several directories below the default worktrees root.
 
+A plugin can also take over worktree creation, removal, and restoration with
+`server.registerWorktreeManager({ create, remove?, restore? })`. It runs after
+`worktree.create.before` and before `worktree.create.after`, with a 120-second timeout matching Git
+worktree commands. Paseo snapshots existing worktree paths before calling `create` so a manager
+cannot adopt a pre-existing directory as Paseo-owned, verifies Git worktree postconditions, records
+`worktreeManagerPluginId` in `paseo/worktree.json` and on the workspace record,
+and skips first-agent branch auto-rename. Removal saves `refs/paseo/kept-commits/<sha>` before
+calling the owning plugin's `remove`, and `create`, `remove`, and `restore` carry `untrusted` for fork
+change requests; `remove` and `restore` fall back to built-in Git when the plugin declines or is disabled. See the
+[worktree managers reference](../public-docs/plugins/reference.md#worktree-managers) and
+`plugin-examples/worktrunk`.
+
 Emit from the operation owner, not a client subscription. Provider history replay must not trigger
 live hooks. Notifications must not be awaited inside agent mutations: a handler can send a prompt
 or answer a permission through its own daemon session. Awaiting it there deadlocks that command.
@@ -513,6 +525,18 @@ that effective launch. Return `{ available: true }` or
 before calling status; it exposes your diagnostic through the normal provider diagnostic command.
 A command-backed provider without status is available when its executable resolves. Providers with
 neither command nor status retain connection-based availability.
+
+Implement optional `installation` to fill the **Installation** section of provider settings. The
+bridge sends each callback as a `provider.installation.*` request carrying the launch `status`
+receives plus `resolved`. `resolved: false` means the executable was not found and `command` is
+the configured name, so answer `not_installed` instead of spawning it. Inspect and update-check
+requests use the 30 s plugin request timeout; the daemon's 25 s update-check deadline sits below
+it, so a slow check reports that deadline. `update` has no request timeout and streams output
+through `provider.installation.report`. When the daemon stops waiting on any of the three, it
+sends `provider.installation.cancel`, which aborts the callback's `signal`.
+The rules shared with built-ins are in [providers.md](providers.md#installation-and-updates); the
+author contract is in the
+[public provider guide](../public-docs/plugins/providers.md#report-installation-and-updates).
 
 A same-ID config entry without `extends` overrides the plugin's `enabled`, `command`, `env`, label,
 description, and model configuration through the normal provider registry. `enabled: false` disables

@@ -10,8 +10,11 @@ import {
   isPaseoOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
   rollbackCreatedPaseoWorktree,
+  runPluginWorktreeManagerCheckout,
   type WorktreeSource,
 } from "../../../utils/worktree.js";
+import type { PluginWorktreeManagerRuntime } from "../../plugins/runtime.js";
+import type { PluginWorktreeRestoreTarget } from "@getpaseo/plugin/server";
 import { WorktreeRequestError, toWorktreeRequestError } from "../../worktree-errors.js";
 import {
   resolveWorkspaceDisplayName,
@@ -66,10 +69,20 @@ export function createWorkspaceRecoveryService(deps: {
   logger: Logger;
   paseoHome: string;
   worktreesRoot?: string;
+  worktreeManagers?: Pick<
+    PluginWorktreeManagerRuntime,
+    "hasWorktreeManager" | "restoreWorktree" | "removeWorktree"
+  >;
   getWorkspace: (workspaceId: string) => Promise<PersistedWorkspaceRecord | null>;
   getProject: (projectId: string) => Promise<PersistedProjectRecord | null>;
   isDirectory: (path: string) => Promise<boolean>;
   unarchiveWorkspace: (workspace: PersistedWorkspaceRecord) => Promise<void>;
+  isCheckoutUntrusted?: (checkoutPath: string) => Promise<boolean>;
+  syncCheckoutWorktreeManager?: (input: {
+    worktreeRoot: string;
+    worktreeManagerPluginId: string | null;
+    excludeWorkspaceId: string;
+  }) => Promise<void>;
 }): WorkspaceRecoveryService {
   async function resolveRecovery(
     workspaceId: string,
@@ -142,17 +155,32 @@ export function createWorkspaceRecoveryService(deps: {
       throw new Error(resolved.message);
     }
 
+    let workspaceToUnarchive = resolved.workspace;
+    let recreated: { worktreePath: string; pluginId: string | null } | null = null;
     if (resolved.kind === "restore") {
-      await recreateArchivedWorktree(resolved.workspace, resolved.sourceRepoRoot);
+      recreated = await recreateArchivedWorktree(resolved.workspace, resolved.sourceRepoRoot);
+      if ((resolved.workspace.worktreeManagerPluginId ?? null) !== recreated.pluginId) {
+        const { worktreeManagerPluginId: _previous, ...withoutManager } = resolved.workspace;
+        workspaceToUnarchive = recreated.pluginId
+          ? { ...withoutManager, worktreeManagerPluginId: recreated.pluginId }
+          : withoutManager;
+      }
     }
-    await deps.unarchiveWorkspace(resolved.workspace);
+    await deps.unarchiveWorkspace(workspaceToUnarchive);
+    if (recreated) {
+      await deps.syncCheckoutWorktreeManager?.({
+        worktreeRoot: recreated.worktreePath,
+        worktreeManagerPluginId: recreated.pluginId,
+        excludeWorkspaceId: workspaceId,
+      });
+    }
     return { workspaceId, action: resolved.kind };
   }
 
   async function recreateArchivedWorktree(
     workspace: PersistedWorkspaceRecord,
     sourceRepoRoot: string,
-  ): Promise<void> {
+  ): Promise<{ worktreePath: string; pluginId: string | null }> {
     let source: WorktreeSource;
     const checkout = parseWorkspaceHead(workspace);
     if (checkout.kind === "branch") {
@@ -196,28 +224,22 @@ export function createWorkspaceRecoveryService(deps: {
       hasRecordedWorktreePath = ownership.allowed;
     }
 
+    const untrusted =
+      Boolean(workspace.untrustedSource) ||
+      Boolean(await deps.isCheckoutUntrusted?.(previousWorktreePath));
     let recreatedWorktreePath: string;
+    let restoredByPluginId: string | null = null;
     try {
-      const result = await createWorktree({
-        cwd: sourceRepoRoot,
-        worktreeSlug: basename(previousWorktreePath),
+      const restored = await recreateWorktreeCheckout({
+        workspace,
+        sourceRepoRoot,
         source,
-
-        paseoHome: deps.paseoHome,
-        worktreesRoot: deps.worktreesRoot,
-        ...(hasRecordedWorktreePath ? { worktreePath: previousWorktreePath } : {}),
+        previousWorktreePath,
+        hasRecordedWorktreePath,
+        untrusted,
       });
-      recreatedWorktreePath = result.worktreePath;
-      if (result.worktreeIncludeSummary.skipped.length > 0) {
-        deps.logger.warn(
-          {
-            materialized: result.worktreeIncludeSummary.materialized,
-            skipped: result.worktreeIncludeSummary.skipped,
-            worktreePath: result.worktreePath,
-          },
-          "Worktree include completed with skipped entries during workspace recovery",
-        );
-      }
+      recreatedWorktreePath = restored.worktreePath;
+      restoredByPluginId = restored.pluginId;
     } catch (error) {
       throw toWorktreeRequestError(error);
     }
@@ -248,13 +270,102 @@ export function createWorkspaceRecoveryService(deps: {
           teardownCwds: [],
           paseoHome: deps.paseoHome,
           worktreesBaseRoot: deps.worktreesRoot,
+          worktreeManagers: deps.worktreeManagers,
+          worktreeManagerPluginId: restoredByPluginId,
+          removeReason: "rollback",
+          untrusted,
         },
         error,
       );
     }
+    return { worktreePath: recreatedWorktreePath, pluginId: restoredByPluginId };
+  }
+
+  async function recreateWorktreeCheckout(options: {
+    workspace: PersistedWorkspaceRecord;
+    sourceRepoRoot: string;
+    source: Extract<WorktreeSource, { kind: "restore" | "restore-commit" | "restore-from-base" }>;
+    previousWorktreePath: string;
+    hasRecordedWorktreePath: boolean;
+    untrusted: boolean;
+  }): Promise<{ worktreePath: string; pluginId: string | null }> {
+    const {
+      workspace,
+      sourceRepoRoot,
+      source,
+      previousWorktreePath,
+      hasRecordedWorktreePath,
+      untrusted,
+    } = options;
+    const managerPluginId = workspace.worktreeManagerPluginId;
+    if (managerPluginId && hasRecordedWorktreePath && deps.worktreeManagers) {
+      const adopted = await runPluginWorktreeManagerCheckout({
+        cwd: sourceRepoRoot,
+        source,
+        operation: "restore",
+        preferredPluginId: managerPluginId,
+        untrusted,
+        paseoHome: deps.paseoHome,
+        worktreesBaseRoot: deps.worktreesRoot,
+        worktreeManagers: deps.worktreeManagers,
+        run: () =>
+          deps.worktreeManagers!.restoreWorktree(
+            {
+              repoRoot: sourceRepoRoot,
+              path: previousWorktreePath,
+              target: restoreTargetFromWorktreeSource(source),
+              baseRef: workspace.baseBranch,
+              untrusted,
+            },
+            { preferredPluginId: managerPluginId },
+          ),
+        verifyValidatedPath: (validatedPath, pluginId) => {
+          if (!createRealpathAwarePathMatcher(previousWorktreePath)(validatedPath)) {
+            throw new WorktreeRequestError({
+              code: "unknown",
+              message: `Plugin ${pluginId} restored worktree to ${validatedPath}, expected ${previousWorktreePath}`,
+            });
+          }
+        },
+      });
+      if (adopted) {
+        return {
+          worktreePath: adopted.worktreePath,
+          pluginId: adopted.worktreeManagerPluginId ?? managerPluginId,
+        };
+      }
+    }
+
+    const result = await createWorktree({
+      cwd: sourceRepoRoot,
+      worktreeSlug: basename(previousWorktreePath),
+      source,
+      paseoHome: deps.paseoHome,
+      worktreesRoot: deps.worktreesRoot,
+      ...(hasRecordedWorktreePath ? { worktreePath: previousWorktreePath } : {}),
+    });
+    if (result.worktreeIncludeSummary.skipped.length > 0) {
+      deps.logger.warn(
+        { ...result.worktreeIncludeSummary, worktreePath: result.worktreePath },
+        "Worktree include completed with skipped entries during workspace recovery",
+      );
+    }
+    return { worktreePath: result.worktreePath, pluginId: null };
   }
 
   return { inspect, restore };
+}
+
+function restoreTargetFromWorktreeSource(
+  source: Extract<WorktreeSource, { kind: "restore" | "restore-commit" | "restore-from-base" }>,
+): PluginWorktreeRestoreTarget {
+  if (source.kind === "restore") {
+    return { type: "branch", branch: source.branchName };
+  }
+  if (source.kind === "restore-commit") {
+    return { type: "commit", commit: source.commit };
+  }
+  return { type: "from-base", branch: source.branchName, baseRef: source.baseRef };
 }
 
 async function resolveRecoveryBase(repoRoot: string, recordedBase: string | null): Promise<string> {
