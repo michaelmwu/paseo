@@ -398,7 +398,11 @@ async function expectStickyWorkspacesHeader(scroll: Locator) {
 
 for (const compact of [false, true]) {
   test.describe(compact ? "Compact sidebar" : "Wide sidebar", () => {
-    test.use({ viewport: { width: compact ? 390 : 1280, height: 540 }, hasTouch: compact });
+    test.use({
+      viewport: { width: compact ? 390 : 1280, height: 540 },
+      hasTouch: compact,
+      deviceScaleFactor: 1.25,
+    });
 
     test("keeps the Workspaces header and Display menu reachable while scrolling", async ({
       page,
@@ -411,17 +415,22 @@ for (const compact of [false, true]) {
 
         const projectScroll = page.getByTestId("sidebar-project-workspace-list-scroll");
         await revealWorkspaces(compactProjectRows(page, seed).group, "Show more");
-        const header = projectScroll.getByTestId("sidebar-workspaces-section-header");
+        const header = page.getByTestId("sidebar-workspaces-section-header");
         await projectScroll.evaluate((element) => {
           element.scrollTop = 0;
         });
-        const restingY = (await visibleBoundingBox(header)).y;
+        await expect(projectScroll.getByTestId("sidebar-workspaces-section-header")).toHaveCount(0);
+        const restingBounds = await visibleBoundingBox(header);
+        const restingPixels = await header.screenshot();
         for (const offset of [1, 8, 0]) {
           await projectScroll.evaluate((element, y) => {
             element.scrollTop = y;
           }, offset);
-          await expect(projectScroll).toHaveJSProperty("scrollTop", offset);
-          expect((await visibleBoundingBox(header)).y).toBe(restingY);
+          expect(
+            Math.abs((await projectScroll.evaluate((el) => el.scrollTop)) - offset),
+          ).toBeLessThan(1);
+          expect(await visibleBoundingBox(header)).toEqual(restingBounds);
+          expect((await header.screenshot()).equals(restingPixels)).toBe(true);
         }
         await seed.client.setWorkspacePinned(seed.workspaceId, true);
         await expect(projectScroll.getByTestId("sidebar-pinned-section")).toBeVisible();

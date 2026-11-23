@@ -2548,17 +2548,18 @@ function ProjectModeList({
       : null;
   const content = Children.toArray([
     pinnedSection,
-    header,
+    pinnedSection ? header : null,
     <>
       {sidebarFilterEmpty ? <SidebarFilterEmptyState /> : projectBody}
       {listFooterComponent}
       <SidebarToastClearance />
     </>,
   ]);
-  const stickyHeaderIndices = header ? [pinnedSection ? 1 : 0] : [];
+  const stickyHeaderIndices = pinnedSection && header ? [1] : undefined;
 
   return (
     <View style={styles.container}>
+      {!pinnedSection && header ? <View style={styles.fixedHeader}>{header}</View> : null}
       {platformIsNative ? (
         <NestableScrollContainer
           {...nativeScrollGestureProps}
@@ -2593,6 +2594,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   list: {
     flex: 1,
+  },
+  fixedHeader: {
+    paddingHorizontal: theme.spacing[2],
   },
   listContent: {
     paddingHorizontal: theme.spacing[2],
