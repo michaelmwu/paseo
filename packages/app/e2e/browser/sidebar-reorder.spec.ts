@@ -405,13 +405,26 @@ for (const compact of [false, true]) {
     }) => {
       const { seed } = await seedCompactProject();
       try {
-        await seed.client.setWorkspacePinned(seed.workspaceId, true);
         await gotoAppShell(page);
         if (compact) await openMobileAgentSidebar(page);
         await waitForSidebarHydration(page);
 
         const projectScroll = page.getByTestId("sidebar-project-workspace-list-scroll");
         await revealWorkspaces(compactProjectRows(page, seed).group, "Show more");
+        const header = projectScroll.getByTestId("sidebar-workspaces-section-header");
+        await projectScroll.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+        const restingY = (await visibleBoundingBox(header)).y;
+        for (const offset of [1, 8, 0]) {
+          await projectScroll.evaluate((element, y) => {
+            element.scrollTop = y;
+          }, offset);
+          await expect(projectScroll).toHaveJSProperty("scrollTop", offset);
+          expect((await visibleBoundingBox(header)).y).toBe(restingY);
+        }
+        await seed.client.setWorkspacePinned(seed.workspaceId, true);
+        await expect(projectScroll.getByTestId("sidebar-pinned-section")).toBeVisible();
         await expectStickyWorkspacesHeader(projectScroll);
         await page.getByTestId("sidebar-display-grouping").click();
         await page.getByTestId("sidebar-grouping-status").click();

@@ -1089,6 +1089,8 @@ function getStatusWorkspaceRowStyle({
 
 const styles = StyleSheet.create((theme) => ({
   container: {
+    // Keep the optical inset outside the scroll range so the header sticks at its resting height.
+    paddingTop: 2,
     flex: 1,
   },
   list: {
@@ -1096,8 +1098,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   listContent: {
     paddingHorizontal: theme.spacing[2],
-    // Keep status mode's Pinned/Workspaces boundary identical to project mode.
-    paddingTop: 2,
     // Room for the sidebar toast comes from SidebarToastClearance at the end of the content.
     paddingBottom: theme.spacing[4],
   },

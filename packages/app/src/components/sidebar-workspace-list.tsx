@@ -2587,6 +2587,8 @@ function ProjectModeList({
 
 const styles = StyleSheet.create((theme) => ({
   container: {
+    // Keep the optical inset outside the scroll range so the header sticks at its resting height.
+    paddingTop: 2,
     flex: 1,
   },
   list: {
@@ -2594,9 +2596,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   listContent: {
     paddingHorizontal: theme.spacing[2],
-    // Optical inset: aligns the visible Pinned/Workspaces glyph edge with the
-    // Schedules icon across the divider; their layout boxes have different insets.
-    paddingTop: 2,
     // Room for the sidebar toast comes from SidebarToastClearance at the end of the content.
     paddingBottom: theme.spacing[4],
   },
