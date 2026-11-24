@@ -13,7 +13,7 @@ This is a fork deployment record, not an aggregate upstream proposal.
 
 | Feature                                                 | Revision    |
 | ------------------------------------------------------- | ----------- |
-| Project linking #4524 (historical #4052), linked branch | `ca620522f` |
+| Project linking #4524 (historical #4052), linked branch | `19395860f` |
 | Transcript attachments #4627                            | `07e750d7c` |
 | Cross-host/native continuation #2496, linked branch     | `b370aadf2` |
 | Project local-file import #4381, linked branch          | `c5c050148` |
@@ -30,10 +30,17 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Host instruction defaults/workspace overrides #10320    | `c84679f11` |
 | Sticky Workspaces header/Display menu #10325            | `0c80a810a` |
 
-Only #10325 is newly selected. Its PR is closed but unmerged, and the live
+The latest #4524 update adds sidebar project-menu and settings entry points,
+scoped matches/saved links, and stricter current-Git-fact checks. Apply only its
+feature commits after main-merge `d6d29a764`, not the unrelated main history in
+that branch. Preserve 0.17.3's project-settings Back ownership and the #10325
+sticky-header content slots. The dialog remains alive while linking regroups
+the sidebar; a local link never changes daemon project records.
+
+#10325's PR is closed but unmerged, and the live
 `sticky-workspaces-header` branch matches the requested head. Its four source/test
 files are applied; existing upstream QA media are referenced rather than copied.
-Other feature heads remain pinned, not refreshed. A fresh GitHub audit found none
+Other feature and companion heads remain pinned, not refreshed. A GitHub audit found none
 of the selected PRs merged; historical linked branches stay intact.
 
 #7782, #9580, #9757 and #9931 are already in the release. #6534 and #9549/#5633
@@ -109,6 +116,26 @@ All heavy work uses `paseo-resources job`. Core dependencies use the official
 release lock with `npm ci --ignore-scripts`; reviewed repository patches run
 explicitly afterward. npm 10 does not support dependency-age cooldowns.
 Logs and fresh browser recordings remain in ignored `.dev/` and test-results.
+
+### Latest #4524 refresh
+
+- Rebuild the daemon dependency stack, server and CLI; full monorepo typecheck,
+  lint and formatting pass.
+- Project-link identity/grouping, persisted store and Projects screen: 52 pass.
+- Locale catalog/interpolation coverage and actual Arabic/Russian match plurals:
+  45 pass. Permit locale-specific plural suffixes in the release's resource type.
+- Chromium linking/settings: five pass, including desktop linking and compact
+  unlinking without navigation, project-scoped saved links, persistence failure
+  recovery and saved links after project removal.
+- Chromium sticky Workspaces header/Display regressions: wide and compact pass.
+- Compiled isolated daemon smoke passes with all eight pinned plugins, browser
+  RPC/JPEG streaming, PTY output, host-instruction capabilities and launch recovery.
+
+Browser checks use `CI=1` to disable Metro watching after the initial dev-mode
+attempt hit the shared host's inotify limit. No system limits or other workspace
+processes were changed. This refresh does not rerun the broad release tests below.
+
+### Retained release verification
 
 - Daemon dependency stack, server and CLI build pass.
 - Full monorepo typecheck, lint and formatting pass.

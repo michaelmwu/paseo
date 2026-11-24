@@ -195,6 +195,7 @@ async function openProjectSettingsFromSidebar(page: Page, projectId: string): Pr
 
   const openSettingsItem = page.getByTestId(`sidebar-project-menu-open-settings-${projectId}`);
   await expect(openSettingsItem).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId(`sidebar-project-menu-project-links-${projectId}`)).toHaveCount(0);
   await openSettingsItem.click();
 }
 
@@ -214,6 +215,10 @@ test.describe("Projects settings", () => {
 
       await expectProjectSettingsFormVisible(page);
       await expect(page.getByTestId("project-settings-back-button")).not.toBeVisible();
+      await page.getByRole("button", { name: "Project links", exact: true }).click();
+      await expect(page.getByTestId("project-links-no-matches")).toBeVisible();
+      await page.getByTestId("project-links-close").click();
+      await expectProjectSettingsFormVisible(page);
     } finally {
       if (projectViewKey) {
         const project = (await client.listProjects()).projects.find(

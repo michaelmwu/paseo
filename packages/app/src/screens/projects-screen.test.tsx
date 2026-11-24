@@ -122,6 +122,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, string>) => {
       if (key === "sidebar.project.empty.title") return "No projects yet";
+      if (key === "settings.projectLinks.sheet.title") return "Project links";
       if (key === "settings.projectList.hostLoadFailed") {
         return `Couldn't load projects from host ${values?.hostName}: ${values?.message}`;
       }
@@ -158,6 +159,11 @@ vi.mock("react-native-safe-area-context", () => ({
 
 vi.mock("@/contexts/toast-context", () => ({
   useToast: () => ({ show: vi.fn(), error: vi.fn() }),
+}));
+
+vi.mock("@/components/settings/detail-row", () => ({
+  SettingsDetailRow: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    React.createElement("button", { type: "button", "aria-label": label, onClick: onPress }, label),
 }));
 
 vi.mock("@/components/ui/loading-spinner", () => ({
@@ -380,12 +386,13 @@ describe("ProjectsScreen", () => {
     expect(container?.querySelector('[data-testid="projects-loading-spinner"]')).not.toBeNull();
   });
 
-  it("renders the empty state when there are no projects", () => {
+  it("keeps project links available when the host has no projects", () => {
     setProjectsState({ projects: [] });
 
     render();
 
     expect(container?.textContent).toContain("No projects yet");
+    expect(container?.querySelector('[aria-label="Project links"]')).not.toBeNull();
     expect(container?.textContent).not.toContain("Non-GitHub remote projects aren't supported yet");
   });
 

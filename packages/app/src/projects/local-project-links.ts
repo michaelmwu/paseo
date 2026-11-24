@@ -53,6 +53,21 @@ export interface ProjectLinkSuggestion {
   placements: ProjectLinkPlacement[];
 }
 
+export function scopeProjectLinks(
+  input: {
+    suggestions?: readonly ProjectLinkSuggestion[];
+    links: readonly LocalProjectLink[];
+  },
+  includes: (placement: ProjectLinkPlacementRef) => boolean,
+) {
+  return {
+    suggestions: (input.suggestions ?? []).filter((suggestion) =>
+      suggestion.placements.some(includes),
+    ),
+    links: input.links.filter((link) => link.members.some(includes)),
+  };
+}
+
 export type ProjectLinkGroupingOverride = { kind: "linked"; linkId: string } | { kind: "blocked" };
 
 export function projectLinkPlacementKey(placement: ProjectLinkPlacementRef): string {
@@ -93,6 +108,11 @@ export function resolveProjectGitIdentity(input: {
 
   for (const workspace of input.workspaces) {
     if (workspace.projectId !== input.project.projectId) continue;
+    // COMPAT(legacyCheckoutRoot): old daemons synthesize this workspace kind from agent payloads,
+    // whose optional worktreeRoot is normalized to cwd. That fallback cannot prove a selected
+    // subdirectory's checkout root, so do not use it for device-local link verification. Remove
+    // after the supported daemon floor guarantees workspaceMultiplicity (2027-11-23).
+    if (workspace.workspaceKind === "checkout") continue;
     const checkout = workspace.project?.checkout;
     const identityRoot = checkout?.isGit
       ? findProjectCheckoutRoot(input.project.projectRootPath, checkout)
@@ -118,11 +138,29 @@ export function resolveProjectGitIdentity(input: {
   return sawIdentity ? resolved : null;
 }
 
-/** Prefer the checkout that actually contains the selected project. */
+/**
+ * Use Git facts only when the workspace proves they belong to the selected project root. An
+ * arbitrary ancestor workspace can own an explicitly selected nested project, including an
+ * independent nested repository, so containment alone is not enough evidence.
+ */
 function findProjectCheckoutRoot(
   projectRootPath: string,
-  checkout: { worktreeRoot: string; mainRepoRoot: string | null },
+  checkout: {
+    cwd: string;
+    worktreeRoot: string;
+    mainRepoRoot: string | null;
+  },
 ): string | null {
+  const hasCheckoutAtSelectedRoot =
+    pathsReferToSameLocation(checkout.cwd, projectRootPath) ||
+    pathsReferToSameLocation(checkout.worktreeRoot, projectRootPath);
+  // mainRepoRoot comes from Git's common directory and is authoritative regardless of whether
+  // Paseo owns the worktree's lifecycle.
+  const hasObservedMainRepoRoot =
+    checkout.mainRepoRoot !== null &&
+    pathsReferToSameLocation(checkout.mainRepoRoot, projectRootPath);
+  if (!hasCheckoutAtSelectedRoot && !hasObservedMainRepoRoot) return null;
+
   const candidateRoots = [checkout.worktreeRoot, checkout.mainRepoRoot];
   return (
     candidateRoots.find(
@@ -130,6 +168,10 @@ function findProjectCheckoutRoot(
         root !== null && relativeProjectPath(root, projectRootPath) !== null,
     ) ?? null
   );
+}
+
+function pathsReferToSameLocation(left: string, right: string): boolean {
+  return relativeProjectPath(left, right) === "";
 }
 
 export function deriveProjectGitIdentity(input: {

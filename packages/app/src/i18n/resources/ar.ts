@@ -2497,11 +2497,16 @@ export const ar: TranslationResources = {
       editProject: "تحرير{{projectName}}",
     },
     projectLinks: {
-      banner: {
-        matchesTitle: "روابط محتملة للمشاريع",
-        linkedTitle: "روابط المشاريع",
-        description: "راجع روابط المشاريع التي تحقّق منها Git والمحفوظة على هذا الجهاز.",
-        review: "مراجعة الروابط",
+      entry: {
+        matches: "{{count}} تطابق مؤكّد للمراجعة",
+        matches_one: "{{count}} تطابق مؤكّد للمراجعة",
+        matches_other: "{{count}} تطابق مؤكّد للمراجعة",
+        savedLinks: "روابط محفوظة على هذا الجهاز",
+        linkAction: "ربط المشاريع…",
+        manageAction: "روابط المشاريع…",
+        matches_two: "{{count}} من التطابقات المؤكّدة للمراجعة",
+        matches_few: "{{count}} تطابقات مؤكّدة للمراجعة",
+        hint: "راجع المشاريع المطابقة وأدر روابطها على هذا الجهاز.",
       },
       sheet: {
         title: "روابط المشاريع",
@@ -2512,7 +2517,7 @@ export const ar: TranslationResources = {
         linkedTitle: "المشاريع المرتبطة",
         noMatchesTitle: "لا توجد روابط مشاريع لمراجعتها",
         noMatchesDescription:
-          "افتح مساحة عمل على كل مضيف لكي يتمكن Paseo من التحقق من مستودع Git البعيد والدليل الفرعي للمشروع.",
+          "افتح مساحة عمل في المستودع نفسه على مضيفين. تظهر هنا المشاريع المطابقة التي لا تزال منفصلة.",
         linkProjects: "ربط {{count}} مشاريع",
         remote: "مستودع Git البعيد",
         subdirectory: "الدليل الفرعي للمشروع",

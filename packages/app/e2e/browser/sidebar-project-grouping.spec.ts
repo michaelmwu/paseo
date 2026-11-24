@@ -25,6 +25,10 @@ import { waitForConnectedHost } from "../support/helpers/hosts";
 import { connectSeedClient, type SeedDaemonClient } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
 import { selectSettingsHost } from "../support/helpers/settings";
+import {
+  expectMobileAgentSidebarVisible,
+  openMobileAgentSidebar,
+} from "../support/helpers/sidebar";
 import { createTempGitRepo } from "../support/helpers/workspace";
 import { waitForSidebarHydration } from "../support/helpers/workspace-ui";
 
@@ -97,19 +101,21 @@ async function removePersistedProjectKeys(host: IsolatedHostDaemon): Promise<voi
 }
 
 const test = base.extend<{
+  crossHostSecondaryRemote: string;
   crossHostProject: CrossHostProjectScenario;
   reconciledCrossHostProject: ProjectDirectoryScenario;
   rootAndSubdirectoryProjects: ProjectDirectoryScenario;
   crossHostSubdirectoryProject: ProjectDirectoryScenario;
   sameHostClones: ProjectDirectoryScenario;
 }>({
-  crossHostProject: async ({ page: _page }, provide) => {
+  crossHostSecondaryRemote: [SHARED_REMOTE_URL, { option: true }],
+  crossHostProject: async ({ page: _page, crossHostSecondaryRemote }, provide) => {
     const secondaryHost = await startIsolatedHostDaemon("project-grouping-secondary");
     const primaryRepo = await createTempGitRepo("grouped-primary-", {
       originUrl: SHARED_REMOTE_URL,
     });
     const secondaryRepo = await createTempGitRepo("grouped-secondary-", {
-      originUrl: SHARED_REMOTE_URL,
+      originUrl: crossHostSecondaryRemote,
     });
     const primaryClient = await connectSeedClient();
     const secondaryClient = await connectSeedClient({ port: secondaryHost.port });
@@ -416,18 +422,74 @@ test.describe("Sidebar project grouping", () => {
     });
   });
 
-  test("reviews and unlinks a device-local cross-host project link", async ({
+  test.describe("Project links in the sidebar menu", () => {
+    test.use({
+      crossHostSecondaryRemote: "ssh://git@ssh.github.com:443/paseo-e2e/grouped-project.git",
+    });
+
+    test("links from the desktop context menu and manages the link from the compact menu", async ({
+      page,
+      crossHostProject,
+    }) => {
+      await openScenario(page, crossHostProject);
+      await openGroupedProjectWorkspace(page, GROUPED_PROJECT_NAME, "Primary workspace");
+      const workspaceUrl = page.url();
+      const primaryGroup = page
+        .getByRole("group", { name: GROUPED_PROJECT_NAME, exact: true })
+        .filter({ hasText: "Primary workspace" });
+      const projectRow = primaryGroup.locator('[data-testid^="sidebar-project-row-"]');
+      await projectRow.click({ button: "right" });
+      await page.getByText("Link projects…", { exact: true }).click();
+
+      const sheet = page.getByTestId("project-links-sheet");
+      await expect(sheet).toContainText("Verified matches");
+      await sheet.getByRole("button", { name: "Link 2 projects", exact: true }).click();
+      await expect(sheet).toContainText("Linked projects");
+      await expect(page).toHaveURL(workspaceUrl);
+      await sheet.getByTestId("project-links-close").click();
+      await expectProjectContainsWorkspaces(page, {
+        projectName: GROUPED_PROJECT_NAME,
+        workspaceNames: ["Primary workspace", "Secondary workspace"],
+      });
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openMobileAgentSidebar(page);
+      await expectMobileAgentSidebarVisible(page);
+      await primaryGroup.locator('[data-testid^="sidebar-project-kebab-"]').click();
+      await page.getByText("Project links…", { exact: true }).click();
+      await expect(page.getByText("Linked projects", { exact: true })).toBeVisible();
+      await page
+        .getByTestId(projectUnlinkTestId(getServerId(), crossHostProject.primaryProjectId))
+        .click();
+      await expect(page.getByText("Verified matches", { exact: true })).toBeVisible();
+      await expect(page).toHaveURL(workspaceUrl);
+    });
+  });
+
+  test("reviews and unlinks a device-local cross-host link from project settings", async ({
     page,
     crossHostProject,
   }) => {
     await openScenario(page, crossHostProject);
+    const savedLink = localProjectLinkFor(crossHostProject);
     await reloadWithLocalProjectLinks(page, crossHostProject, [
-      localProjectLinkFor(crossHostProject),
+      savedLink,
+      {
+        id: "unrelated-project-link",
+        members: savedLink.members.map(({ serverId }) => ({
+          serverId,
+          projectId: "unrelated-project",
+        })),
+        identity: { repository: "github.com/paseo-e2e/unrelated-project", subdirectory: "" },
+      },
     ]);
-    await openProjectsSettings(page, getServerId());
+    await openGroupedProjectSettings(page, {
+      serverId: getServerId(),
+      projectName: GROUPED_PROJECT_NAME,
+    });
 
-    await expect(page.getByTestId("project-links-banner")).toBeVisible();
-    await page.getByTestId("project-links-review").click();
+    const entry = page.getByRole("button", { name: "Project links", exact: true });
+    await entry.click();
 
     const sheet = page.getByTestId("project-links-sheet");
     await expect(sheet).toBeVisible();
@@ -436,6 +498,7 @@ test.describe("Sidebar project grouping", () => {
     await expect(sheet).toContainText(SECONDARY_HOST_LABEL);
     await expect(sheet).toContainText(crossHostProject.primaryProjectPath);
     await expect(sheet).toContainText(crossHostProject.secondaryProjectPath);
+    await expect(sheet).not.toContainText("github.com/paseo-e2e/unrelated-project");
 
     await page
       .getByTestId(projectUnlinkTestId(getServerId(), crossHostProject.primaryProjectId))
@@ -443,7 +506,7 @@ test.describe("Sidebar project grouping", () => {
     await expect(sheet.getByTestId("project-links-no-matches")).toBeVisible();
 
     await page.getByTestId("project-links-close").click();
-    await expect(page.getByTestId("project-links-banner")).toHaveCount(0);
+    await expect(entry).toBeVisible();
   });
 
   test("keeps a project link available to retry when local persistence fails", async ({
@@ -455,7 +518,7 @@ test.describe("Sidebar project grouping", () => {
       localProjectLinkFor(crossHostProject),
     ]);
     await openProjectsSettings(page, getServerId());
-    await page.getByTestId("project-links-review").click();
+    await page.getByRole("button", { name: "Project links", exact: true }).click();
 
     const sheet = page.getByTestId("project-links-sheet");
     const primaryUnlink = page.getByTestId(
@@ -498,8 +561,7 @@ test.describe("Sidebar project grouping", () => {
     await openProjectsSettings(page, getServerId());
 
     await expect(page.getByText("No projects yet", { exact: true })).toBeVisible();
-    await expect(page.getByTestId("project-links-banner")).toBeVisible();
-    await page.getByTestId("project-links-review").click();
+    await page.getByRole("button", { name: "Project links", exact: true }).click();
 
     const sheet = page.getByTestId("project-links-sheet");
     await expect(sheet).toBeVisible();

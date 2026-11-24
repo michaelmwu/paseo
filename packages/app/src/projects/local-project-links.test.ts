@@ -31,29 +31,35 @@ function workspace(input: {
   id: string;
   projectId: string;
   projectRoot: string;
+  workspaceDirectory?: string;
+  workspaceKind?: WorkspaceDescriptor["workspaceKind"];
+  isPaseoOwnedWorktree?: boolean;
   worktreeRoot: string;
   mainRepoRoot?: string;
   remote: string;
 }): WorkspaceDescriptor {
-  const checkout = input.mainRepoRoot
-    ? {
-        cwd: input.projectRoot,
-        isGit: true as const,
-        currentBranch: "main",
-        remoteUrl: null,
-        worktreeRoot: input.worktreeRoot,
-        isPaseoOwnedWorktree: true as const,
-        mainRepoRoot: input.mainRepoRoot,
-      }
-    : {
-        cwd: input.projectRoot,
-        isGit: true as const,
-        currentBranch: "main",
-        remoteUrl: null,
-        worktreeRoot: input.worktreeRoot,
-        isPaseoOwnedWorktree: false as const,
-        mainRepoRoot: null,
-      };
+  const workspaceDirectory = input.workspaceDirectory ?? input.projectRoot;
+  const isPaseoOwnedWorktree = input.isPaseoOwnedWorktree ?? Boolean(input.mainRepoRoot);
+  const checkout =
+    isPaseoOwnedWorktree && input.mainRepoRoot
+      ? {
+          cwd: workspaceDirectory,
+          isGit: true as const,
+          currentBranch: "main",
+          remoteUrl: null,
+          worktreeRoot: input.worktreeRoot,
+          isPaseoOwnedWorktree: true as const,
+          mainRepoRoot: input.mainRepoRoot,
+        }
+      : {
+          cwd: workspaceDirectory,
+          isGit: true as const,
+          currentBranch: "main",
+          remoteUrl: null,
+          worktreeRoot: input.worktreeRoot,
+          isPaseoOwnedWorktree: false as const,
+          mainRepoRoot: input.mainRepoRoot ?? null,
+        };
 
   return {
     createdAt: null,
@@ -63,9 +69,9 @@ function workspace(input: {
     projectDisplayName: "acme/app",
     projectCustomName: null,
     projectRootPath: input.projectRoot,
-    workspaceDirectory: input.projectRoot,
+    workspaceDirectory,
     projectKind: "git",
-    workspaceKind: "local_checkout",
+    workspaceKind: input.workspaceKind ?? "local_checkout",
     name: "main",
     status: "done",
     statusEnteredAt: null,
@@ -279,6 +285,109 @@ describe("local project links", () => {
       remoteDisplay: "github.com/acme/app",
       subdirectory: "packages/web",
     });
+  });
+
+  test("uses a managed worktree for its exact main-repository project", () => {
+    const descriptor = project({ id: "prj-main", root: "/repos/app" });
+    expect(
+      resolveProjectGitIdentity({
+        project: descriptor,
+        workspaces: [
+          workspace({
+            id: "ws-main",
+            projectId: descriptor.projectId,
+            projectRoot: descriptor.projectRootPath,
+            workspaceDirectory: "/repos/.paseo/worktrees/feature",
+            worktreeRoot: "/repos/.paseo/worktrees/feature",
+            mainRepoRoot: "/repos/app",
+            remote: "https://github.com/acme/app.git",
+          }),
+        ],
+      }),
+    ).toMatchObject({ repository: "github.com/acme/app", subdirectory: "" });
+  });
+
+  test("uses a user-owned worktree for its exact main-repository project", () => {
+    const descriptor = project({ id: "prj-user-worktree", root: "/repos/app" });
+    expect(
+      resolveProjectGitIdentity({
+        project: descriptor,
+        workspaces: [
+          workspace({
+            id: "ws-user-worktree",
+            projectId: descriptor.projectId,
+            projectRoot: descriptor.projectRootPath,
+            workspaceDirectory: "/repos/worktrees/feature",
+            workspaceKind: "worktree",
+            isPaseoOwnedWorktree: false,
+            worktreeRoot: "/repos/worktrees/feature",
+            mainRepoRoot: "/repos/app",
+            remote: "https://github.com/acme/app.git",
+          }),
+        ],
+      }),
+    ).toMatchObject({ repository: "github.com/acme/app", subdirectory: "" });
+  });
+
+  test("does not use an ancestor workspace checkout as selected-root evidence", () => {
+    const descriptor = project({ id: "prj-inner", root: "/repo/outer/inner" });
+    expect(
+      resolveProjectGitIdentity({
+        project: descriptor,
+        workspaces: [
+          workspace({
+            id: "ws-outer",
+            projectId: descriptor.projectId,
+            projectRoot: descriptor.projectRootPath,
+            workspaceDirectory: "/repo/outer",
+            worktreeRoot: "/repo/outer",
+            remote: "https://github.com/acme/outer.git",
+          }),
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  test("does not verify links from synthetic legacy checkout roots", () => {
+    const projectA = project({ id: "prj-a", root: "/repo/packages/web" });
+    const projectB = project({ id: "prj-b", root: "/clone/packages/api" });
+    const placements = buildProjectLinkPlacements({
+      hosts: [
+        {
+          serverId: "host-a",
+          serverName: "Desktop",
+          projects: [projectA],
+          workspaces: [
+            workspace({
+              id: "ws-a",
+              projectId: projectA.projectId,
+              projectRoot: projectA.projectRootPath,
+              worktreeRoot: projectA.projectRootPath,
+              workspaceKind: "checkout",
+              remote: "https://github.com/acme/app.git",
+            }),
+          ],
+        },
+        {
+          serverId: "host-b",
+          serverName: "Laptop",
+          projects: [projectB],
+          workspaces: [
+            workspace({
+              id: "ws-b",
+              projectId: projectB.projectId,
+              projectRoot: projectB.projectRootPath,
+              worktreeRoot: projectB.projectRootPath,
+              workspaceKind: "checkout",
+              remote: "https://github.com/acme/app.git",
+            }),
+          ],
+        },
+      ],
+    });
+
+    expect(placements.map((placement) => placement.identity)).toEqual([null, null]);
+    expect(buildProjectLinkSuggestions({ placements, links: [] })).toEqual([]);
   });
 
   test("does not infer an identity when a project is outside its Git worktree", () => {

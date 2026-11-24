@@ -2494,11 +2494,14 @@ export const en = {
       editProject: "Edit {{projectName}}",
     },
     projectLinks: {
-      banner: {
-        matchesTitle: "Possible project links",
-        linkedTitle: "Project links",
-        description: "Review Git-verified project links stored on this device.",
-        review: "Review links",
+      entry: {
+        matches: "{{count}} verified matches to review",
+        matches_one: "{{count}} verified match to review",
+        matches_other: "{{count}} verified matches to review",
+        savedLinks: "Links saved on this device",
+        linkAction: "Link projects…",
+        manageAction: "Project links…",
+        hint: "Review matches and manage links on this device.",
       },
       sheet: {
         title: "Project links",
@@ -2510,7 +2513,7 @@ export const en = {
         linkedTitle: "Linked projects",
         noMatchesTitle: "No project links to review",
         noMatchesDescription:
-          "Open a workspace on each host so Paseo can verify its Git remote and project subdirectory.",
+          "Open a workspace in the same repository on two hosts. Matching projects that are still separate appear here.",
         linkProjects: "Link {{count}} projects",
         remote: "Git remote",
         subdirectory: "Project subdirectory",
@@ -3621,10 +3624,17 @@ type TranslationResourcesBase = WidenStringLeaves<typeof en>;
 type PluralCategory = "zero" | "one" | "two" | "few" | "many" | "other";
 type DurationPluralKey = `${"days" | "hours" | "minutes"}_${PluralCategory}`;
 type AgoPluralKey = `${"daysAgo" | "hoursAgo" | "minutesAgo"}_${PluralCategory}`;
+type ProjectLinkMatchPluralKey = `matches_${PluralCategory}`;
 
 // i18next plural categories differ by locale, so locale catalogs may add the
 // explicit v4 suffixes they need while retaining the canonical fallback keys.
 export type TranslationResources = TranslationResourcesBase & {
+  settings: TranslationResourcesBase["settings"] & {
+    projectLinks: TranslationResourcesBase["settings"]["projectLinks"] & {
+      entry: TranslationResourcesBase["settings"]["projectLinks"]["entry"] &
+        Partial<Record<ProjectLinkMatchPluralKey, string>>;
+    };
+  };
   providerUsage: TranslationResourcesBase["providerUsage"] & {
     duration: TranslationResourcesBase["providerUsage"]["duration"] &
       Partial<Record<DurationPluralKey, string>>;

@@ -2431,11 +2431,14 @@ export const zhCN: TranslationResources = {
       editProject: "编辑 {{projectName}}",
     },
     projectLinks: {
-      banner: {
-        matchesTitle: "可能的项目链接",
-        linkedTitle: "项目链接",
-        description: "查看存储在此设备上的、已由 Git 验证的项目链接。",
-        review: "查看链接",
+      entry: {
+        matches: "有 {{count}} 个已验证的匹配项待查看",
+        matches_one: "有 {{count}} 个已验证的匹配项待查看",
+        matches_other: "有 {{count}} 个已验证的匹配项待查看",
+        savedLinks: "关联已保存在此设备上",
+        linkAction: "关联项目…",
+        manageAction: "项目关联…",
+        hint: "查看匹配的项目并管理此设备上的关联。",
       },
       sheet: {
         title: "项目链接",
@@ -2445,7 +2448,7 @@ export const zhCN: TranslationResources = {
         linkedTitle: "已链接的项目",
         noMatchesTitle: "没有要查看的项目链接",
         noMatchesDescription:
-          "请在每台主机上打开一个工作区，以便 Paseo 验证 Git 远程仓库和项目子目录。",
+          "在两台主机上打开同一仓库中的工作区。匹配且仍单独显示的项目会出现在这里。",
         linkProjects: "链接 {{count}} 个项目",
         remote: "Git 远程仓库",
         subdirectory: "项目子目录",
