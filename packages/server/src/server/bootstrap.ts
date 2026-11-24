@@ -1,3 +1,5 @@
+import { MessageAcceptanceStore } from "./message-receipts/acceptance.js";
+import { HostInstructionsRuntime } from "./host-instructions/runtime.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { sendPromptToAgent, unarchiveAgentState } from "./agent/agent-prompt.js";
@@ -215,8 +217,12 @@ import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-regist
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
+import { WorkspaceLaunchManager } from "./workspace-launch-manager.js";
+import { deriveProjectServiceSlug, deriveProjectSlug } from "./workspace-git-metadata.js";
 import { createWorkspaceScriptsService } from "./session/workspace-scripts/workspace-scripts-service.js";
 import {
+  assertWorkspaceAutomationAllowed,
   assertWorkspaceAutomationAllowedForWorkspace,
   isCheckoutUntrusted,
 } from "./workspace-automation-gate.js";
@@ -574,6 +580,18 @@ function resolveExpressTrustProxySetting(config: PaseoDaemonConfig): true | stri
   return config.trustedProxies ?? ["loopback"];
 }
 
+function resolveRelayRuntimeConfig(config: PaseoDaemonConfig) {
+  const endpoint = config.relayEndpoint ?? "relay.paseo.sh:443";
+  const useTls = config.relayUseTls ?? endpoint === "relay.paseo.sh:443";
+  return {
+    enabled: config.relayEnabled ?? true,
+    endpoint,
+    publicEndpoint: config.relayPublicEndpoint ?? endpoint,
+    useTls,
+    publicUseTls: config.relayPublicUseTls ?? useTls,
+  };
+}
+
 function createInitialRelayConfig(config: ResolvedDaemonSettings): MutableDaemonConfig["relay"] {
   return {
     enabled: config.relayEnabled ?? true,
@@ -751,6 +769,8 @@ export async function createPaseoDaemon(
     publicBaseUrl: serviceProxyPublicBaseUrl,
   });
   const scriptRuntimeStore = new WorkspaceScriptRuntimeStore();
+  const workspaceRuntimeEnvironment = new WorkspaceRuntimeEnvironmentService();
+  let workspaceLaunchManager: WorkspaceLaunchManager | null = null;
   const workspaceSetupRuntime = new WorkspaceSetupRuntime();
   const workspaceArchiveOperations = new WorkspaceArchiveOperations();
   let configuredHostnames = config.hostnames ?? config.allowedHosts;
@@ -763,29 +783,53 @@ export async function createPaseoDaemon(
   });
   let wsServer: VoiceAssistantWebSocketServer | null = null;
   let serviceProxyListenTarget: ListenTarget | null = null;
+  const emitWorkspaceUpdatesExternal = async (workspaceIds: Iterable<string>) => {
+    await wsServer?.publishWorkspaceUpdates(workspaceIds);
+  };
+  const emitScriptStatusUpdate = createScriptStatusEmitter({
+    sessions: () =>
+      wsServer?.listSessions().map((session) => ({
+        emit: (message) => session.emitServerMessage(message),
+      })) ?? [],
+    serviceProxy,
+    runtimeStore: scriptRuntimeStore,
+    daemonPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
+    resolveWorkspaceConfig: async (workspaceId) => {
+      const workspace = await workspaceRegistry?.get(workspaceId);
+      if (!workspace) {
+        return null;
+      }
+      const project = await projectRegistry.get(workspace.projectId);
+      return {
+        workspaceDirectory: workspace.cwd,
+        projectConfigDirectory: project?.rootPath ?? workspace.cwd,
+      };
+    },
+    emitWorkspaceSnapshot: async (workspaceId) => {
+      await emitWorkspaceUpdatesExternal([workspaceId]);
+    },
+    logger,
+    serviceProxyPublicBaseUrl,
+  });
   const scriptHealthMonitor = new ScriptHealthMonitor({
     serviceProxy,
-    onChange: createScriptStatusEmitter({
-      sessions: () =>
-        wsServer?.listSessions().map((session) => ({
-          emit: (message) => session.emitServerMessage(message),
-        })) ?? [],
-      serviceProxy,
-      runtimeStore: scriptRuntimeStore,
-      daemonPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
-      resolveWorkspaceDirectory: async (workspaceId) =>
-        (await workspaceRegistry?.get(workspaceId))?.cwd ?? null,
-      logger,
-      serviceProxyPublicBaseUrl,
-    }),
+    onChange: emitScriptStatusUpdate,
   });
-  const handleBranchChange = createBranchChangeRouteHandler({
+  const handleServiceProxyBranchChange = createBranchChangeRouteHandler({
     serviceProxy,
     onRoutesChanged: (workspaceId) => {
       scriptHealthMonitor.invalidateWorkspace(workspaceId);
     },
     logger,
   });
+  const handleBranchChange = (
+    workspaceId: string,
+    oldBranch: string | null,
+    newBranch: string | null,
+  ): void => {
+    handleServiceProxyBranchChange(workspaceId, oldBranch, newBranch);
+    workspaceLaunchManager?.updateWorkspaceBranch(workspaceId, newBranch);
+  };
 
   // Service proxy classifies service hosts before daemon auth/route fallthrough.
   // Registered service hosts proxy directly; known service namespaces without a
@@ -1039,6 +1083,9 @@ export async function createPaseoDaemon(
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
+    messageAcceptanceStore: new MessageAcceptanceStore(
+      path.join(config.paseoHome, "message-acceptance"),
+    ),
     pluginLifecycle: pluginRuntime,
     pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
@@ -1108,6 +1155,15 @@ export async function createPaseoDaemon(
   logger.info({ elapsed: elapsed() }, "Workspace registries bootstrapped");
   const teardownArchivedWorkspaceRuntime = (workspaceId: string): void => {
     scriptRuntimeStore.removeForWorkspace(workspaceId);
+    if (workspaceLaunchManager) {
+      void workspaceLaunchManager
+        .disposeWorkspace(workspaceId)
+        .catch((error) =>
+          logger.warn({ err: error, workspaceId }, "Failed to stop workspace launch"),
+        );
+    } else {
+      workspaceRuntimeEnvironment.release(workspaceId);
+    }
     releaseWorkspaceServicePortPlan(workspaceId);
   };
   const workspaceReconciliation = new WorkspaceReconciliationService({
@@ -1125,10 +1181,6 @@ export async function createPaseoDaemon(
         logger,
       });
     },
-  });
-  await workspaceReconciliation.start();
-  void workspaceReconciliation.reconcileNow().catch((error) => {
-    logger.warn({ err: error }, "Initial workspace reconciliation failed");
   });
   const checkoutDiffManager = new CheckoutDiffManager({
     logger,
@@ -1195,9 +1247,49 @@ export async function createPaseoDaemon(
     workspaceArchiveOperations.markArchiving(workspaceIds, archivingAt);
   const clearWorkspaceArchiving = (workspaceIds: Iterable<string>) =>
     workspaceArchiveOperations.clearArchiving(workspaceIds);
-  const emitWorkspaceUpdatesExternal = async (workspaceIds: Iterable<string>) => {
-    await wsServer?.publishWorkspaceUpdates(workspaceIds);
-  };
+  workspaceLaunchManager = new WorkspaceLaunchManager({
+    terminalManager,
+    serviceProxy,
+    workspaceRuntimeEnvironment,
+    assertAutomationAllowed: async (workspaceId) => {
+      const workspace = await workspaceRegistry.get(workspaceId);
+      if (!workspace || workspace.archivedAt)
+        throw new Error(`Workspace not found: ${workspaceId}`);
+      assertWorkspaceAutomationAllowed(workspace.untrustedSource);
+    },
+    scriptRuntimeStore,
+    getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
+    serviceProxyPublicBaseUrl,
+    getGlobalServicePorts: () => daemonConfigStore.readServicePorts(),
+    resolveScriptHealth: (hostname) => scriptHealthMonitor.getHealthForHostname(hostname),
+    emitWorkspaceUpdates: emitWorkspaceUpdatesExternal,
+    logger,
+  });
+  const launchProjects = new Map(
+    (await projectRegistry.list()).map((project) => [project.projectId, project]),
+  );
+  await workspaceLaunchManager.initialize(
+    (await workspaceRegistry.listAll())
+      .filter((workspace) => !workspace.archivedAt)
+      .map((workspace) => {
+        const project = launchProjects.get(workspace.projectId);
+        const snapshot = workspaceGitService.peekSnapshot(workspace.cwd);
+        return {
+          workspaceId: workspace.workspaceId,
+          workspaceDirectory: workspace.cwd,
+          projectConfigDirectory: project?.rootPath ?? workspace.cwd,
+          projectSlug: project
+            ? deriveProjectServiceSlug(project)
+            : deriveProjectSlug(workspace.cwd),
+          branchName: snapshot?.git.currentBranch ?? workspace.branch ?? null,
+        };
+      }),
+  );
+  // Recovery must own surviving blocks before reconciliation can archive their workspaces.
+  await workspaceReconciliation.start();
+  void workspaceReconciliation.reconcileNow().catch((error) => {
+    logger.warn({ err: error }, "Initial workspace reconciliation failed");
+  });
   const ensureWorkspaceForCreateAndBroadcastExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
@@ -1585,6 +1677,20 @@ export async function createPaseoDaemon(
     idleRuntimeCleanup,
   );
 
+  const relayConfig = resolveRelayRuntimeConfig(config);
+  const hostInstructions = await HostInstructionsRuntime.open({
+    paseoHome: config.paseoHome,
+    serverId,
+    logger,
+    agentManager,
+    agentStorage,
+    workspaceRegistry,
+    relay: () => ({
+      ...relayConfig,
+      enabled: daemonConfigStore.get().relay?.enabled ?? relayConfig.enabled,
+    }),
+  });
+
   const createAgentToolHostDependencies = (
     runtime: PaseoToolRuntimeContext,
   ): PaseoToolHostDependencies => ({
@@ -1595,6 +1701,7 @@ export async function createPaseoDaemon(
       return wsServer.agentMessages;
     },
     serverId,
+    hostInstructions,
     hosts: () => {
       if (!wsServer) throw new Error("Daemon is not accepting host operations");
       return wsServer.toolHosts();
@@ -1643,9 +1750,12 @@ export async function createPaseoDaemon(
       emit: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
       publishStatusUpdate: (message) => wsServer?.publishScriptStatusUpdate(message),
       spawnWorkspaceScript,
+      runWorkspaceOperation: (workspaceId, operation) =>
+        workspaceLaunchManager?.runWorkspaceOperation(workspaceId, operation) ?? operation(),
       assertAutomationAllowed: (workspaceId) =>
         assertWorkspaceAutomationAllowedForWorkspace(workspaceRegistry, workspaceId),
       getGlobalServicePorts: () => daemonConfigStore.readServicePorts(),
+      workspaceRuntimeEnvironment,
     }),
     markWorkspaceArchiving,
     clearWorkspaceArchiving,
@@ -1856,11 +1966,6 @@ export async function createPaseoDaemon(
             daemonConfigStore.onFieldChange("appendSystemPrompt", (value) => {
               agentManager.setAppendSystemPrompt(typeof value === "string" ? value : "");
             });
-            const relayEnabled = config.relayEnabled ?? true;
-            const relayEndpoint = config.relayEndpoint ?? "relay.paseo.sh:443";
-            const relayPublicEndpoint = config.relayPublicEndpoint ?? relayEndpoint;
-            const relayUseTls = config.relayUseTls ?? relayEndpoint === "relay.paseo.sh:443";
-            const relayPublicUseTls = config.relayPublicUseTls ?? relayUseTls;
             if (boundListenTarget.type === "tcp") {
               logger.info(
                 {
@@ -1901,6 +2006,7 @@ export async function createPaseoDaemon(
                 daemonStatusRpc: dependencies.serverFeatureOverrides?.daemonStatusRpc,
                 relayConfig: dependencies.serverFeatureOverrides?.relayConfig,
                 startPaused: true,
+                hostInstructions,
               },
               workspaceAutoName,
               workspaceRuntimeStore,
@@ -1941,11 +2047,8 @@ export async function createPaseoDaemon(
                 desktopManaged: config.desktopManaged === true,
                 getRelayConfig: () => ({
                   ...(relayRuntime?.getConfig() ?? {
-                    enabled: daemonConfigStore.get().relay?.enabled ?? relayEnabled,
-                    endpoint: relayEndpoint,
-                    publicEndpoint: relayPublicEndpoint,
-                    useTls: relayUseTls,
-                    publicUseTls: relayPublicUseTls,
+                    ...relayConfig,
+                    enabled: daemonConfigStore.get().relay?.enabled ?? relayConfig.enabled,
                   }),
                   requireProtectedSecurity:
                     daemonConfigStore.get().relay?.requireProtectedSecurity === true,
@@ -1960,6 +2063,10 @@ export async function createPaseoDaemon(
               workspaceLabelService,
               workspaceArchiveOperations,
             );
+            wsServer.setWorkspaceLaunchServices({
+              workspaceRuntimeEnvironment,
+              workspaceLaunchManager,
+            });
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
@@ -1969,13 +2076,7 @@ export async function createPaseoDaemon(
             wsServer.beginAcceptingConnections();
             const relaySecurityLogger = logger.child({ module: "relay-security" });
             relayRuntime = createRelayRuntime({
-              config: {
-                enabled: relayEnabled,
-                endpoint: relayEndpoint,
-                publicEndpoint: relayPublicEndpoint,
-                useTls: relayUseTls,
-                publicUseTls: relayPublicUseTls,
-              },
+              config: relayConfig,
               logger,
               attachSocket: (ws, metadata) =>
                 admitSecuredRelaySocket(
@@ -2105,6 +2206,7 @@ export async function createPaseoDaemon(
     }
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
+    await hostInstructions.close().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

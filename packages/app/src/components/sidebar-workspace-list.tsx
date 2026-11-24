@@ -11,6 +11,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import {
+  Children,
+  Fragment,
   memo,
   useCallback,
   useMemo,
@@ -39,7 +41,7 @@ import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop
 import { type GestureType } from "react-native-gesture-handler";
 import { useSidebarWorkspaceRename } from "@/workspace-rename";
 import { useWorkspaceClipboardActions } from "@/hooks/use-workspace-clipboard-actions";
-import { ExternalLink, Settings, MoreVertical, Plus, Trash2 } from "lucide-react-native";
+import { ExternalLink, Link2, Settings, MoreVertical, Plus, Trash2 } from "lucide-react-native";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { DraggableList, type DraggableRenderItemInfo } from "./draggable-list";
 import type { DraggableListDragHandleProps } from "./draggable-list.types";
@@ -88,6 +90,12 @@ import {
 import { ProjectLeadingVisual } from "@/components/sidebar/project-leading-visual";
 import { useToast } from "@/contexts/toast-context";
 import { SidebarToastClearance } from "@/components/sidebar/sidebar-toast-region";
+import {
+  SidebarProjectLinksProvider,
+  useOpenSidebarProjectLinks,
+  useSidebarProjectLinks,
+} from "@/components/sidebar/sidebar-project-links";
+import type { ProjectLinkPlacementRef } from "@/projects/local-project-links";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -407,7 +415,8 @@ function ProjectRowTrailingActions({
   projectViewKey,
   displayName,
   worktreeTarget,
-  settingsTarget,
+  projectHosts,
+  onOpenProjectLinks,
   projectPath,
   isHovered,
   isMobileBreakpoint,
@@ -419,7 +428,8 @@ function ProjectRowTrailingActions({
   projectViewKey: string;
   displayName: string;
   worktreeTarget: SidebarProjectHostTarget | null;
-  settingsTarget: { serverId: string; projectId: string } | null;
+  projectHosts: readonly ProjectLinkPlacementRef[];
+  onOpenProjectLinks: () => void;
   projectPath: string;
   isHovered: boolean;
   isMobileBreakpoint: boolean;
@@ -447,7 +457,8 @@ function ProjectRowTrailingActions({
         >
           <ProjectKebabMenu
             projectViewKey={projectViewKey}
-            settingsTarget={settingsTarget}
+            projectHosts={projectHosts}
+            onOpenProjectLinks={onOpenProjectLinks}
             projectPath={projectPath}
             onRemoveProject={onRemoveProject}
             removeProjectStatus={removeProjectStatus}
@@ -460,6 +471,8 @@ function ProjectRowTrailingActions({
 
 const trash2LeadingIcon = <ThemedTrash2 size={14} uniProps={foregroundMutedColorMapping} />;
 const settingsLeadingIcon = <ThemedSettings size={14} uniProps={foregroundMutedColorMapping} />;
+const ThemedLink2 = withUnistyles(Link2);
+const projectLinksLeadingIcon = <ThemedLink2 size={14} uniProps={foregroundMutedColorMapping} />;
 const openInNewWindowLeadingIcon = (
   <ThemedExternalLink size={14} uniProps={foregroundMutedColorMapping} />
 );
@@ -475,13 +488,15 @@ function renderKebabTriggerIcon({ hovered }: { hovered?: boolean }) {
 
 function ProjectKebabMenu({
   projectViewKey,
-  settingsTarget,
+  projectHosts,
+  onOpenProjectLinks,
   projectPath,
   onRemoveProject,
   removeProjectStatus,
 }: {
   projectViewKey: string;
-  settingsTarget: { serverId: string; projectId: string } | null;
+  projectHosts: readonly ProjectLinkPlacementRef[];
+  onOpenProjectLinks: () => void;
   projectPath: string;
   onRemoveProject: () => void;
   removeProjectStatus: "idle" | "pending" | "success";
@@ -502,7 +517,8 @@ function ProjectKebabMenu({
         <ProjectMenuItems
           surface="dropdown"
           projectViewKey={projectViewKey}
-          settingsTarget={settingsTarget}
+          projectHosts={projectHosts}
+          onOpenProjectLinks={onOpenProjectLinks}
           projectPath={projectPath}
           onRemoveProject={onRemoveProject}
           removeProjectStatus={removeProjectStatus}
@@ -530,20 +546,25 @@ function ProjectMenuItem({
 function ProjectMenuItems({
   surface,
   projectViewKey,
-  settingsTarget,
+  projectHosts,
+  onOpenProjectLinks,
   projectPath,
   onRemoveProject,
   removeProjectStatus,
 }: {
   surface: ProjectMenuSurface;
   projectViewKey: string;
-  settingsTarget: { serverId: string; projectId: string } | null;
+  projectHosts: readonly ProjectLinkPlacementRef[];
+  onOpenProjectLinks: () => void;
   projectPath: string;
   onRemoveProject: () => void;
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const { t } = useTranslation();
   const toast = useToast();
+  const settingsTarget = projectHosts[0];
+  const { suggestions, links } = useSidebarProjectLinks(projectHosts);
+  const hasMatch = suggestions.length > 0;
   const handleOpenProjectSettings = useCallback(() => {
     if (!settingsTarget) return;
     router.navigate(buildProjectSettingsRoute(settingsTarget.serverId, settingsTarget.projectId));
@@ -570,6 +591,20 @@ function ProjectMenuItems({
           onSelect={handleOpenProjectSettings}
         >
           {t("sidebar.project.actions.openSettings")}
+        </ProjectMenuItem>
+      ) : null}
+      {hasMatch || links.length > 0 ? (
+        <ProjectMenuItem
+          surface={surface}
+          testID={`sidebar-project-menu-project-links-${projectViewKey}`}
+          leading={projectLinksLeadingIcon}
+          onSelect={onOpenProjectLinks}
+        >
+          {t(
+            hasMatch
+              ? "settings.projectLinks.entry.linkAction"
+              : "settings.projectLinks.entry.manageAction",
+          )}
         </ProjectMenuItem>
       ) : null}
       {canOpenInNewWindow ? (
@@ -885,7 +920,10 @@ function ProjectHeaderRow({
   const isMobileBreakpoint = useIsCompactFormFactor();
   const localDaemonServerId = useLocalDaemonServerId();
   const projectPath = resolveSidebarProjectLocalPath(project, localDaemonServerId);
-  const settingsTarget = project.hosts[0] ?? null;
+  const openProjectLinks = useOpenSidebarProjectLinks();
+  const handleOpenProjectLinks = useCallback(() => {
+    openProjectLinks?.(project.hosts);
+  }, [openProjectLinks, project.hosts]);
   const handleBeginWorkspaceSetup = useCallback(() => {
     if (!worktreeTarget) {
       return;
@@ -962,7 +1000,8 @@ function ProjectHeaderRow({
         projectViewKey={project.viewKey}
         displayName={displayName}
         worktreeTarget={worktreeTarget}
-        settingsTarget={settingsTarget}
+        projectHosts={project.hosts}
+        onOpenProjectLinks={handleOpenProjectLinks}
         projectPath={projectPath}
         isHovered={isHovered}
         isMobileBreakpoint={isMobileBreakpoint}
@@ -1037,7 +1076,8 @@ function ProjectHeaderRow({
         <ProjectMenuItems
           surface="context"
           projectViewKey={project.viewKey}
-          settingsTarget={settingsTarget}
+          projectHosts={project.hosts}
+          onOpenProjectLinks={handleOpenProjectLinks}
           projectPath={projectPath}
           onRemoveProject={onRemoveProject}
           removeProjectStatus={removeProjectStatus}
@@ -2038,7 +2078,7 @@ export function SidebarWorkspaceList({
       />
     );
 
-  return content;
+  return <SidebarProjectLinksProvider>{content}</SidebarProjectLinksProvider>;
 }
 
 /**
@@ -2488,61 +2528,61 @@ function ProjectModeList({
       />
     );
 
-  const content = (
-    <>
-      {pinnedChats.length > 0 ? (
-        <View style={styles.pinnedSection} testID="sidebar-pinned-section">
-          <SidebarSectionHeader
-            title={t("sidebar.pinned.title")}
-            collapsed={pinnedCollapsed}
-            onToggle={togglePinnedCollapsed}
-            testID="sidebar-pinned-section-header"
-          />
-          {pinnedCollapsed ? null : (
-            <>
-              {leadingPinnedChat ? renderPinnedChatRow(leadingPinnedChat) : null}
-              <DraggableList
-                testID="sidebar-pinned-list"
-                data={visiblePinnedChats}
-                keyExtractor={workspaceKeyExtractor}
-                renderItem={renderPinnedChat}
-                onDragEnd={onPinnedWorkspaceReorder}
-                extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
-                scrollEnabled={false}
-                useDragHandle
-                nestable={platformIsNative}
-                simultaneousGestureRef={parentGestureRef}
-                gestureHostPresented={dragGestureHostActive}
-                containerStyle={styles.workspaceListContainer}
+  const pinnedSection =
+    pinnedChats.length > 0 ? (
+      <View key="pinned-workspaces" style={styles.pinnedSection} testID="sidebar-pinned-section">
+        <SidebarSectionHeader
+          title={t("sidebar.pinned.title")}
+          collapsed={pinnedCollapsed}
+          onToggle={togglePinnedCollapsed}
+          testID="sidebar-pinned-section-header"
+        />
+        {pinnedCollapsed ? null : (
+          <>
+            {leadingPinnedChat ? renderPinnedChatRow(leadingPinnedChat) : null}
+            <DraggableList
+              testID="sidebar-pinned-list"
+              data={visiblePinnedChats}
+              keyExtractor={workspaceKeyExtractor}
+              renderItem={renderPinnedChat}
+              onDragEnd={onPinnedWorkspaceReorder}
+              extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
+              scrollEnabled={false}
+              useDragHandle
+              nestable={platformIsNative}
+              simultaneousGestureRef={parentGestureRef}
+              gestureHostPresented={dragGestureHostActive}
+              containerStyle={styles.workspaceListContainer}
+            />
+            {canTogglePinnedChats ? (
+              <SidebarGroupToggleRow
+                expanded={pinnedChatsExpanded}
+                onPress={togglePinnedChatsExpanded}
+                testID="sidebar-pinned-show-more"
               />
-              {canTogglePinnedChats ? (
-                <SidebarGroupToggleRow
-                  expanded={pinnedChatsExpanded}
-                  onPress={togglePinnedChatsExpanded}
-                  testID="sidebar-pinned-show-more"
-                />
-              ) : null}
-            </>
-          )}
-        </View>
-      ) : null}
-      {/* The header carries the display menu, which is the only way back out of a filter, so it
-        stays for as long as a filter is what emptied the list. It is absent only when the
-        sidebar is genuinely empty, where a section heading would sit over nothing.
-        Every filter that can empty this branch needs a term here: a project filter pinned to a
-        project whose chats are all pinned leaves `unpinnedProjects` empty, and without its term
-        the header would go with it, taking the only route back to the filter page. */}
-      {unpinnedProjects.length > 0 ||
-      hasActiveHostFilter ||
-      hasActiveProjectFilter ||
-      sidebarFilterEmpty
-        ? listHeaderComponent
-        : null}
+            ) : null}
+          </>
+        )}
+      </View>
+    ) : null;
+  // A filtered empty list keeps its Display menu so the filter can be cleared.
+  const header =
+    unpinnedProjects.length > 0 ||
+    hasActiveHostFilter ||
+    hasActiveProjectFilter ||
+    sidebarFilterEmpty
+      ? listHeaderComponent
+      : null;
+  const content = Children.toArray([
+    pinnedSection,
+    header,
+    <Fragment key="workspaces-body">
       {sidebarFilterEmpty ? <SidebarFilterEmptyState /> : projectBody}
       {listFooterComponent}
       <SidebarToastClearance />
-    </>
-  );
+    </Fragment>,
+  ]);
+  const stickyHeaderIndices = header ? [pinnedSection ? 1 : 0] : [];
 
   return (
     <View style={styles.container}>
@@ -2551,6 +2591,7 @@ function ProjectModeList({
           {...nativeScrollGestureProps}
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          stickyHeaderIndices={stickyHeaderIndices}
           showsVerticalScrollIndicator={false}
           testID="sidebar-project-workspace-list-scroll"
         >
@@ -2560,6 +2601,7 @@ function ProjectModeList({
         <ScrollView
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          stickyHeaderIndices={stickyHeaderIndices}
           showsVerticalScrollIndicator={false}
           testID="sidebar-project-workspace-list-scroll"
         >

@@ -206,7 +206,14 @@ export type AgentPromptContentBlock =
 
 export type AgentPromptInput = string | AgentPromptContentBlock[];
 
+/** Original daemon-submitted identities, before quoting or agent-message batching. */
+export interface SubmittedMessageFingerprint {
+  clientMessageId: string;
+  promptFingerprint: string;
+}
+
 export interface AgentRunOptions {
+  submittedMessages?: readonly SubmittedMessageFingerprint[];
   outputSchema?: unknown;
   resumeFrom?: AgentPersistenceHandle;
   maxThinkingTokens?: number;
@@ -616,6 +623,19 @@ export interface ImportProviderSessionInput {
   cwd: string;
 }
 
+/**
+ * Creates a new provider-native session from an importable source session.
+ *
+ * The source working directory locates the original provider session. The
+ * destination working directory is where the newly forked session will run.
+ * Providers must leave the source session and its working tree untouched.
+ */
+export interface ForkImportableProviderSessionInput {
+  providerHandleId: string;
+  sourceCwd: string;
+  destinationCwd: string;
+}
+
 export interface ImportProviderSessionContext {
   config: AgentSessionConfig;
   storedConfig: AgentSessionConfig;
@@ -763,6 +783,8 @@ export interface AgentSession {
    * still uncertain.
    */
   interrupt(): Promise<void>;
+  /** A failed stop still owns a runtime even after its local turn ended. */
+  hasPendingInterruptRecovery?(): boolean;
   /** Stop one currently owned background item and wait for provider confirmation. */
   stopBackgroundWork?(id: string): Promise<void>;
   /** True only when releasing this runtime loses no background work or pending replies.
@@ -934,6 +956,14 @@ export interface AgentClient {
   ): Promise<ImportableProviderSession[]>;
   importSession?(
     input: ImportProviderSessionInput,
+    context: ImportProviderSessionContext,
+  ): Promise<ImportedProviderSession>;
+  /**
+   * Fork an importable provider session for execution in another workspace.
+   * Importing adopts the native handle; forking creates a new native handle.
+   */
+  forkImportableSession?(
+    input: ForkImportableProviderSessionInput,
     context: ImportProviderSessionContext,
   ): Promise<ImportedProviderSession>;
   /**

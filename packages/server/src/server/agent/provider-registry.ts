@@ -477,6 +477,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     respondToPermission: (requestId, response) => inner.respondToPermission(requestId, response),
     describePersistence: () => mapPersistenceHandle(provider, inner.describePersistence()),
     interrupt: () => inner.interrupt(),
+    hasPendingInterruptRecovery: inner.hasPendingInterruptRecovery?.bind(inner),
     stopBackgroundWork: inner.stopBackgroundWork?.bind(inner),
     close: () => inner.close(),
     canStopRuntime: inner.canStopRuntime?.bind(inner),
@@ -625,11 +626,46 @@ function wrapClientProvider(
     unarchiveNativeSession: unarchiveNativeSession
       ? async (handle) => await unarchiveNativeSession({ ...handle, provider: inner.provider })
       : undefined,
+    forkImportableSession: wrapForkImportableSession(provider, inner),
     resolveUsageLaunch: inner.resolveUsageLaunch?.bind(inner),
     getCatalogCacheKey: inner.getCatalogCacheKey?.bind(inner),
     isAvailable: (signal, options) => inner.isAvailable(signal, options),
     getDiagnostic: inner.getDiagnostic?.bind(inner),
     installation: inner.installation,
+  };
+}
+
+function wrapForkImportableSession(
+  provider: AgentProvider,
+  inner: AgentClient,
+): AgentClient["forkImportableSession"] {
+  const forkImportableSession = inner.forkImportableSession?.bind(inner);
+  if (!forkImportableSession) return undefined;
+  return async (input, context) => {
+    const imported = await forkImportableSession(input, {
+      ...context,
+      config: {
+        ...context.config,
+        provider: inner.provider,
+      },
+      storedConfig: {
+        ...context.storedConfig,
+        provider: inner.provider,
+      },
+    });
+    const persistence = mapPersistenceHandle(provider, imported.persistence);
+    if (!persistence) {
+      throw new Error(`Provider '${provider}' fork did not return persistence`);
+    }
+    return {
+      ...imported,
+      session: wrapSessionProvider(provider, imported.session),
+      config: {
+        ...imported.config,
+        provider,
+      },
+      persistence,
+    };
   };
 }
 

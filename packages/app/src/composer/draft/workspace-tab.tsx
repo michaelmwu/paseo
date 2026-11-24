@@ -3,14 +3,11 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 import { Keyboard, StyleSheet as RNStyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { StyleSheet } from "react-native-unistyles";
-import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { type ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
-import { ComposerImportPill } from "@/composer/draft/import-pill";
-import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
+import { DraftAttachmentActions } from "@/composer/draft/attachment-actions";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
@@ -536,12 +533,14 @@ export function WorkspaceDraftComposer({
   );
   return (
     <View style={animatedStaticStyles.inputAreaWrapper} onLayout={onInputAreaLayout}>
-      {importPillPress && !isComposerFullscreen ? (
-        <View style={styles.importPillRow} dataSet={CHAT_COLUMN_RAIL_DATASET}>
-          <View style={styles.importPillContent}>
-            <ComposerImportPill onPress={importPillPress} />
-          </View>
-        </View>
+      {!isComposerFullscreen && !isSubmitting ? (
+        <DraftAttachmentActions
+          serverId={serverId}
+          client={client}
+          attachments={draftInput.attachments}
+          onChangeAttachments={setDraftAttachments}
+          onOpenImportSheet={importPillPress ?? undefined}
+        />
       ) : null}
       <Composer
         agentId={tabId}
@@ -581,24 +580,3 @@ const animatedStaticStyles = RNStyleSheet.create({
     flexGrow: 1,
   },
 });
-
-const styles = StyleSheet.create((theme) => ({
-  importPillRow: {
-    width: "100%",
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    paddingBottom: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    alignItems: "center",
-  },
-  importPillContent: {
-    width: "100%",
-    maxWidth: theme.contentMaxWidth,
-    flexDirection: "row",
-  },
-}));

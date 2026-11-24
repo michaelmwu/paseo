@@ -250,6 +250,7 @@ const styles = StyleSheet.create((theme) => ({
 const WEB_EXIT_DURATION_MS = 160;
 const WEB_ENTER_DURATION_MS = 160;
 const WEB_ENTER_ANIMATION_NAME = "paseo-modal-enter";
+const ALWAYS_CAN_CLOSE = () => true;
 
 // The desktop card fades in; the dim lands at once, so the screen behind is never seen undimmed
 // while the dialog arrives. A CSS animation runs from the card's first paint, so a dialog that opens
@@ -577,6 +578,8 @@ export interface AdaptiveModalSheetProps {
   showCloseButton?: boolean;
   visible: boolean;
   onClose: () => void;
+  /** Return false to prevent user-driven dismissal while an owner-managed operation is pending. */
+  canClose?: () => boolean;
   onDismiss?: () => void;
   children: ReactNode;
   /** Sticky footer rendered below the scrollable content. */
@@ -683,6 +686,7 @@ export function AdaptiveModalSheet({
   showCloseButton = true,
   visible,
   onClose,
+  canClose = ALWAYS_CAN_CLOSE,
   onDismiss,
   children,
   footer,
@@ -702,8 +706,12 @@ export function AdaptiveModalSheet({
   const isKeyboardVisible = useKeyboardVisibility(visible);
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
   const isSheet = isMobile || !isWeb;
+  const isDismissEnabled = canClose();
+  const requestClose = useCallback(() => {
+    if (canClose()) onClose();
+  }, [canClose, onClose]);
   // The sheet registers itself; the desktop dialog does not use it.
-  useDismissibleOverlay(visible && !isSheet, onClose);
+  useDismissibleOverlay(visible && !isSheet, requestClose);
   const footerView = useMemo(
     () => (footer ? <SheetFooter style={footerContainerStyle}>{footer}</SheetFooter> : null),
     [footer, footerContainerStyle],
@@ -719,14 +727,14 @@ export function AdaptiveModalSheet({
   const { sheetRef, handleSheetChange, handleSheetDismiss } = useIsolatedBottomSheetVisibility({
     visible,
     isEnabled: isSheet,
-    onClose,
+    onClose: requestClose,
+    canClose,
   });
   const [shouldRenderWeb, setShouldRenderWeb] = useState(visible);
   const [isWebClosing, setIsWebClosing] = useState(false);
   const modalLayer = useGlobalOverlayLayer("modal", visible || shouldRenderWeb);
   const handleDismiss = useCallback(() => {
-    handleSheetDismiss();
-    onDismiss?.();
+    if (handleSheetDismiss()) onDismiss?.();
   }, [handleSheetDismiss, onDismiss]);
 
   const desktopCardStyle = useMemo(
@@ -757,10 +765,10 @@ export function AdaptiveModalSheet({
       if (event.key !== "Escape") return false;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      requestClose();
       return true;
     },
-    [onClose],
+    [requestClose],
   );
   const setOverlayScope = useOverlayRegistration({
     keys: ["Escape"],
@@ -797,6 +805,7 @@ export function AdaptiveModalSheet({
         onChange={handleSheetChange}
         onDismiss={handleDismiss}
         backdropOpacity={0.45}
+        enableDismissOnClose={isDismissEnabled}
         enablePanDownToClose
         backgroundComponent={SheetBackground}
         handleComponent={SheetHandle}
@@ -809,7 +818,7 @@ export function AdaptiveModalSheet({
           <CompactSheetBody
             header={header}
             showCloseButton={showCloseButton}
-            onClose={onClose}
+            onClose={requestClose}
             testID={testID}
             footer={footerView}
             isKeyboardVisible={isKeyboardVisible}
@@ -829,7 +838,7 @@ export function AdaptiveModalSheet({
   const cardInner = (
     <OverlayLayerProvider layer={modalLayer}>
       {header ? (
-        <SheetHeaderView header={header} onClose={onClose} showCloseButton={showCloseButton} />
+        <SheetHeaderView header={header} onClose={requestClose} showCloseButton={showCloseButton} />
       ) : null}
       <View style={[scrollable ? styles.desktopScrollContainer : desktopStaticStyle, bodyStyle]}>
         {scrollable ? (
@@ -849,7 +858,11 @@ export function AdaptiveModalSheet({
       {header ? null : (
         <IconButtonChromeProvider value="header-island">
           <View style={styles.floatingClose}>
-            <SheetHeaderIconButton icon={X} label={t("common.actions.close")} onPress={onClose} />
+            <SheetHeaderIconButton
+              icon={X}
+              label={t("common.actions.close")}
+              onPress={requestClose}
+            />
           </View>
         </IconButtonChromeProvider>
       )}
@@ -858,7 +871,7 @@ export function AdaptiveModalSheet({
 
   const desktopContent = (
     <View style={desktopOverlayStyle} testID={testID}>
-      <DismissBackdrop label={t("common.actions.dismiss")} onPress={onClose} />
+      <DismissBackdrop label={t("common.actions.dismiss")} onPress={requestClose} />
       <View ref={setOverlayScope} style={desktopCardStyle} role="dialog" aria-modal tabIndex={-1}>
         {cardInner}
       </View>
@@ -883,6 +896,7 @@ export function AdaptiveModalSheet({
       enableDynamicSizing={false}
       onChange={handleSheetChange}
       onDismiss={handleDismiss}
+      enableDismissOnClose={isDismissEnabled}
       handleComponent={null}
       backgroundStyle={styles.nativeDialogBackground}
       enablePanDownToClose={false}

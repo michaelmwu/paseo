@@ -1,3 +1,5 @@
+import { messageFingerprint } from "../../message-receipts/fingerprint.js";
+import type { SubmittedMessageFingerprint } from "../agent-sdk-types.js";
 import {
   AgentTurnBusyError,
   AgentTurnChangedError,
@@ -72,6 +74,7 @@ interface Inbox {
 interface DispatchRequest {
   recipientId: string;
   messageIds: readonly string[];
+  submittedMessages: readonly SubmittedMessageFingerprint[];
   prompt: AgentPromptInput;
   activeTurnBehavior: "steer" | "interrupt";
   idleOnly: boolean;
@@ -96,6 +99,7 @@ interface DirectPrompt {
 /** The provider prompt a direct prompt became. Unchanged when nothing was queued. */
 interface JoinedPrompt {
   prompt: AgentPromptInput;
+  submittedMessages: readonly SubmittedMessageFingerprint[];
   messageId?: string;
   sessionMode?: string;
   unarchive: boolean;
@@ -236,6 +240,10 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
         return true;
       },
       messageIds: messages.map((message) => message.receipt.messageId),
+      submittedMessages: messages.map((message) => ({
+        clientMessageId: message.receipt.messageId,
+        promptFingerprint: messageFingerprint(message.prompt),
+      })),
       prompt: combine(messages.map(envelope)),
       // A batch that waited for the turn to end is dispatched idle-only, so it never steers.
       activeTurnBehavior: messages.some((message) => message.urgency === "interrupt")
@@ -489,6 +497,14 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
       const own = prepareAgentMessage(direct.prompt, direct.source, direct.messageId);
       return {
         prompt: own.prompt,
+        submittedMessages: own.messageId
+          ? [
+              {
+                clientMessageId: own.messageId,
+                promptFingerprint: messageFingerprint(direct.prompt),
+              },
+            ]
+          : [],
         messageId: own.messageId,
         sessionMode: direct.sessionMode,
         unarchive: direct.unarchive !== false,
@@ -499,6 +515,20 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
     const own = envelopeMessage(direct.prompt, direct.source ?? null, direct.messageId);
     return {
       prompt: combine([...queued.map(envelope), own.prompt]),
+      submittedMessages: [
+        ...queued.map((message) => ({
+          clientMessageId: message.receipt.messageId,
+          promptFingerprint: messageFingerprint(message.prompt),
+        })),
+        ...(own.messageId
+          ? [
+              {
+                clientMessageId: own.messageId,
+                promptFingerprint: messageFingerprint(direct.prompt),
+              },
+            ]
+          : []),
+      ],
       messageId: own.messageId,
       sessionMode:
         direct.sessionMode ?? queued.findLast((message) => message.sessionMode)?.sessionMode,

@@ -49,7 +49,7 @@ const paseoHome = join(root, "home");
 const cliHome = join(root, "os-home");
 const workDir = join(root, "work");
 for (const dir of [paseoHome, cliHome, workDir]) mkdirSync(dir, { recursive: true });
-const currentProtocolVersion = 6;
+const currentProtocolVersion = 7;
 const zsh = ["/bin/zsh", "/usr/bin/zsh"].find((candidate) => existsSync(candidate)) ?? null;
 
 interface Installation {

@@ -1,4 +1,5 @@
 import { AgentTurnBusyError, AgentTurnChangedError } from "../agent-prompt.js";
+import { messageFingerprint } from "../../message-receipts/fingerprint.js";
 import { expect, test } from "vitest";
 import { createAgentMessageDelivery, parseAgentMessages } from "./index.js";
 import type { AgentPromptInput } from "../agent-sdk-types.js";
@@ -23,6 +24,37 @@ function createClock() {
     },
   };
 }
+
+test("direct prompts retain original acceptance identities for queued messages and the sender", async () => {
+  const clock = createClock();
+  const delivery = createAgentMessageDelivery({
+    schedule: clock.schedule,
+    dispatch: async () => {
+      throw new Error("Joined messages must not dispatch twice");
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+  const queued = delivery.enqueue({
+    recipientId: "parent",
+    messageId: "queued-id",
+    prompt: "Queued report",
+    source: { kind: "agent-message", agentId: "worker" },
+  });
+  await delivery.sendDirect(
+    { recipientId: "parent", messageId: "direct-id", prompt: "Human prompt" },
+    async (joined) => {
+      expect(joined.submittedMessages).toEqual([
+        { clientMessageId: "queued-id", promptFingerprint: messageFingerprint("Queued report") },
+        { clientMessageId: "direct-id", promptFingerprint: messageFingerprint("Human prompt") },
+      ]);
+      return { disposition: "steered" as const };
+    },
+  );
+  await expect(queued.dispatched).resolves.toBe("steered");
+  await delivery.close();
+});
 
 test("a queued child report and completion reach the recipient in one prompt after two quiet seconds", async () => {
   const clock = createClock();
