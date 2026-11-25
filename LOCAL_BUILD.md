@@ -31,6 +31,7 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Host instruction defaults/workspace overrides #10320 | `c84679f11` |
 | Sticky Workspaces header/Display menu #10325         | `0c80a810a` |
 | Native PR-watch composer/setup entry points #10736   | `9dc9ae0da` |
+| Shared workspace header management #10446            | `9d915bec3` |
 
 No selected feature PR is newly merged into v0.17.4, so none is removed.
 This release-only rebuild retains the verified feature revisions above, including
@@ -40,6 +41,11 @@ them without silently refreshing this feature stack. #10325 is closed but unmerg
 The subsequent #10736 addition starts from verified build `1f989bf43` and applies
 only its two feature commits after `cf1a5a9e7`. Other feature and companion pins
 stay unchanged. Reference source QA images instead of copying historical media.
+
+#10446 then adds shared header management from `e7579bd62`, using only its two
+feature commits after `311728a78`. Its archive prerequisite #10507 is already
+an ancestor of v0.17.4 at `884adbcc2`; do not apply it again. Other feature and
+companion revisions stay pinned.
 
 #7782, #9580, #9757 and #9931 are already in the release; their merge commits
 are verified ancestors of v0.17.4. #6534 and #9549/#5633 remain included once
@@ -74,6 +80,12 @@ Background work Stop. Preserve receipt-status support alongside the new session
 watch service. Capability negotiation gates the new request/response; its optional
 feature and Background work URL fields do not change existing wire requirements.
 
+#10446 shares Labels, read/unread, Archive and Electron-only Open in file manager
+actions between the wide and compact workspace headers. Reuse the existing label
+picker, read-state rules and archive owner, including warnings, Undo and active
+workspace handling. Keep existing terminal/setup/script placement and #10736's
+workspace-aware Git actions; do not add Rename or Pin behavior from other PRs.
+
 ## Client features and limits
 
 Project linking, sticky headers, Back/Forward history, desktop workspace links
@@ -83,6 +95,8 @@ OS URL activation or physical-device QA is claimed.
 
 Native PR-watch UI also needs this patched client. It does not depend on the
 companion PR watcher plugin, migrate that plugin or start watches automatically.
+Shared workspace header management likewise needs a matching patched client;
+rebuilding or replacing only the daemon cannot add these menu rows to an official app.
 
 #10320 retains sender-wide Ask each time/Allow unattended defaults and workspace
 inherit/ask/unattended/blocked policies for existing conversations. Both hosts
@@ -122,6 +136,26 @@ All heavy commands use `paseo-resources job`. Core dependencies use the official
 release lock and `npm ci --ignore-scripts`; reviewed repository patches run through
 `npm run postinstall` afterward. npm 10 lacks dependency-age cooldown support.
 Fresh validation logs remain in ignored `.dev/`.
+
+### #10446 addition
+
+- Daemon dependency stack, server and CLI rebuild pass; full monorepo typecheck
+  and lint pass.
+- Locale, labels, workspace/project archive and archive-navigation unit files:
+  73 pass across five files.
+- Chromium header scenarios: eight pass. Both layouts support read-state toggles,
+  label assignment/removal and plain-directory Archive/Undo. Compact risk-warning
+  cases preserve a workspace opened after the archive confirmation began.
+- Chromium desktop-runtime fixture: one passes, checking the file-manager bridge
+  receives the exact workspace path. This is not a packaged Electron or OS launch.
+  The unrelated browser-routing prototype logs a mock-contract warning in this fixture.
+- Compiled isolated daemon smoke passes with all eight pinned plugins, native-watch
+  capability/RPC rejection, browser/JPEG streaming, PTY output, launch recovery and
+  retained output. Production is not restarted and live plugins are not migrated.
+
+Source QA media stay referenced in #10446 rather than copied. Native iOS/Android
+and packaged desktop behavior remain unverified. Earlier results below belong to
+their recorded build revisions; no broad suite is rerun for this addition.
 
 ### #10736 addition
 
