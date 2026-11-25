@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { expect, test } from "../support/fixtures";
 import { clickNewChat } from "../support/helpers/launcher";
 import { expectComposerVisible } from "../support/helpers/composer";
@@ -24,6 +25,7 @@ import {
   selectGithubOption,
   expectGithubAttachmentPill,
   openGithubWorkspace,
+  submitMessage,
 } from "../support/helpers/composer";
 import {
   delayBrowserAgentCreatedStatus,
@@ -39,8 +41,14 @@ import { hasGithubAuth, createTempGithubRepo } from "../support/helpers/github-f
 import { getServerId } from "../support/helpers/server-id";
 import { openFileExplorer } from "../support/helpers/file-explorer";
 import { attachFileFromMenu, controlFileUploadCompletion } from "../support/helpers/composer";
-import { withAttachmentSourceFixture } from "../support/helpers/attachment-source";
+import {
+  observeCrossHostAttachmentTraffic,
+  withAttachmentSourceFixture,
+} from "../support/helpers/attachment-source";
+import { startIsolatedHostDaemon } from "../support/helpers/isolated-host-daemon";
 import { connectNewWorkspaceDaemonClient } from "../support/helpers/new-workspace";
+import { copyPluginFixture } from "../support/helpers/plugin-fixture";
+import { addConnectedHostAndReload } from "../support/helpers/hosts";
 
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
@@ -66,6 +74,115 @@ test.describe("Composer attachments", () => {
     });
   });
 
+  test("cross-host attachment asks before searching and retains the source host", async ({
+    page,
+  }, info) => {
+    info.setTimeout(120_000);
+    const cleanup: Array<() => Promise<unknown>> = [];
+    let journeyFailed = false;
+    let journeyError: unknown;
+    try {
+      const workspace = await seedWorkspace({ repoPrefix: "cross-host-attachment-" });
+      cleanup.push(() => workspace.cleanup());
+      const sourceHost = await startIsolatedHostDaemon("cross-host-attachment-source");
+      cleanup.push(() => sourceHost.close());
+      const sourceClient = await connectNewWorkspaceDaemonClient({
+        port: sourceHost.port,
+        ownProjects: false,
+      });
+      cleanup.push(() => sourceClient.close());
+      const destinationClient = await connectNewWorkspaceDaemonClient({ ownProjects: false });
+      cleanup.push(() => destinationClient.close());
+      const plugin = await copyPluginFixture("attachment-source");
+      cleanup.push(() => plugin.cleanup());
+      const traffic = await observeCrossHostAttachmentTraffic(page, sourceHost.port);
+      const previousDestinationConfig = await destinationClient.getDaemonConfig();
+      cleanup.push(() =>
+        destinationClient.patchDaemonConfig({
+          pluginsEnabled: previousDestinationConfig.config.pluginsEnabled ?? false,
+        }),
+      );
+      cleanup.push(async () => {
+        const installed = (await destinationClient.getDaemonConfig()).config.plugins?.[
+          "test-attachment-source"
+        ];
+        if (installed?.path === plugin.directory)
+          await destinationClient.removePlugin("test-attachment-source");
+      });
+      await sourceClient.patchDaemonConfig({ pluginsEnabled: true });
+      await sourceClient.installDirectoryPlugin(plugin.directory);
+      await destinationClient.patchDaemonConfig({ pluginsEnabled: true });
+      await destinationClient.installDirectoryPlugin(plugin.directory);
+      await gotoAppShell(page);
+      await addConnectedHostAndReload(page, {
+        serverId: sourceHost.serverId,
+        label: "Secondary",
+        port: sourceHost.port,
+        primaryLabel: "Primary",
+      });
+      await waitForSidebarHydration(page);
+      await switchWorkspaceViaSidebar({
+        page,
+        serverId: getServerId(),
+        workspaceId: workspace.workspaceId,
+      });
+      await clickNewChat(page);
+      await expectComposerVisible(page);
+
+      await expect(
+        page.getByRole("button", { name: "Attach Conversation context", exact: true }),
+      ).toHaveCount(1);
+      await expect(
+        page.getByRole("button", { name: "Attach Conversation context from Secondary" }),
+      ).toHaveCount(0);
+      await openAttachmentMenu(page);
+      await page
+        .getByRole("menuitem", { name: "Attach Conversation context from Secondary" })
+        .click();
+      const approveRemoteSearch = page.getByRole("button", {
+        name: "Search Conversation context on Secondary",
+      });
+      await expect(approveRemoteSearch).toBeVisible();
+      await expect(page.getByText(/Readable results will be copied to this app/)).toBeVisible();
+      await expect(page.getByText("Example conversation")).toHaveCount(0);
+      traffic.expectSearchNotStarted();
+
+      await approveRemoteSearch.click();
+      await expect(page.getByPlaceholder("Search conversations")).toBeVisible();
+      const result = page.getByRole("button", { name: /^Example conversation/ });
+      await expect(result).toBeVisible({ timeout: 30_000 });
+      await expect(result).toContainText("Example workspace");
+      await expect(page.getByTestId("plugin-attachment-source-host")).toHaveText("Secondary");
+      await traffic.expectSearchStarted();
+      await result.click();
+      await expect(page.getByTestId("composer-plugin-resource-attachment-pill")).toContainText(
+        "Secondary",
+      );
+      await expect(page.getByTestId("composer-plugin-resource-attachment-pill")).toContainText(
+        "Example conversation",
+      );
+      await submitMessage(page, "Use the attached conversation.");
+      await traffic.expectSnapshotSubmittedToDestination();
+    } catch (error) {
+      journeyFailed = true;
+      journeyError = error;
+    }
+    const errors: unknown[] = [];
+    for (const release of cleanup.toReversed()) {
+      try {
+        await release();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (journeyFailed) {
+      if (errors.length)
+        console.error(new AggregateError(errors, "Cross-host attachment cleanup failed"));
+      throw journeyError;
+    }
+    if (errors.length) throw new AggregateError(errors, "Cross-host attachment cleanup failed");
+  });
+
   test("compact agent attachment picker keeps the workspace and source host visible", async ({
     page,
   }, info) => {
@@ -78,11 +195,24 @@ test.describe("Composer attachments", () => {
   });
 
   test("failed attachment source setup releases its workspace", async ({ page }, info) => {
-    await expect(
-      withAttachmentSourceFixture(page, info, async () => {}, {
-        fixtureName: "missing-attachment-source",
-      }),
-    ).rejects.toThrow();
+    const observer = await connectNewWorkspaceDaemonClient({ ownProjects: false });
+    let seeded: { workspaceId: string; repoPath: string } | undefined;
+    try {
+      await expect(
+        withAttachmentSourceFixture(page, info, async () => {}, {
+          fixtureName: "missing-attachment-source",
+          onWorkspaceCreated(workspace) {
+            seeded = workspace;
+          },
+        }),
+      ).rejects.toThrow();
+      expect(seeded).toBeDefined();
+      expect(existsSync(seeded!.repoPath)).toBe(false);
+      const remaining = await observer.fetchWorkspaces();
+      expect(remaining.entries.some((entry) => entry.id === seeded!.workspaceId)).toBe(false);
+    } finally {
+      await observer.close();
+    }
   });
 
   test("failed attachment source startup removes its configured plugin", async ({ page }, info) => {

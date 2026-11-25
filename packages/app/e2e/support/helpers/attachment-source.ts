@@ -2,8 +2,9 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { gotoAppShell } from "./app";
 import { expectComposerVisible } from "./composer";
 import { clickNewChat } from "./launcher";
+import { getE2EDaemonPort } from "./daemon-port";
 import { TEST_HOST_LABEL } from "./daemon-registry";
-import { connectNewWorkspaceDaemonClient } from "./new-workspace";
+import { connectNewWorkspaceDaemonClient, loadSessionMessageReaders } from "./new-workspace";
 import { copyPluginFixture } from "./plugin-fixture";
 import { seedWorkspace } from "./seed-client";
 import { getServerId } from "./server-id";
@@ -11,6 +12,25 @@ import { switchWorkspaceViaSidebar, waitForSidebarHydration } from "./workspace-
 
 const RESULT_TITLE = "Example conversation";
 const PLUGIN_ID = "test-attachment-source";
+const SOURCE_SEARCH_METHOD = "context.search";
+const SNAPSHOT_TEXT = "[User] Example context\n[Assistant] Example response";
+
+const EXPECTED_REMOTE_ATTACHMENT = {
+  type: "text",
+  mimeType: "text/plain",
+  title: expect.stringMatching(/^a1b2c3d4 Example conversation/),
+  text: SNAPSHOT_TEXT,
+  contextKind: "chat_history",
+  externalResource: {
+    provider: PLUGIN_ID,
+    providerLabel: "Conversation context · Secondary",
+    resourceType: "conversation",
+    id: "agent_a1b2c3d4-1a2b-3c4d-5e6f-123456789abc",
+    identifier: "a1b2c3d4",
+    title: expect.stringMatching(/^Example conversation/),
+    url: "https://example.invalid/conversation",
+  },
+};
 
 interface AttachmentSourceActions {
   openShortcut(): Promise<void>;
@@ -19,11 +39,71 @@ interface AttachmentSourceActions {
   expectAttachmentInDraft(): Promise<void>;
 }
 
+export async function observeCrossHostAttachmentTraffic(page: Page, sourcePort: number) {
+  const frames = await loadSessionMessageReaders();
+  const destinationPort = getE2EDaemonPort();
+  let searchRequestCount = 0;
+  let submittedAttachment: unknown = null;
+
+  page.on("websocket", (socket) => {
+    const socketPort = new URL(socket.url()).port;
+    socket.on("framesent", ({ payload }) => {
+      const message = frames.client(payload);
+      if (
+        socketPort === String(sourcePort) &&
+        message?.type === "plugin.rpc.invoke.request" &&
+        message.pluginId === PLUGIN_ID &&
+        message.method === SOURCE_SEARCH_METHOD
+      ) {
+        searchRequestCount += 1;
+      }
+
+      if (socketPort !== destinationPort) return;
+      let attachments: unknown;
+      if (message?.type === "workspace.create.request") {
+        attachments = message.agent?.attachments;
+      } else if (
+        message?.type === "create_agent_request" ||
+        message?.type === "agent.create.request" ||
+        message?.type === "send_agent_message_request"
+      ) {
+        attachments = message.attachments;
+      }
+      if (!Array.isArray(attachments)) return;
+      submittedAttachment = attachments.find(
+        (attachment) =>
+          typeof attachment === "object" &&
+          attachment !== null &&
+          "externalResource" in attachment &&
+          typeof attachment.externalResource === "object" &&
+          attachment.externalResource !== null &&
+          "provider" in attachment.externalResource &&
+          attachment.externalResource.provider === PLUGIN_ID,
+      );
+    });
+  });
+
+  return {
+    expectSearchNotStarted() {
+      expect(searchRequestCount).toBe(0);
+    },
+    async expectSearchStarted() {
+      await expect.poll(() => searchRequestCount).toBeGreaterThan(0);
+    },
+    async expectSnapshotSubmittedToDestination() {
+      await expect.poll(() => submittedAttachment).toMatchObject(EXPECTED_REMOTE_ATTACHMENT);
+    },
+  };
+}
+
 export async function withAttachmentSourceFixture(
   page: Page,
   info: TestInfo,
   run: (actions: AttachmentSourceActions) => Promise<void>,
-  options?: { fixtureName?: string },
+  options?: {
+    fixtureName?: string;
+    onWorkspaceCreated?: (workspace: { workspaceId: string; repoPath: string }) => void;
+  },
 ): Promise<void> {
   info.setTimeout(120_000);
   const workspace = await seedWorkspace({ repoPrefix: "attachment-source-" });
@@ -32,6 +112,7 @@ export async function withAttachmentSourceFixture(
   let journeyError: unknown;
 
   try {
+    options?.onWorkspaceCreated?.(workspace);
     const pluginClient = await connectNewWorkspaceDaemonClient({ ownProjects: false });
     cleanupSteps.unshift(() => pluginClient.close());
     const previousConfig = await pluginClient.getDaemonConfig();
