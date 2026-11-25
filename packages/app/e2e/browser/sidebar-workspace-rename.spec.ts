@@ -4,6 +4,7 @@ import { seedWorkspace } from "../support/helpers/seed-client";
 import { openAgentRoute } from "../support/helpers/mock-agent";
 import { getServerId } from "../support/helpers/server-id";
 import { installDaemonWebSocketGate } from "../support/helpers/daemon-websocket-gate";
+import { buildHostWorkspaceRoute } from "@/utils/host-routes";
 
 function workspaceRowTestId(workspaceId: string): string {
   return `sidebar-workspace-row-${getServerId()}:${workspaceId}`;
@@ -378,6 +379,54 @@ test.describe("Sidebar workspace rename", () => {
       await workspace.cleanup();
     }
   });
+});
+
+// The workspace header's ⋯ menu offers the same rename as the sidebar row, so a workspace can be
+// renamed from the screen you are on without finding its row first.
+test.describe("Workspace header rename", () => {
+  for (const [layout, width] of [
+    ["wide", 1280],
+    ["compact", 390],
+  ] as const) {
+    test(`renaming from the ${layout} header menu updates the header and the sidebar row`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      const workspace = await seedWorkspace({ repoPrefix: "header-rename-" });
+
+      try {
+        await gotoAppShell(page);
+        await page.goto(buildHostWorkspaceRoute(getServerId(), workspace.workspaceId));
+
+        await page.getByRole("button", { name: "Workspace actions", exact: true }).click();
+        await expect(page.getByRole("menuitem", { name: "Labels", exact: true })).toBeVisible();
+        await expect(page.getByTestId("workspace-header-archive-workspace")).toBeVisible();
+        await page.getByTestId("workspace-header-rename").click();
+
+        const input = page.getByTestId("workspace-rename-modal-global-input");
+        await expect(input).toBeVisible({ timeout: 10_000 });
+        await expect(input).toHaveValue("main");
+
+        const customTitle = "Header Rename";
+        await input.fill(customTitle);
+        await page.getByTestId("workspace-rename-modal-global-submit").click();
+
+        await expect(input).toHaveCount(0, { timeout: 15_000 });
+        await expect(
+          page.getByTestId("workspace-header-title").filter({ visible: true }),
+        ).toHaveText(customTitle, { timeout: 15_000 });
+        if (layout === "compact") {
+          await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        }
+        await expect(page.getByTestId(workspaceRowTestId(workspace.workspaceId))).toContainText(
+          customTitle,
+          { timeout: 15_000 },
+        );
+      } finally {
+        await workspace.cleanup();
+      }
+    });
+  }
 });
 
 async function toggleBackgroundWorkspaces(page: Page): Promise<void> {
