@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import type { Logger } from "pino";
 
 import { resolveRepositoryDefaultBranch } from "../../../utils/checkout-git.js";
+import { runWithRepositoryRoot } from "../../../utils/git-repository-discovery.js";
 import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
 import { runGitCommand } from "../../../utils/run-git-command.js";
 import {
@@ -158,7 +159,10 @@ export function createWorkspaceRecoveryService(deps: {
     let workspaceToUnarchive = resolved.workspace;
     let recreated: { worktreePath: string; pluginId: string | null } | null = null;
     if (resolved.kind === "restore") {
-      recreated = await recreateArchivedWorktree(resolved.workspace, resolved.sourceRepoRoot);
+      const { workspace, sourceRepoRoot } = resolved;
+      recreated = await runWithRepositoryRoot(sourceRepoRoot, () =>
+        recreateArchivedWorktree(workspace, sourceRepoRoot),
+      );
       if ((resolved.workspace.worktreeManagerPluginId ?? null) !== recreated.pluginId) {
         const { worktreeManagerPluginId: _previous, ...withoutManager } = resolved.workspace;
         workspaceToUnarchive = recreated.pluginId

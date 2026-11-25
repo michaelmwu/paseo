@@ -5531,8 +5531,9 @@ describe("Codex app-server provider", () => {
     );
 
     try {
-      const resultPromise = session.run("Start working.");
-      await appServer.waitForTurnStart();
+      // Observing the request does not mean Codex acknowledged it. Before that
+      // boundary Stop deliberately retires the app-server instead of awaiting an id.
+      await session.startTurn("Start working.");
 
       const interruptPromise = session.interrupt();
       appServer.startsTurn({ threadId: "thread-1", turnId: "turn-identified-late" });
@@ -5540,9 +5541,9 @@ describe("Codex app-server provider", () => {
       await interruptPromise;
 
       expect(interruptedTurns).toEqual([{ threadId: "thread-1", turnId: "turn-identified-late" }]);
+      const completed = waitForNextEvent(session, "turn_completed");
       appServer.completeTurn();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      await resultPromise;
+      await completed;
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -5565,14 +5566,13 @@ describe("Codex app-server provider", () => {
     );
 
     try {
-      const resultPromise = session.run("Finish before identification.");
-      await appServer.waitForTurnStart();
+      await session.startTurn("Finish before identification.");
       const interruptPromise = session.interrupt();
+      const completed = waitForNextEvent(session, "turn_completed");
       appServer.completeTurn();
-      await new Promise<void>((resolve) => setImmediate(resolve));
 
       await expect(interruptPromise).resolves.toBeUndefined();
-      await resultPromise;
+      await completed;
       expect(interruptedTurns).toEqual([]);
       appServer.assertNoErrors();
     } finally {
@@ -5605,35 +5605,22 @@ describe("Codex app-server provider", () => {
       createTestLogger(),
       async () => appServer.child,
     );
-    const resultPromise = session.run("Start after the delayed thread.");
+    const startPromise = session.startTurn("Start after the delayed thread.");
+    const canceled = expect(startPromise).rejects.toThrow("Turn was canceled before starting");
 
     try {
       await appServer.waitForRequest("thread/start");
-      let interruptSettled = false;
-      const interruptPromise = session.interrupt().then(() => {
-        interruptSettled = true;
-        return undefined;
-      });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(interruptSettled).toBe(false);
-
-      threadStart.resolve({ thread: { id: "thread-1" } });
-      await expect(interruptPromise).resolves.toBeUndefined();
-      await expect(resultPromise).resolves.toMatchObject({ canceled: true, timeline: [] });
+      // Stop retires the connected app-server without waiting for thread/start
+      // to reply. Exercise the manager's startTurn boundary, not run() history hydration.
+      await expect(session.interrupt()).resolves.toBeUndefined();
+      await canceled;
       expect(appServer.requests()).not.toContainEqual(
         expect.objectContaining({ method: "turn/start" }),
       );
       appServer.assertNoErrors();
     } finally {
       threadStart.resolve({ thread: { id: "thread-1" } });
-      const nativeStart = await appServer.waitForTurnStart().catch(() => null);
-      if (nativeStart) {
-        appServer.startsTurn({ threadId: "thread-1", turnId: "cleanup-turn" });
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        appServer.completeTurn();
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
-      await resultPromise.catch(() => undefined);
+      await startPromise.catch(() => undefined);
       await session.close();
     }
   });

@@ -1,0 +1,190 @@
+{
+  "auditedAt": "2026-11-25",
+  "release": {
+    "tag": "v0.17.4",
+    "commit": "2b3559b107243306986176b80beb0e779f9fe53e"
+  },
+  "retainedBundle": "b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe",
+  "policy": "Release-only upgrade: retain verified feature revisions from local-build-inputs.json, not the newer PR heads recorded here. No selected feature PR is newly merged in this release.",
+  "pullRequests": [
+    {
+      "number": 4524,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "add-project-linking-dialog-duplicate-git-repos",
+      "headRefOid": "9ea9aed6e3aed48e2c963adf5fc27a44269e85e3",
+      "url": "https://github.com/getpaseo/paseo/pull/4524",
+      "mergeCommit": null
+    },
+    {
+      "number": 4627,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "agent-context-attachment-plugin",
+      "headRefOid": "58ae4c316e6552e239e6e7886a73c3052e1c60ce",
+      "url": "https://github.com/getpaseo/paseo/pull/4627",
+      "mergeCommit": null
+    },
+    {
+      "number": 2496,
+      "state": "CLOSED",
+      "mergedAt": null,
+      "headRefName": "session-portability-prototype",
+      "headRefOid": "dc055bd69d5ce907458e2073e4486cd40617867d",
+      "url": "https://github.com/getpaseo/paseo/pull/2496",
+      "mergeCommit": null
+    },
+    {
+      "number": 4381,
+      "state": "CLOSED",
+      "mergedAt": null,
+      "headRefName": "feat/project-secrets-import-worktrees",
+      "headRefOid": "b28a0af48e75cd04516e26c750557de4e742670a",
+      "url": "https://github.com/getpaseo/paseo/pull/4381",
+      "mergeCommit": null
+    },
+    {
+      "number": 4525,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "redesign-service-definitions",
+      "headRefOid": "14957fa6ac8ea7326563520d84622a0cefd69fdf",
+      "url": "https://github.com/getpaseo/paseo/pull/4525",
+      "mergeCommit": null
+    },
+    {
+      "number": 9332,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "codex/offline-mobile-outbox",
+      "headRefOid": "8562246f1b77d591ccae719a40a3661b69215811",
+      "url": "https://github.com/getpaseo/paseo/pull/9332",
+      "mergeCommit": null
+    },
+    {
+      "number": 9548,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "fix/message-receipt-reconciliation",
+      "headRefOid": "ccab6ce52ea5ed448230223ea75c5ff37baa3a10",
+      "url": "https://github.com/getpaseo/paseo/pull/9548",
+      "mergeCommit": null
+    },
+    {
+      "number": 9550,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "fix/codex-interrupt-retirement",
+      "headRefOid": "91acce31eddf42dd2fee915a5fa115b2f6516ed3",
+      "url": "https://github.com/getpaseo/paseo/pull/9550",
+      "mergeCommit": null
+    },
+    {
+      "number": 9333,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "feat/turn-scoped-changes",
+      "headRefOid": "5c40d9dc0874d89238c2fdd89750ba0ae776a9dd",
+      "url": "https://github.com/getpaseo/paseo/pull/9333",
+      "mergeCommit": null
+    },
+    {
+      "number": 9334,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "feat/named-port-forwarding",
+      "headRefOid": "ffcd2c78aeb75a0536890ea120f9fbb95b16d65c",
+      "url": "https://github.com/getpaseo/paseo/pull/9334",
+      "mergeCommit": null
+    },
+    {
+      "number": 3190,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "fix/interactive-element-picker",
+      "headRefOid": "595852d3c656630d3d786dfa68f6c7dd99ac4019",
+      "url": "https://github.com/getpaseo/paseo/pull/3190",
+      "mergeCommit": null
+    },
+    {
+      "number": 10173,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "giant-starfish",
+      "headRefOid": "5471a0a86c9a367de404cd6852ec5930955056ce",
+      "url": "https://github.com/getpaseo/paseo/pull/10173",
+      "mergeCommit": null
+    },
+    {
+      "number": 10256,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "prototype/remote-workspace-deeplink",
+      "headRefOid": "f0fc7bf76647e938b252f6e5544375ab37466827",
+      "url": "https://github.com/getpaseo/paseo/pull/10256",
+      "mergeCommit": null
+    },
+    {
+      "number": 10320,
+      "state": "OPEN",
+      "mergedAt": null,
+      "headRefName": "feat/restricted-host-instructions",
+      "headRefOid": "fcfeca27e52d6a14aaa36ccab3711ec2f56d29c2",
+      "url": "https://github.com/getpaseo/paseo/pull/10320",
+      "mergeCommit": null
+    },
+    {
+      "number": 10325,
+      "state": "CLOSED",
+      "mergedAt": null,
+      "headRefName": "sticky-workspaces-header",
+      "headRefOid": "0c80a810a530f441380289ba467d46f166e48374",
+      "url": "https://github.com/getpaseo/paseo/pull/10325",
+      "mergeCommit": null
+    },
+    {
+      "number": 7782,
+      "state": "MERGED",
+      "mergedAt": "2026-10-26T05:38:15Z",
+      "headRefName": "feat/idle-runtime-cleanup-opt-out",
+      "headRefOid": "f8a5ea474bae940c5e1aa7fc7f9ea611f20a8349",
+      "url": "https://github.com/getpaseo/paseo/pull/7782",
+      "mergeCommit": {
+        "oid": "8e5f5367666951a7f5933cbb9f66c8047ba8a399"
+      }
+    },
+    {
+      "number": 9580,
+      "state": "MERGED",
+      "mergedAt": "2026-11-14T08:10:41Z",
+      "headRefName": "fix/receipt-pre-dispatch-failure",
+      "headRefOid": "c5b97d567505a89983d040360e742b9471a33d58",
+      "url": "https://github.com/getpaseo/paseo/pull/9580",
+      "mergeCommit": {
+        "oid": "d30aa16bebb180740267178a97baae87a504ca4f"
+      }
+    },
+    {
+      "number": 9757,
+      "state": "MERGED",
+      "mergedAt": "2026-11-16T09:02:48Z",
+      "headRefName": "diagnose-agent-notification-debounce",
+      "headRefOid": "1d8c9d33a7a72113fa3fd3134f70483e20354aa0",
+      "url": "https://github.com/getpaseo/paseo/pull/9757",
+      "mergeCommit": {
+        "oid": "41c294c7855f3d864337b8628513bf00ece0a644"
+      }
+    },
+    {
+      "number": 9931,
+      "state": "MERGED",
+      "mergedAt": "2026-11-17T05:11:26Z",
+      "headRefName": "fix/codex-canceled-start-9912",
+      "headRefOid": "fcb4f65543a74a295fa3638c8bbecb61483f6784",
+      "url": "https://github.com/getpaseo/paseo/pull/9931",
+      "mergeCommit": {
+        "oid": "eabbd3d97c2d6a9a24d72de0bf08db1c7398a8a5"
+      }
+    }
+  ]
+}

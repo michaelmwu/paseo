@@ -16176,6 +16176,11 @@ for (const origin of [
       messageAcceptanceStore: new MessageAcceptanceStore(acceptancePath),
       logger,
     });
+    const delivery = createTestAgentMessages({
+      agentManager: first,
+      agentStorage: storageBeforeRestart,
+      logger,
+    });
     let restored: AgentManager | null = null;
     let agentId: string | null = null;
     try {
@@ -16194,6 +16199,7 @@ for (const origin of [
             const dispatch = await sendPromptToAgent({
               agentManager: first,
               agentStorage: storageBeforeRestart,
+              agentMessages: delivery,
               agentId: agent.id,
               prompt: origin.prompt,
               source: origin.source,
@@ -16250,6 +16256,7 @@ for (const origin of [
       ).resolves.toBe(false);
     } finally {
       if (restored && agentId) await restored.closeAgent(agentId);
+      await delivery.close();
       await first.flush();
       await restored?.flush();
       rmSync(workdir, { recursive: true, force: true });
