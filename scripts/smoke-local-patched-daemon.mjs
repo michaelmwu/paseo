@@ -54,6 +54,14 @@ try {
   assert.equal(info.features.idleRuntimeCleanupSetting, true);
   assert.equal(info.features.hostInstructions, true);
   assert.equal(info.features.hostInstructionWorkspacePolicies, true);
+  assert.equal(info.features.agentChangeRequestSubscribe, true);
+  await assert.rejects(
+    observer.subscribeAgentChangeRequest({
+      agentId: "missing-native-watch-smoke-agent",
+      url: "https://github.com/getpaseo/paseo/pull/10736",
+    }),
+    /Unknown agent/,
+  );
   const instructionDirectory = await observer.manageHostInstructions({ action: "list" });
   assert.deepEqual(instructionDirectory.hostPolicies, []);
   assert.deepEqual(instructionDirectory.grants, []);

@@ -30,11 +30,16 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Desktop workspace links #10256                       | `664eb46fe` |
 | Host instruction defaults/workspace overrides #10320 | `c84679f11` |
 | Sticky Workspaces header/Display menu #10325         | `0c80a810a` |
+| Native PR-watch composer/setup entry points #10736   | `9dc9ae0da` |
 
 No selected feature PR is newly merged into v0.17.4, so none is removed.
 This release-only rebuild retains the verified feature revisions above, including
 historical linked branches. Several live PR heads are newer; the audit records
 them without silently refreshing this feature stack. #10325 is closed but unmerged.
+
+The subsequent #10736 addition starts from verified build `1f989bf43` and applies
+only its two feature commits after `cf1a5a9e7`. Other feature and companion pins
+stay unchanged. Reference source QA images instead of copying historical media.
 
 #7782, #9580, #9757 and #9931 are already in the release; their merge commits
 are verified ancestors of v0.17.4. #6534 and #9549/#5633 remain included once
@@ -63,12 +68,21 @@ Plugin-managed worktree restores retain the plugin's ownership.
 Its sheet survives sidebar regrouping. Preserve release project-settings Back
 ownership, localized plural categories and #10325 sticky-header content slots.
 
+#10736 adds composer, Git menu, Command Center and PR-tab entry points to the
+native watch service. The daemon still owns polling, subscriptions, delivery and
+Background work Stop. Preserve receipt-status support alongside the new session
+watch service. Capability negotiation gates the new request/response; its optional
+feature and Background work URL fields do not change existing wire requirements.
+
 ## Client features and limits
 
 Project linking, sticky headers, Back/Forward history, desktop workspace links
 and policy setup require a matching patched client. Replacing only the daemon
 does not change an official client's UI. No packaged Electron/mobile artifact,
 OS URL activation or physical-device QA is claimed.
+
+Native PR-watch UI also needs this patched client. It does not depend on the
+companion PR watcher plugin, migrate that plugin or start watches automatically.
 
 #10320 retains sender-wide Ask each time/Allow unattended defaults and workspace
 inherit/ask/unattended/blocked policies for existing conversations. Both hosts
@@ -108,6 +122,27 @@ All heavy commands use `paseo-resources job`. Core dependencies use the official
 release lock and `npm ci --ignore-scripts`; reviewed repository patches run through
 `npm run postinstall` afterward. npm 10 lacks dependency-age cooldown support.
 Fresh validation logs remain in ignored `.dev/`.
+
+### #10736 addition
+
+- Rebuilt daemon dependency stack, server and CLI; full monorepo typecheck, lint
+  and formatting pass.
+- Native watch and Background work: 22 pass; authorization inventory: nine pass.
+- Session watch permission/eligibility and receipt-status regression: two pass.
+- Client capability gate and no-send behavior for older hosts: two pass.
+- App Git policy/locales: 111 pass; Command Center contributions/shortcuts: 19 pass.
+- Chromium PR pane/composer: 16 pass, covering desktop/compact watch setup, pane
+  agent routing, focused/sole/explicit recipients, retries, closure, Background
+  work updates and older-host guidance.
+- Compiled isolated daemon advertises the new capability and rejects a missing
+  watch recipient through the real RPC. All eight pinned plugins, browser/JPEG
+  streaming, PTY output, launch recovery and retained output still pass.
+
+These 165 focused tests and 16 browser cases are fresh results. No production
+watch, GitHub mutation, real-provider turn or credentialed disposable-repository
+test is run. Source QA media remain referenced in #10736, not copied here.
+
+### Release base validation (`1f989bf43`)
 
 - Daemon dependency stack, server and CLI build pass; compiled CLI reports 0.17.4.
 - Full monorepo typecheck, lint and formatting pass.

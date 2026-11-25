@@ -2056,6 +2056,7 @@ export async function createPaseoDaemon(
               orchestrationSkills,
               workspaceLabelService,
               workspaceArchiveOperations,
+              changeRequestWatches,
             );
             wsServer.setWorkspaceLaunchServices({
               workspaceRuntimeEnvironment,

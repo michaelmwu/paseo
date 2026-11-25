@@ -2,6 +2,7 @@
   "release": { "tag": "v0.17.4", "commit": "2b3559b107243306986176b80beb0e779f9fe53e" },
   "retainedBundle": "b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe",
   "rebuildBase": "b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe",
+  "incrementalBuildBase": "1f989bf43e43ccf6bcdbf06ffba95a3c33a4b1a2",
   "alreadyInRelease": [7782, 9580, 9757, 9931],
   "mergedPrerequisiteBackports": [],
   "features": [
@@ -85,6 +86,11 @@
       "pr": 10325,
       "branch": "sticky-workspaces-header",
       "commit": "0c80a810a530f441380289ba467d46f166e48374"
+    },
+    {
+      "pr": 10736,
+      "branch": "feat/native-watch-pr",
+      "commit": "9dc9ae0da75e1b109e1536ee54c4846486aa59b9"
     }
   ],
   "plugins": [
