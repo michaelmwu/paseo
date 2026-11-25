@@ -32,6 +32,7 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Sticky Workspaces header/Display menu #10325         | `0c80a810a` |
 | Native PR-watch composer/setup entry points #10736   | `9dc9ae0da` |
 | Shared workspace header management #10446            | `9d915bec3` |
+| Passive native PR/MR-watch running status #10845     | `b686ed6c1` |
 
 No selected feature PR is newly merged into v0.17.4, so none is removed.
 This release-only rebuild retains the verified feature revisions above, including
@@ -46,6 +47,10 @@ stay unchanged. Reference source QA images instead of copying historical media.
 feature commits after `311728a78`. Its archive prerequisite #10507 is already
 an ancestor of v0.17.4 at `884adbcc2`; do not apply it again. Other feature and
 companion revisions stay pinned.
+
+#10845 adds the passive native PR/MR-watch registration from `f666920d5` for
+review. The release already supports passive Background work and its state buckets;
+no waiting-heartbeat backport is needed. Keep all other feature and plugin pins.
 
 #7782, #9580, #9757 and #9931 are already in the release; their merge commits
 are verified ancestors of v0.17.4. #6534 and #9549/#5633 remain included once
@@ -85,6 +90,11 @@ actions between the wide and compact workspace headers. Reuse the existing label
 picker, read-state rules and archive owner, including warnings, Undo and active
 workspace handling. Keep existing terminal/setup/script placement and #10736's
 workspace-aware Git actions; do not add Rename or Pin behavior from other PRs.
+
+#10845 marks armed and restored native PR/MR watches passive (`countsAsRunning: false`).
+They stay listed and stoppable, but do not hold an idle agent in Running.
+Queued watch updates still supply Running through the ordinary active-turn
+lifecycle. Preserve #10736's change-request URL on Background work rows.
 
 ## Client features and limits
 
@@ -136,6 +146,23 @@ All heavy commands use `paseo-resources job`. Core dependencies use the official
 release lock and `npm ci --ignore-scripts`; reviewed repository patches run through
 `npm run postinstall` afterward. npm 10 lacks dependency-age cooldown support.
 Fresh validation logs remain in ignored `.dev/`.
+
+### #10845 review build
+
+- Before applying the fix, the updated watch regression reproduces the unwanted
+  running count in this bundle. After applying it, all 35 tests across native
+  watches, state buckets and Background work pass.
+- Cases cover passive registration/restoration across PRs and MRs, shared
+  observations, queued updates, per-agent Stop and active-turn Running precedence.
+- Daemon dependency stack/server/CLI rebuild, full monorepo typecheck, lint and
+  formatting pass. The compiled native watch registration contains the passive flag.
+- Compiled isolated daemon smoke passes with all eight pinned plugins, native-watch
+  capability/RPC rejection, browser/JPEG streaming, real PTY output, launch recovery
+  and retained output. The production daemon and installed plugins are unchanged.
+
+This daemon-only addition leaves client and plugin code pinned. No fresh browser,
+installed-client or live-forge-account QA is claimed; the focused before/after logs
+and smoke output remain in ignored `.dev/pr10845-*.log`.
 
 ### #10446 addition
 
