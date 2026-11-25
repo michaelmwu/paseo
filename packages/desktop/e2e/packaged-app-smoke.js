@@ -481,6 +481,13 @@ async function assertPackagedRendererLoaded(page, deadline) {
     { timeout: remainingTime(deadline) },
   );
 
+  const bootError = await page.evaluate(
+    () => document.querySelector('[data-testid="root-error-boundary"]')?.textContent ?? null,
+  );
+  if (bootError !== null) {
+    throw new Error(`Packaged renderer mounted its root error boundary: ${bootError}`);
+  }
+
   const bridgeKeys = await page.evaluate(() =>
     typeof window.paseoDesktop === "object" && window.paseoDesktop !== null
       ? Object.keys(window.paseoDesktop)
@@ -816,6 +823,38 @@ async function openSmokeWorkspace({ appPath, env, page, daemonHome }) {
   console.log(`Packaged desktop smoke: renderer opened workspace ${workspace.workspaceId}`);
 }
 
+async function smokeWarmWorkspaceDeepLink({
+  appPath,
+  executablePath,
+  env,
+  page,
+  daemonHome,
+  serverId,
+}) {
+  const projectPath = path.join(fs.realpathSync(daemonHome), "workspace link smoke");
+  fs.mkdirSync(projectPath);
+  const workspace = await runCliShimJsonCommand({
+    appPath,
+    env,
+    args: ["workspace", "create", "--isolation", "local", "--path", projectPath],
+    label: "Create workspace for packaged deep-link smoke",
+  });
+  assert.ok(workspace.workspaceId, "Expected an isolated workspace ID");
+  await page.evaluate(() =>
+    localStorage.setItem("@paseo:onboarding", JSON.stringify({ completedAt: "1970-01-01" })),
+  );
+  await page.reload();
+  const link = `paseo://h/${serverId}/open-workspace?${new URLSearchParams({ path: projectPath })}`;
+  assert.ok(!new URL(page.url()).pathname.endsWith(`/workspace/${workspace.workspaceId}`));
+  await runShellCommand({
+    script: `${shellQuote(executablePath)} ${shellQuote(link)}`,
+    env,
+    label: "Forward a workspace link from a second packaged app launch",
+  });
+  await page.waitForURL((url) => url.pathname.endsWith(`/workspace/${workspace.workspaceId}`));
+  console.log("Packaged desktop smoke: a second launch opened the exact linked workspace");
+}
+
 async function assertSandboxState({ browser, page, expectedSandbox, stdout, stderr }) {
   const diagnostics = await page.evaluate(() =>
     window.paseoDesktop.invoke("desktop_sandbox_diagnostics"),
@@ -954,10 +993,22 @@ async function smokePackagedDesktopApp({
     console.log("Packaged desktop smoke: every built-in plugin started");
     await smokeCliShim({ appPath, env });
     await smokeCliTerminal({ appPath, env });
+    if (process.platform === "darwin" && process.env.PASEO_SMOKE_WORKSPACE_LINK === "1") {
+      await smokeWarmWorkspaceDeepLink({
+        appPath,
+        executablePath,
+        env,
+        page,
+        daemonHome,
+        serverId: status.serverId,
+      });
+    }
     if (expectedSandbox !== undefined) {
       await assertSandboxState({ browser, page, expectedSandbox, stdout, stderr });
       await openSmokeWorkspace({ appPath, env, page, daemonHome });
     }
+    // Daemon and CLI startup can succeed even if the app crashes after its first render.
+    await assertPackagedRendererLoaded(page, Date.now() + SMOKE_TIMEOUT_MS);
     await writeSmokeArtifacts({ page, stdout, stderr, userData, daemonHome });
     await stopDaemonForCleanup();
     console.log(
@@ -991,6 +1042,7 @@ async function smokePackagedDesktopApp({
 }
 
 module.exports = {
+  assertPackagedRendererLoaded,
   smokePackagedDesktopApp,
 };
 

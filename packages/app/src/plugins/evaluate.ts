@@ -137,6 +137,7 @@ export function runPluginClientBundle(
     workspaceRowBadgeItems: [],
     filePanels: [],
     composerItems: [],
+    composerSections: [],
     newWorkspaceItems: [],
     workspacePanels: [],
     commandCenterItems: [],
@@ -156,6 +157,7 @@ export function runPluginClientBundle(
   const workspaceRowItemIds = new Set<string>();
   const filePanelIds = new Set<string>();
   const composerItemIds = new Set<string>();
+  const composerSectionIds = new Set<string>();
   const newWorkspaceItemIds = new Set<string>();
   const workspacePanelIds = new Set<string>();
   const commandCenterItemIds = new Set<string>();
@@ -292,6 +294,20 @@ export function runPluginClientBundle(
         collector.composerItems,
         { id: normalizedId, Component: contribution.Component },
         () => composerItemIds.delete(normalizedId),
+      );
+    },
+    addComposerSection(contribution) {
+      const sectionId = requireId(contribution.id, "composer section id");
+      if (composerSectionIds.has(sectionId))
+        throw new Error(`Duplicate composer section: ${sectionId}`);
+      if (!isComponentType(contribution.Component)) {
+        throw new Error(`Composer section ${sectionId} is not a component`);
+      }
+      composerSectionIds.add(sectionId);
+      return register(
+        collector.composerSections,
+        { id: sectionId, Component: contribution.Component },
+        () => composerSectionIds.delete(sectionId),
       );
     },
     addNewWorkspaceItem(contribution) {
@@ -489,6 +505,8 @@ export function runPluginClientBundle(
       const title = normalizePluginText(contribution.title);
       const pickerTitle = normalizePluginText(contribution.pickerTitle);
       const searchPlaceholder = normalizePluginText(contribution.searchPlaceholder);
+      const newAgentShortcut = contribution.newAgentShortcut;
+      const crossHost = contribution.crossHost;
       const method = contribution.search.name.trim();
       if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
       const icon = parseSerializablePluginIcon(
@@ -498,6 +516,12 @@ export function runPluginClientBundle(
       if (!pickerTitle) throw new Error(`Attachment source ${normalizedId} has no picker title`);
       if (!searchPlaceholder) {
         throw new Error(`Attachment source ${normalizedId} has no search placeholder`);
+      }
+      if (newAgentShortcut !== undefined && typeof newAgentShortcut !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid New Agent shortcut`);
+      }
+      if (crossHost !== undefined && typeof crossHost !== "boolean") {
+        throw new Error(`Attachment source ${normalizedId} has an invalid cross-host setting`);
       }
       if (!method) throw new Error(`Attachment source ${normalizedId} has no search RPC`);
       attachmentSourceIds.add(normalizedId);
@@ -509,6 +533,8 @@ export function runPluginClientBundle(
           icon,
           pickerTitle,
           searchPlaceholder,
+          ...(newAgentShortcut === true ? { newAgentShortcut: true } : {}),
+          ...(crossHost === true ? { crossHost: true } : {}),
           search: { ...contribution.search, name: method },
         },
         () => attachmentSourceIds.delete(normalizedId),
@@ -657,6 +683,7 @@ export function runPluginClientBundle(
     workspaceRowBadgeItems: collector.workspaceRowBadgeItems,
     filePanels: collector.filePanels,
     composerItems: collector.composerItems,
+    composerSections: collector.composerSections,
     newWorkspaceItems: collector.newWorkspaceItems,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,

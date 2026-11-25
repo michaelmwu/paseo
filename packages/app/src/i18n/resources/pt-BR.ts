@@ -2,6 +2,24 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Navegador",
+    permissionDenied:
+      "Esta conexão não tem permissão para usar a rede do host. Peça ao responsável pelo host para permitir o acesso à rede.",
+    title: "Usar a rede do host nas abas do navegador",
+    description: "As abas deste host usam a rede dele e um perfil próprio, com cookies separados.",
+    updateHost: "Atualize este host para usar a rede dele nas abas do navegador.",
+    settingFailed: "Não foi possível salvar ou carregar esta opção. Tente novamente.",
+    viaHost: "via {{host}}",
+    proxyUnavailable:
+      "A conexão do navegador com a rede do host {{host}} está indisponível. Reconecte o host e recarregue.",
+    destinationFailed:
+      "Não foi possível acessar este endereço pela rede do host {{host}}. Verifique o endereço e a conexão do host.",
+    connectionClosed:
+      "A conexão pela rede do host {{host}} foi encerrada. Reconecte o host e recarregue.",
+    notReady:
+      "O navegador não conseguiu preparar a rede do host {{host}}. Tente abrir a aba novamente.",
+  },
   pluginCombobox: {
     searching: "Pesquisando…",
     empty: "Nenhum resultado",
@@ -132,6 +150,20 @@ export const ptBR: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "Buscar mensagem",
+    outbox: {
+      pending: "Salvo neste dispositivo. Aguardando o host ou agente.",
+      sending: "Enviando…",
+      needsReview: "Entrega não confirmada. Verifique o status antes de outra ação.",
+      retry: "Tentar enviar novamente",
+      discard: "Descartar mensagem salva",
+      attachmentMessage: "Mensagem com anexos",
+
+      failed: "Não entregue. Tente enviar esta mensagem salva novamente.",
+      inFlight: "O host ainda está processando. Verificando automaticamente…",
+      checking: "Verificando a entrega…",
+      check: "Verificar a entrega",
+    },
     placeholders: {
       desktop: "Envie uma mensagem ao agente, marque @files ou use /commands e /skills",
       mobile: "Mensagem, @files, /commands",
@@ -194,8 +226,14 @@ export const ptBR: TranslationResources = {
       removeReview: "Remover anexo de revisão",
     },
     errors: {
+      messageLookupFailed:
+        "Não foi possível atualizar a conversa. A entrega ainda não foi confirmada. Reconecte e tente buscar a mensagem novamente.",
+      messageNotFound:
+        "Não foi possível encontrar esta mensagem no histórico disponível. A entrega ainda não foi confirmada.",
       failedToSend: "Falha ao enviar mensagem",
       failedToCreateAgent: "Falha ao criar agente",
+      creationOutcomeUnknown:
+        "A inicialização anterior ainda pode estar em andamento. Verifique seus espaços de trabalho e agentes antes de iniciar outra.",
       noHostSelected: "Nenhum host selecionado",
       initialPromptRequired: "O prompt inicial é obrigatório",
       alreadyLoading: "Já está carregando",
@@ -269,6 +307,11 @@ export const ptBR: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Atualize o host para revisar as alterações de um turno.",
+      viewChanges: "Alterações durante este turno",
+      backToConversation: "Voltar à conversa",
+    },
     states: {
       notFound: "Agente não encontrado",
       failedToLoad: "Falha ao carregar agente",
@@ -399,6 +442,9 @@ export const ptBR: TranslationResources = {
     },
     question: {
       responseFailed: "Não foi possível enviar sua resposta. Tente novamente.",
+      sendToChat: "Enviar para o chat",
+      chatDeliveryWarning:
+        "Sua resposta aparecerá no chat. Não digite senhas nem informações secretas.",
       submit: "Enviar",
       next: "Próximo",
       answerPlaceholder: "Digite sua resposta...",
@@ -811,7 +857,7 @@ export const ptBR: TranslationResources = {
         view: "Ver terminal",
       },
       accessibility: {
-        trigger: "Scripts do workspace",
+        trigger: "Executar comandos do espaço de trabalho",
         openService: "Ver serviço {{scriptName}}",
         viewTerminal: "Ver terminal de {{scriptName}}",
         runScript: "Executar script {{scriptName}}",
@@ -832,6 +878,34 @@ export const ptBR: TranslationResources = {
         stopFailed: "Falha ao parar {{scriptName}}",
         running: "Em execução",
         runningCount: "{{count}} em execução",
+      },
+    },
+    launches: {
+      title: "Inicializações",
+      actions: {
+        switch: "Alternar",
+        start: "Iniciar",
+        stop: "Parar",
+        view: "Saída",
+        openService: "Ver serviço",
+      },
+      accessibility: {
+        switchLaunch: "Parar {{activeLaunchName}} e iniciar {{launchName}}",
+        trigger: "Inicializações do espaço de trabalho",
+        launch: "Inicialização {{launchName}}",
+        startLaunch: "Iniciar {{launchName}}",
+        stopLaunch: "Parar {{launchName}}",
+        viewTerminal: "Ver terminal de {{launchName}}",
+        openService: "Ver serviço {{hostname}}",
+      },
+      states: {
+        running: "Em execução",
+        stopped: "Parado",
+        stopping: "Parando…",
+        noListeners: "Nenhuma porta em escuta detectada ainda",
+        startFailed: "Não foi possível iniciar {{launchName}}",
+        stopFailed: "Não foi possível parar {{launchName}}",
+        portRange: "portas {{base}}–{{end}}",
       },
     },
     tree: {
@@ -864,6 +938,7 @@ export const ptBR: TranslationResources = {
         },
         viewPr: "Ver PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "Criar PR",
           pending: "Criando PR...",
           success: "PR criada",
@@ -2358,6 +2433,7 @@ export const ptBR: TranslationResources = {
   },
   settings: {
     title: "Configurações",
+    searchResults: "Resultados da pesquisa",
     loading: "Carregando configurações...",
     groups: {
       app: "App",
@@ -2374,6 +2450,46 @@ export const ptBR: TranslationResources = {
     projectList: {
       hostLoadFailed: "Não foi possível carregar projetos do host {{hostName}}: {{message}}",
       editProject: "Editar {{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Projetos em vários hosts",
+        linkProjects: "Vincular projetos",
+        matches: "{{count}} correspondências verificadas para revisar",
+        matches_one: "{{count}} correspondência verificada para revisar",
+        matches_other: "{{count}} correspondências verificadas para revisar",
+        savedLinks: "Vínculos salvos neste dispositivo",
+        linkAction: "Vincular projetos…",
+        manageAction: "Vínculos de projetos…",
+        hint: "Agrupe cópias do mesmo repositório Git na barra lateral.",
+      },
+      sheet: {
+        title: "Vincular projetos entre hosts",
+        deviceOnly:
+          "O vínculo agrupa os projetos na barra lateral deste dispositivo. Espaços de trabalho, configurações e arquivos permanecem em seus hosts.",
+        matchesTitle: "Correspondências verificadas",
+        matchesDescription:
+          "Estas entradas têm o mesmo remoto do Git e subdiretório do projeto, mas ainda estão separadas.",
+        linkedTitle: "Projetos vinculados",
+        noMatchesTitle: "Não há vínculos de projeto para revisar",
+        noMatchesDescription:
+          "Abra um espaço de trabalho no mesmo repositório em dois hosts. Projetos correspondentes que ainda estão separados aparecem aqui.",
+        linkProjects: "Vincular {{count}} projetos",
+        remote: "Remoto do Git",
+        subdirectory: "Subdiretório do projeto",
+        path: "Caminho",
+        needsReviewTitle: "Precisa de revisão",
+        needsReviewDescription:
+          "Os dados mais recentes do Git não confirmam mais este vínculo, então o Paseo mantém estes projetos separados.",
+        projectUnavailable: "Este projeto não está disponível no momento.",
+        saving: "Salvando o vínculo do projeto…",
+        saveFailed: "Não foi possível salvar o vínculo do projeto. Tente novamente.",
+        unlink: "Desvincular",
+      },
+      toasts: {
+        linked: "Projetos vinculados neste dispositivo",
+        unlinked: "Vínculo de projeto removido",
+      },
     },
     groupInfo: "Sobre {{title}}",
     sections: {
@@ -2523,12 +2639,13 @@ export const ptBR: TranslationResources = {
       browserData: {
         title: "Dados do navegador",
         siteData: "Cookies e dados de sites",
-        description: "As abas do navegador compartilham logins e dados de sites no Paseo.",
+        description:
+          "As abas do navegador compartilham logins e dados de sites no Paseo. Hosts com “Usar a rede do host nas abas do navegador” ativada mantêm um perfil separado, e limpar os dados remove os dois.",
         clear: "Limpar dados do navegador",
         clearing: "Limpando...",
         confirmTitle: "Limpar dados do navegador?",
         confirmMessage:
-          "Você será desconectado dos sites e as abas abertas do navegador serão recarregadas.",
+          "Você será desconectado dos sites em todos os perfis e as abas abertas do navegador serão recarregadas.",
         success: "Dados do navegador limpos.",
         error: "Não foi possível limpar os dados do navegador.",
       },
@@ -2771,6 +2888,8 @@ export const ptBR: TranslationResources = {
         closeCurrentTab: "Fechar aba atual",
         jumpToWorkspace: "Ir para workspace",
         jumpToTab: "Ir para aba",
+        goBack: "Voltar",
+        goForward: "Avançar",
         previousWorkspace: "Workspace anterior",
         nextWorkspace: "Próximo workspace",
         previousTab: "Aba anterior",
@@ -2891,6 +3010,7 @@ export const ptBR: TranslationResources = {
         removeErrorMessage: "Não foi possível remover a conexão",
         timeout: "Timeout",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Parear dispositivos",
         rowTitle: "Parear um dispositivo",
@@ -3216,6 +3336,13 @@ export const ptBR: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "Detalhes do projeto",
+        sourceDirectory: "Diretório de origem",
+        copySourceDirectory: "Copiar diretório de origem",
+        repository: "Repositório",
+        openRepositoryFailed: "Não foi possível abrir o repositório.",
+      },
       noEditableTarget: "Este projeto não pode ser editado neste host.",
       backToProjects: "Voltar para projetos",
       edit: {
@@ -3278,6 +3405,28 @@ export const ptBR: TranslationResources = {
           edit: "Editar",
           remove: "Remover",
         },
+      },
+      launches: {
+        title: "Inicializações",
+        info: "Configurações de desenvolvimento que você pode iniciar de qualquer espaço de trabalho deste projeto",
+        empty: "Ainda não há inicializações.",
+        untitled: "Inicialização sem título",
+        menuAccessibility: "Abrir menu de inicialização",
+        removeTitle: "Remover inicialização?",
+        removeMessage: "Remover {{name}}?",
+        removeFallbackName: "esta inicialização",
+        name: "Nome",
+        command: "Comando",
+        nameAccessibility: "Nome da inicialização",
+        commandAccessibility: "Comando da inicialização",
+        nameRequired: "O nome é obrigatório",
+        nameDuplicate: "Cada inicialização precisa de um nome exclusivo",
+        commandRequired: "O comando é obrigatório",
+        newLaunch: "Nova inicialização",
+        editLaunch: "Editar {{name}}",
+        commandHint:
+          "O Paseo executa este comando com o bloco de portas do espaço de trabalho e o nome do projeto Compose no ambiente.",
+        actions: { add: "Adicionar inicialização", edit: "Editar", remove: "Remover" },
       },
       metadata: {
         title: "Geração de metadados",

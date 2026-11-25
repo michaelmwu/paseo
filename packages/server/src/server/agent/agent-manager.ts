@@ -1,3 +1,10 @@
+import type { AgentTurnChanges } from "@getpaseo/protocol/messages";
+import { deliveryFailureOutcome } from "../message-receipts/outcome.js";
+import { messageFingerprint } from "../message-receipts/fingerprint.js";
+import {
+  MessageAcceptanceStore,
+  type SubmittedMessageIdentity,
+} from "../message-receipts/acceptance.js";
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
 import { ProviderOptionsValidationError } from "./provider-options.js";
 import type { AgentToolResult } from "@getpaseo/plugin/server";
@@ -104,10 +111,17 @@ import {
   type ForegroundPromptStart,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
+  type TrackedAgentRun,
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { parseAgentMessage, projectAgentMessages } from "./agent-messages/index.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
+import {
+  captureTurnWorktree,
+  discardPendingTurnStart,
+  retainPendingTurnStart,
+  retainTurnChanges,
+} from "./turn-changes.js";
 import {
   PASEO_MCP_SERVER_NAME,
   stripInternalPaseoMcpServer,
@@ -132,7 +146,8 @@ import { withTimeout } from "../../utils/promise-timeout.js";
 import { buildSessionConfig, extractAttention } from "../persistence-hooks.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
-const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+const INTERRUPT_SESSION_TIMEOUT_MS = 10_000;
+const INTERRUPT_SETTLEMENT_TIMEOUT_MS = 2_000;
 const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
@@ -168,11 +183,20 @@ export class AgentManagerShuttingDownError extends Error {
 type RunCancellationCause = "reload" | "replace" | "rewind" | "stop";
 
 export class AgentRunCancellationError extends Error {
+  readonly deliveryOutcome?: "not_submitted";
+
   constructor(agentId: string, action: RunCancellationCause) {
-    super(
-      `Cannot ${action} agent ${agentId} because its active run cancellation was not acknowledged`,
-    );
+    const reason = "Paseo could not confirm the agent stopped.";
+    const message = {
+      stop: `${reason} Try Stop again.`,
+      replace: `${reason} Your message was not sent. Try Stop, then retry your message.`,
+      reload: `Cannot reload agent ${agentId}. ${reason} Try Stop first.`,
+      rewind: `Cannot rewind agent ${agentId}. ${reason} Try Stop first.`,
+    }[action];
+    super(message);
     this.name = "AgentRunCancellationError";
+    // Replacement stops here, before reserving or submitting the new prompt.
+    if (action === "replace") this.deliveryOutcome = "not_submitted";
   }
 }
 
@@ -386,6 +410,7 @@ export interface CreateAgentOptions {
 }
 
 export interface AgentManagerOptions {
+  messageAcceptanceStore?: MessageAcceptanceStore;
   pluginLifecycle?: PluginLifecycle;
   /** An internal workspace makes every agent created inside it internal. */
   clients?: ProviderClientMap;
@@ -515,6 +540,7 @@ interface ManagedAgentBase {
   lastUserMessageAt: Date | null;
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
+  latestTurnChanges?: AgentTurnChanges;
   lastUsage?: AgentUsage;
   /** Provider-owned session metrics, replaced whole on every provider update. */
   sessionMetrics?: AgentMetric[];
@@ -907,6 +933,7 @@ export class AgentManager {
   private readonly providerEnabled = new Map<AgentProvider, boolean>();
   private readonly providerDefinitions = new Map<AgentProvider, ProviderEnabledFlag>();
   private readonly agents = new Map<string, LiveManagedAgent>();
+  private readonly pendingTurnChanges = new Map<string, { turnId: string; before: string }>();
   private readonly timelineStore: InMemoryAgentTimelineStore;
   private readonly providerSubagents = new ProviderSubagentStore();
   private readonly backgroundWork = new AgentBackgroundWorkStore();
@@ -920,6 +947,7 @@ export class AgentManager {
   private readonly stopListeners = new Set<(agentId: string) => void>();
   private readonly idFactory: () => string;
   private readonly registry?: AgentStorage;
+  private readonly messageAcceptanceStore?: MessageAcceptanceStore;
   private readonly durableTimelineStore?: AgentTimelineStore;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
   private readonly backgroundTasks = new Set<Promise<void>>();
@@ -962,6 +990,7 @@ export class AgentManager {
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
+    this.messageAcceptanceStore = options.messageAcceptanceStore;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
@@ -1506,6 +1535,14 @@ export class AgentManager {
     return this.timelineStore.fetch(id, options);
   }
 
+  async hasAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<boolean> {
+    return (await this.messageAcceptanceStore?.has(input)) ?? false;
+  }
+
+  async forgetAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<void> {
+    await this.messageAcceptanceStore?.forget(input);
+  }
+
   listProviderSubagents(parentAgentId: string): ProviderSubagentDescriptor[] {
     this.requirePublicAgent(parentAgentId);
     return this.providerSubagents.list(parentAgentId);
@@ -1844,6 +1881,7 @@ export class AgentManager {
             sessionMetrics: record.sessionMetrics,
           }
         : {}),
+      latestTurnChanges: record?.latestTurnChanges,
       workspaceId,
       launchEnv,
       persistence:
@@ -2060,6 +2098,7 @@ export class AgentManager {
         launchedOptions,
         labels: existing.labels,
         metadata: existing.metadata,
+        latestTurnChanges: existing.latestTurnChanges,
         workspaceId: existing.workspaceId,
         owner: existing.owner,
         background: existing.background,
@@ -2520,6 +2559,7 @@ export class AgentManager {
         activeForegroundTurnId: null,
         activeTurnId: null,
         activeTurnStartedAt: null,
+        latestTurnChanges: record.latestTurnChanges,
         foregroundTurnWaiters: new Set(),
         finalizedForegroundTurnIds: new Set(),
         unsubscribeSession: null,
@@ -3181,6 +3221,8 @@ export class AgentManager {
     }
     onAccepted?.();
     this.touchUpdatedAt(agent);
+    if (this.messageAcceptanceStore)
+      await this.persistMessageAcceptances({ agentId, prompt, options });
     if (options?.clientMessageId) {
       this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "accepted");
       this.emitState(agent);
@@ -3284,12 +3326,16 @@ export class AgentManager {
     promptStart?: ForegroundPromptStart;
   }): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
+    if (pendingRun.settled || this.runs.getPendingRun(agentId) !== pendingRun) {
+      throw new Error(`Agent ${agentId} run was canceled before its turn started`);
+    }
     if (promptStart?.admit?.() === false) {
       this.runs.settleForegroundRun(agentId, pendingRun.token);
       return null;
     }
     try {
       const result = await agent.session.startTurn(prompt, options);
+      await this.persistMessageAcceptances({ agentId, prompt, options });
       if (pendingRun.settled) {
         throw new Error(`Agent ${agentId} run was canceled before its turn started`);
       }
@@ -3297,6 +3343,11 @@ export class AgentManager {
     } catch (error) {
       if (error instanceof AgentTurnStartCanceledError) {
         if (!pendingRun.settled) {
+          this.runs.settleForegroundStart(pendingRun, {
+            status: "failed",
+            error: error.message,
+            cause: error,
+          });
           if (options?.clientMessageId) {
             this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
               messageId: options.clientMessageId,
@@ -3328,13 +3379,23 @@ export class AgentManager {
       }
       agent.pendingReplacement = false;
       const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
-      this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
+      this.runs.settleForegroundStart(pendingRun, {
+        status: "failed",
+        error: errorMsg,
+        ...(error instanceof Error ? { cause: error } : {}),
+      });
       try {
         // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
         if (options?.clientMessageId) {
-          this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
-            messageId: options.clientMessageId,
-          });
+          this.recordSubmittedPrompt(
+            agent,
+            prompt,
+            options.clientMessageId,
+            deliveryFailureOutcome(error) === "unknown" ? "unknown" : "rejected",
+            {
+              messageId: options.clientMessageId,
+            },
+          );
         }
         await this.handleStreamEvent(agent, {
           type: "turn_failed",
@@ -3358,6 +3419,76 @@ export class AgentManager {
       );
     }
     return this.requireSessionAgent(agentId);
+  }
+
+  private async startTurnWithWorktreeCapture(params: {
+    agent: ActiveManagedAgent;
+    agentId: string;
+    pendingRun: PendingForegroundRun;
+    prompt: AgentPromptInput;
+    options?: AgentRunOptions;
+    promptStart?: ForegroundPromptStart;
+  }): Promise<string | null> {
+    const { agent, agentId } = params;
+    if (agent.internal) return this.startPendingForegroundTurn(params);
+    let before: string | null = null;
+    try {
+      before = await captureTurnWorktree(agent.cwd);
+      if (
+        before &&
+        !params.pendingRun.settled &&
+        this.runs.getPendingRun(agentId) === params.pendingRun
+      ) {
+        await retainPendingTurnStart(agent.cwd, agentId, before);
+      }
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Could not capture turn start worktree");
+      before = null;
+    }
+    try {
+      const turnId = await this.startPendingForegroundTurn(params);
+      if (turnId === null) {
+        if (before) await discardPendingTurnStart(agent.cwd, agentId);
+        return null;
+      }
+      // A stale comparison must not be presented as the turn that just started.
+      agent.latestTurnChanges = undefined;
+      if (before) this.pendingTurnChanges.set(agentId, { turnId, before });
+      return turnId;
+    } catch (error) {
+      if (before)
+        await discardPendingTurnStart(agent.cwd, agentId).catch((cleanupError) => {
+          this.logger.warn({ err: cleanupError, agentId }, "Could not discard turn start snapshot");
+        });
+      throw error;
+    }
+  }
+
+  private async finishTurnWorktreeCapture(
+    agent: ActiveManagedAgent,
+    turnId: string,
+  ): Promise<void> {
+    const pending = this.pendingTurnChanges.get(agent.id);
+    if (pending?.turnId !== turnId) return;
+    this.pendingTurnChanges.delete(agent.id);
+    try {
+      const after = await captureTurnWorktree(agent.cwd);
+      if (after) {
+        const changes = { turnId, before: pending.before, after };
+        await retainTurnChanges(agent.cwd, agent.id, changes);
+        agent.latestTurnChanges = changes;
+      } else {
+        await discardPendingTurnStart(agent.cwd, agent.id);
+      }
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Could not capture turn end worktree");
+      await discardPendingTurnStart(agent.cwd, agent.id).catch((cleanupError) => {
+        this.logger.warn(
+          { err: cleanupError, agentId: agent.id },
+          "Could not discard turn end snapshot",
+        );
+      });
+    }
   }
 
   /** Inside the agent's lane: a history session is upgraded before anything is applied to it. */
@@ -3483,7 +3614,7 @@ export class AgentManager {
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
       let turnId: string | null;
       let turnStream: ReturnType<AgentRunState["createTurnStream"]> | null = null;
-      turnId = await this.startPendingForegroundTurn({
+      turnId = await this.startTurnWithWorktreeCapture({
         agent,
         agentId,
         pendingRun,
@@ -3676,6 +3807,8 @@ export class AgentManager {
         expectedTurnId,
       });
       if (admission.status === "accepted") {
+        if (this.messageAcceptanceStore)
+          await this.persistMessageAcceptances({ agentId, prompt, options });
         await this.recordAcceptedSteer(
           agent,
           prompt,
@@ -3716,6 +3849,8 @@ export class AgentManager {
             expectedTurnId,
           });
           if (admission.status === "accepted") {
+            if (this.messageAcceptanceStore)
+              await this.persistMessageAcceptances({ agentId, prompt, options });
             await this.recordAcceptedSteer(
               agent,
               prompt,
@@ -3919,6 +4054,7 @@ export class AgentManager {
       throw new Error(`Agent ${agentId} not found`);
     }
 
+    // shortcut: binds to the run tracked when the wait begins, so a sender already replaced by then follows the replacement; pass the run token from dispatch if that window matters.
     const pendingRun = this.runs.getPendingRun(agentId);
     if (
       (snapshot.lifecycle === "running" || pendingRun?.start.status === "started") &&
@@ -3986,6 +4122,18 @@ export class AgentManager {
           return true;
         }
 
+        // A replacement's start must not acknowledge the sender's own run that ended unstarted.
+        if (pendingRun?.settled && pendingRun.start.status !== "started") {
+          finishErr(
+            new Error(
+              pendingRun.start.status === "failed"
+                ? pendingRun.start.error
+                : `Agent ${agentId} run was canceled before its turn started; its prompt was not delivered`,
+            ),
+          );
+          return true;
+        }
+
         const currentPendingRun = this.runs.getPendingRun(agentId);
         if (
           (current.lifecycle === "running" || currentPendingRun?.start.status === "started") &&
@@ -4023,6 +4171,8 @@ export class AgentManager {
         { agentId, replayState: false },
       );
 
+      // Clearing a run emits no agent state.
+      void pendingRun?.settledPromise.then(checkCurrentState);
       checkCurrentState();
     });
   }
@@ -4097,38 +4247,72 @@ export class AgentManager {
       this.runs.getRun(agentId) ??
       (agent.lifecycle === "running" ? this.runs.trackAutonomousRun(agentId, null) : null);
     if (!run) {
+      if (agent.session.hasPendingInterruptRecovery?.()) {
+        return this.retryInterruptRecovery(agent);
+      }
       return { status: "not_running" };
     }
     if (cause === "stop") {
       for (const listener of this.stopListeners) listener(agentId);
     }
 
+    const interruptedPermissions = new Map(agent.pendingPermissions);
     const interruptAcknowledged = await this.interruptSession(agent.session, agentId);
     const settlement = await this.waitWithTimeout({
       operation: run.settledPromise,
       timeoutMs: interruptAcknowledged
-        ? INTERRUPT_SESSION_TIMEOUT_MS
-        : this.rescueTimeouts.interruptSessionMs,
+        ? INTERRUPT_SETTLEMENT_TIMEOUT_MS
+        : Math.min(this.rescueTimeouts.interruptSessionMs, INTERRUPT_SETTLEMENT_TIMEOUT_MS),
     });
 
     if (!interruptAcknowledged) {
-      return { status: settlement === "completed" ? "settled" : "refused" };
+      return {
+        status:
+          settlement === "completed" && !agent.session.hasPendingInterruptRecovery?.()
+            ? "settled"
+            : "refused",
+      };
+    }
+
+    if (settlement === "timed_out") await this.settleAcknowledgedInterrupt(agent, run);
+
+    if (agent.pendingPermissions.size > 0) {
+      this.resolvePendingPermissionsForAgent(
+        agent,
+        agent.provider,
+        { requests: interruptedPermissions },
+        "Interrupted",
+      );
+      this.touchUpdatedAt(agent);
+      this.emitState(agent);
+    }
+    return { status: "settled" };
+  }
+
+  private async settleAcknowledgedInterrupt(
+    agent: ActiveManagedAgent,
+    run: TrackedAgentRun,
+  ): Promise<void> {
+    const agentId = agent.id;
+    // A terminal event can make room for a successor while Stop awaits provider acknowledgement.
+    if (this.runs.getRun(agentId) !== run) {
+      return;
     }
 
     const runTurnId = this.runs.getTurnId(agentId);
-    if (settlement === "timed_out" && runTurnId) {
+    if (runTurnId) {
       this.logger.warn(
         { agentId, turnId: runTurnId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
+      await this.dispatchSessionEventInOrder(agentId, {
         type: "turn_canceled",
         provider: agent.provider,
         reason: "interrupted",
         turnId: runTurnId,
       });
       await run.settledPromise;
-    } else if (settlement === "timed_out" && run.kind === "foreground") {
+    } else if (run.kind === "foreground") {
       this.logger.warn(
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged pending turn still active after timeout, clearing it",
@@ -4139,24 +4323,26 @@ export class AgentManager {
         this.touchUpdatedAt(agent);
         this.emitState(agent);
       }
-    } else if (settlement === "timed_out" && run.kind === "autonomous") {
+    } else if (run.kind === "autonomous") {
       this.logger.warn(
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
+      await this.dispatchSessionEventInOrder(agentId, {
         type: "turn_canceled",
         provider: agent.provider,
         reason: "interrupted",
       });
     }
+  }
 
-    if (agent.pendingPermissions.size > 0) {
-      this.resolvePendingPermissionsForAgent(agent, agent.provider, undefined, "Interrupted");
-      this.touchUpdatedAt(agent);
-      this.emitState(agent);
-    }
-    return { status: "settled" };
+  private async retryInterruptRecovery(
+    agent: ActiveManagedAgent,
+  ): Promise<AgentRunCancellationResult> {
+    const stopped = await this.interruptSession(agent.session, agent.id);
+    this.touchUpdatedAt(agent);
+    this.emitState(agent);
+    return { status: stopped ? "settled" : "refused" };
   }
 
   private async cancelAgentRunBefore(agentId: string, action: "reload" | "rewind"): Promise<void> {
@@ -4282,8 +4468,17 @@ export class AgentManager {
   }
 
   async deleteAgentState(agentId: string): Promise<void> {
+    this.pendingTurnChanges.delete(agentId);
     this.discardRetainedAgentState(agentId);
     await this.deleteCommittedTimeline(agentId);
+    try {
+      await this.messageAcceptanceStore?.forgetAgent(agentId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId },
+        "Could not clean message acceptance records for the removed agent",
+      );
+    }
   }
 
   notifyAgentRemoved(agent: Pick<StoredAgentRecord, "id" | "workspaceId" | "internal">): void {
@@ -4539,6 +4734,7 @@ export class AgentManager {
       lastUserMessageAt?: Date | null;
       labels?: Record<string, string>;
       metadata?: AgentMetadata;
+      latestTurnChanges?: AgentTurnChanges;
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
       timelineNextSeq?: number;
@@ -4754,6 +4950,7 @@ export class AgentManager {
           lastUserMessageAt?: Date | null;
           labels?: Record<string, string>;
           metadata?: AgentMetadata;
+          latestTurnChanges?: AgentTurnChanges;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
           sessionMetrics?: AgentMetric[];
@@ -4800,6 +4997,7 @@ export class AgentManager {
       activeForegroundTurnId: null,
       activeTurnId: null,
       activeTurnStartedAt: null,
+      latestTurnChanges: options?.latestTurnChanges,
       foregroundTurnWaiters: new Set<ForegroundTurnWaiter>(),
       finalizedForegroundTurnIds: new Set<string>(),
       unsubscribeSession: null,
@@ -4896,6 +5094,17 @@ export class AgentManager {
     agent.unsubscribeSession = unsubscribe;
   }
 
+  // Child activity, runtime inventory, and updates to existing rows survive a failed start.
+  private isIndependentOfPendingStart(agentId: string, event: AgentStreamEvent): boolean {
+    if (event.type === "provider_subagent" || event.type === "background_work") return true;
+    const turnId = getAgentStreamEventTurnId(event);
+    return (
+      event.type === "timeline" &&
+      turnId != null &&
+      this.timelineStore.hasItemInTurn(agentId, event.item, turnId)
+    );
+  }
+
   private enqueueSessionEvent(agentId: string, event: AgentStreamEvent): void {
     this.logger.trace(
       {
@@ -4913,10 +5122,17 @@ export class AgentManager {
       return;
     }
     const pendingRun = this.runs.getPendingRun(agentId);
-    if (pendingRun?.start.status === "pending") {
+    if (
+      pendingRun?.start.status === "pending" &&
+      !this.isIndependentOfPendingStart(agentId, event)
+    ) {
       pendingRun.stagedEvents.push(event);
       return;
     }
+    void this.dispatchSessionEventInOrder(agentId, event);
+  }
+
+  private dispatchSessionEventInOrder(agentId: string, event: AgentStreamEvent): Promise<void> {
     const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -4955,6 +5171,7 @@ export class AgentManager {
         this.sessionEventTails.delete(agentId);
       }
     });
+    return next;
   }
 
   /**
@@ -5390,24 +5607,41 @@ export class AgentManager {
     }
 
     if (!options?.fromHistory) {
-      if (isTurnTerminalEvent(event)) {
-        this.runs.settleTerminalRun(agent.id, eventTurnId);
-        if (isForegroundEvent) {
-          this.finalizeForegroundTurn(agent, eventTurnId);
-        } else if (terminalDisposition !== "stale" && !agent.activeForegroundTurnId) {
-          // Publish autonomous readiness only after the tracked run has settled.
-          this.emitState(agent);
-        }
-      }
-
-      if (flags.shouldDispatchEvent) {
-        this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
-      }
+      await this.publishLiveStreamEvent(
+        agent,
+        event,
+        eventTurnId,
+        isForegroundEvent,
+        terminalDisposition,
+        flags.shouldDispatchEvent,
+      );
     }
 
     this.traceHandleStreamEventEnd(agent, event, eventTurnId, flags);
 
     return flags.shouldNotifyWaiters;
+  }
+
+  private async publishLiveStreamEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    turnId: string | undefined,
+    isForeground: boolean,
+    disposition: ActiveTurnTerminalDisposition,
+    shouldDispatch: boolean,
+  ): Promise<void> {
+    if (isTurnTerminalEvent(event)) {
+      if (isForeground && turnId) await this.finishTurnWorktreeCapture(agent, turnId);
+      // Idle-only delivery observes readiness in state callbacks, so settle before publishing.
+      this.runs.settleTerminalRun(agent.id, turnId);
+      if (isForeground) {
+        this.finalizeForegroundTurn(agent, turnId);
+      } else if (disposition !== "stale" && !agent.activeForegroundTurnId) {
+        this.emitState(agent);
+      }
+    }
+    if (shouldDispatch)
+      this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
   }
 
   private traceHandleStreamEventStart(
@@ -5861,10 +6095,13 @@ export class AgentManager {
   private resolvePendingPermissionsForAgent(
     agent: ActiveManagedAgent,
     provider: AgentProvider,
-    options: { fromHistory?: boolean } | undefined,
+    options:
+      | { fromHistory?: boolean; requests?: ReadonlyMap<string, AgentPermissionRequest> }
+      | undefined,
     message: string,
   ): void {
-    for (const [requestId] of agent.pendingPermissions) {
+    for (const [requestId, request] of agent.pendingPermissions) {
+      if (options?.requests && options.requests.get(requestId) !== request) continue;
       agent.pendingPermissions.delete(requestId);
       if (!options?.fromHistory) {
         this.dispatchStream(agent.id, {
@@ -5912,11 +6149,40 @@ export class AgentManager {
     return event;
   }
 
+  private async persistMessageAcceptances(input: {
+    agentId: string;
+    prompt: AgentPromptInput;
+    options?: AgentRunOptions;
+  }): Promise<void> {
+    if (!this.messageAcceptanceStore) return;
+    const submissions =
+      input.options?.submittedMessages ??
+      (input.options?.clientMessageId
+        ? [
+            {
+              clientMessageId: input.options.clientMessageId,
+              promptFingerprint: messageFingerprint(input.prompt),
+            },
+          ]
+        : []);
+    for (const submission of submissions) {
+      try {
+        await this.messageAcceptanceStore.record({ agentId: input.agentId, ...submission });
+      } catch (error) {
+        // A journal failure cannot undo provider acceptance or fail the running turn.
+        this.logger.error(
+          { err: error, agentId: input.agentId, clientMessageId: submission.clientMessageId },
+          "Could not persist message acceptance",
+        );
+      }
+    }
+  }
+
   private recordSubmittedPrompt(
     agent: ActiveManagedAgent,
     prompt: AgentPromptInput,
     clientMessageId: string,
-    outcome: "accepted" | "rejected",
+    outcome: "accepted" | "rejected" | "unknown",
     options?: { messageId?: string; providerMessageId?: string; turnId?: string },
   ): void {
     const items = projectAgentMessages({
@@ -5927,7 +6193,7 @@ export class AgentManager {
     });
     for (const item of items) {
       // Human attempts stay in history on rejection; delivery notifications require acceptance.
-      if (outcome === "rejected" && item.type !== "user_message") continue;
+      if (outcome !== "accepted" && item.type !== "user_message") continue;
       this.recordSubmittedPromptItem(agent, item, options);
     }
   }

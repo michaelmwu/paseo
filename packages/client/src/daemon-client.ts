@@ -14,7 +14,7 @@ import {
   decodeHostRouteFrame,
   type HostRouteFrame,
 } from "@getpaseo/protocol/binary-frames/index";
-import { messageTooLargeError } from "./daemon-client-transport-utils.js";
+import { messageTooLargeError, MessageTooLargeError } from "./daemon-client-transport-utils.js";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
 import type { PluginListingDetail, PluginListingIndex } from "@getpaseo/protocol/plugin-registry";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
@@ -174,8 +174,10 @@ import {
   decodeFileTransferFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
+  decodeTunnelFrame,
   FileTransferOpcode,
   TerminalStreamOpcode,
+  TunnelOpcode,
   type FileTransferFrame,
   assertPluginWireValue,
   decodePluginFrame,
@@ -183,6 +185,13 @@ import {
   isPluginFrameOpcode,
   PluginFrameOpcode,
 } from "@getpaseo/protocol/binary-frames/index";
+import {
+  CLIENT_NETWORK_TUNNEL_LIMITS,
+  NetworkTunnelRpcError,
+  NetworkTunnelRegistry,
+  withinClientNetworkTunnelLimits,
+  type NetworkTunnel,
+} from "./network-tunnel.js";
 import {
   createRelayE2eeTransportFactory,
   createRelayUpgradeTransportFactory,
@@ -297,10 +306,12 @@ function chooseConnectionAuth(
   if (localCredential) helloAuth = { kind: "localCredential", token: localCredential };
   else if (password) helloAuth = { kind: "password", password };
   const headers: Record<string, string> = {};
-  const compatibleBearer = localCredential ? null : compatibleBearerPassword(password);
+  const compatibleBearer =
+    localCredential || config.e2ee?.enabled ? null : compatibleBearerPassword(password);
   // COMPAT(headerAuth): added in v0.9.1, remove after 2027-03-24.
   if (compatibleBearer) headers.Authorization = `Bearer ${compatibleBearer}`;
-  else if (!localCredential && config.authHeader) headers.Authorization = config.authHeader;
+  else if (!localCredential && !config.e2ee?.enabled && config.authHeader)
+    headers.Authorization = config.authHeader;
   return {
     helloAuth,
     headers,
@@ -363,6 +374,15 @@ export type {
 } from "./daemon-client-transport.js";
 
 export type { TerminalStreamEvent };
+export type {
+  NetworkTunnel,
+  NetworkTunnelClosedReason,
+  NetworkTunnelLimits,
+  NetworkTunnelStream,
+  NetworkTunnelStreamHandlers,
+  NetworkTunnelTarget,
+} from "./network-tunnel.js";
+export { NetworkTunnelError, NetworkTunnelRpcError } from "./network-tunnel.js";
 
 export type ConnectionState =
   | { status: "idle" }
@@ -1099,6 +1119,19 @@ export type PluginCatalogEntry = Omit<PluginCatalogResponseEntry, "clientBundle"
   clientBundle: string;
 };
 
+export class AgentMessageSendError extends Error {
+  readonly deliveryOutcome: "not_submitted" | "rejected" | "unknown";
+  constructor(input: {
+    message: string;
+    deliveryOutcome: "not_submitted" | "rejected" | "unknown";
+    cause?: unknown;
+  }) {
+    super(input.message, { cause: input.cause });
+    this.deliveryOutcome = input.deliveryOutcome;
+    this.name = "AgentMessageSendError";
+  }
+}
+
 export class DaemonConnectionError extends Error {
   readonly serverId?: string;
   readonly outcome?: "unknown";
@@ -1111,6 +1144,14 @@ export class DaemonConnectionError extends Error {
     this.serverId = context?.serverId;
     this.outcome = context?.outcome;
     this.name = "DaemonConnectionError";
+  }
+}
+
+/** Local creation preflight failed before handing any creation to the transport. */
+export class CreationNotSentError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "CreationNotSentError";
   }
 }
 
@@ -1172,6 +1213,8 @@ function toTimeoutError(error: unknown, label: string, timeoutMs: number): Error
 const DEFAULT_RECONNECT_BASE_DELAY_MS = 1500;
 const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
+// A send waits for host preparation and provider admission (Codex alone allows 90s).
+const AGENT_MESSAGE_ACK_TIMEOUT_MS = 180_000;
 const PUSH_TOKEN_REVOCATION_TIMEOUT_MS = 2_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
@@ -1493,6 +1536,24 @@ export class DaemonClient {
     failed: (error) => this.logger.error({ err: error }, "Diff observer failed"),
   });
   private readonly terminalStreams = new TerminalStreamRouter();
+  private readonly networkTunnels = new NetworkTunnelRegistry({
+    send: (frame) => this.sendBinaryFrame(frame),
+    close: (subscriptionId) => this.closeNetworkTunnelSubscription(subscriptionId),
+    createStreamId: () => crypto.randomUUID(),
+    closeProtocolViolation: (subscriptionId) => {
+      this.closeNetworkTunnelInBackground(subscriptionId, "Failed to close invalid network tunnel");
+    },
+    closeSendFailure: (subscriptionId, error) => {
+      this.logger.warn({ err: error, subscriptionId }, "Network tunnel frame was not sent");
+      this.closeNetworkTunnelInBackground(
+        subscriptionId,
+        "Failed to close network tunnel after a send failure",
+      );
+    },
+    handlerError: (error, handler) => {
+      this.logger.error({ err: error, handler }, "Network tunnel handler failed");
+    },
+  });
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
   private completedBinaryFileReads = new Map<string, FileReadResult>();
@@ -1899,6 +1960,17 @@ export class DaemonClient {
         code: "unsupported_capability",
       });
   }
+  async manageHostInstructions(
+    command: import("@getpaseo/protocol/messages").HostInstructionsCommand,
+  ) {
+    if (!this.lastServerInfoMessage?.features?.hostInstructions) {
+      throw new Error("Update the daemon to use host instructions");
+    }
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "host.instructions.manage.request", command },
+      responseType: "host.instructions.manage.response",
+    });
+  }
   async listHosts(): Promise<HostDirectory> {
     this.requireConnectedHosts();
     return (
@@ -2042,6 +2114,22 @@ export class DaemonClient {
     return this.relaySecurityFloorValue;
   }
 
+  /** Whether this live connection can carry explicitly selected sensitive files. */
+  get canSendSensitiveFiles(): boolean {
+    if (!this.isConnected) return false;
+    if (isRelayClientWebSocketUrl(this.config.url)) {
+      return this.config.e2ee?.enabled === true && this.relaySecurityFloor === "protected";
+    }
+    const { protocol, hostname } = new URL(this.config.url);
+    if (protocol === "wss:") return true;
+    if (protocol === "ws:") return ["localhost", "127.0.0.1", "[::1]"].includes(hostname);
+    return (
+      protocol === "paseo+desktop:" &&
+      this.config.transportFactory !== undefined &&
+      ["socket", "pipe", "ssh"].includes(hostname)
+    );
+  }
+
   get lastError(): string | null {
     return this.lastErrorValue;
   }
@@ -2181,6 +2269,13 @@ export class DaemonClient {
       });
     try {
       return this.sendTransportFrame(JSON.stringify(message), submitted);
+    } catch (error) {
+      const creation =
+        messageType === "agent.create.request" ||
+        messageType === "create_agent_request" ||
+        messageType === "workspace.create.request";
+      if (creation && error instanceof MessageTooLargeError) throw new CreationNotSentError(error);
+      throw error;
     } finally {
       this.endTraceSection(isOpen);
     }
@@ -3246,13 +3341,19 @@ export class DaemonClient {
   }
 
   async cloneGithubProject(
-    input: { repo: string; targetDirectory: string; cloneProtocol?: ProjectGithubCloneProtocol },
+    input: {
+      repo: string;
+      targetDirectory: string;
+      cloneProtocol?: ProjectGithubCloneProtocol;
+      folderName?: string;
+    },
     requestId?: string,
   ): Promise<ProjectGithubClonePayload> {
     const message = {
       type: "project.github.clone.request",
       repo: input.repo,
       targetDirectory: input.targetDirectory,
+      ...(input.folderName !== undefined ? { folderName: input.folderName } : {}),
       ...(input.cloneProtocol ? { cloneProtocol: input.cloneProtocol } : {}),
     } as const;
     return this.sendNamespacedCorrelatedSessionRequest<"project.github.clone.response">({
@@ -3318,6 +3419,47 @@ export class DaemonClient {
       requestId,
       message: { type: "workspace.script.stop.request", workspaceId, scriptName },
       responseType: "workspace.script.stop.response",
+    });
+  }
+
+  async listWorkspaceLaunches(
+    workspaceId: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.list.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.list.request", workspaceId },
+      responseType: "workspace.launch.list.response",
+    });
+  }
+
+  async startWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.start.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.start.request", workspaceId, launchName },
+      responseType: "workspace.launch.start.response",
+    });
+  }
+
+  async stopWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.stop.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.stop.request", workspaceId, launchName },
+      responseType: "workspace.launch.stop.response",
     });
   }
 
@@ -3499,20 +3641,26 @@ export class DaemonClient {
   }
 
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
-    if (options.git !== undefined || options.worktreeName !== undefined) {
-      throw new Error(
-        "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) or create a workspace first and pass workspaceId.",
-      );
+    let prepared: CreateAgentRequestOptions;
+    try {
+      if (options.git !== undefined || options.worktreeName !== undefined) {
+        throw new Error(
+          "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) or create a workspace first and pass workspaceId.",
+        );
+      }
+      if (options.background !== undefined) this.requireBackgroundCreation(options);
+      if (options.metadata !== undefined) this.requireEntityMetadata();
+      const config = resolveAgentConfig(options);
+      prepared = {
+        ...options,
+        config: this.carriesLegacyOptions(config)
+          ? await this.routeLegacyCreateConfig(config)
+          : config,
+      };
+    } catch (error) {
+      throw new CreationNotSentError(error);
     }
-    if (options.background !== undefined) this.requireBackgroundCreation(options);
-    if (options.metadata !== undefined) this.requireEntityMetadata();
-    const config = resolveAgentConfig(options);
-    const result = await this.creations.createAgent({
-      ...options,
-      config: this.carriesLegacyOptions(config)
-        ? await this.routeLegacyCreateConfig(config)
-        : config,
-    });
+    const result = await this.creations.createAgent(prepared);
     if (result.error || !result.agent) throw new Error(result.error ?? "Agent creation failed");
     return result.agent;
   }
@@ -4277,13 +4425,19 @@ export class DaemonClient {
       options.sourceAgentId &&
       this.lastServerInfoMessage?.features?.agentMessageProvenance !== true
     ) {
-      throw new Error("Update the Paseo host to send messages with agent provenance.");
+      throw new AgentMessageSendError({
+        message: "Update the Paseo host to send messages with agent provenance.",
+        deliveryOutcome: "not_submitted",
+      });
     }
     if (
       options.sourceAgentServerId &&
       this.lastServerInfoMessage?.features?.agentMessageBatching !== true
     ) {
-      throw new Error("Update the Paseo host to send messages with a qualified agent address.");
+      throw new AgentMessageSendError({
+        message: "Update the Paseo host to send messages with a qualified agent address.",
+        deliveryOutcome: "not_submitted",
+      });
     }
     const activeTurnBehavior = this.activeTurnBehaviorForHost(options);
     const requestId = this.createRequestId();
@@ -4304,6 +4458,7 @@ export class DaemonClient {
     const payload = await this.sendRequest({
       requestId,
       message,
+      timeout: AGENT_MESSAGE_ACK_TIMEOUT_MS,
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "send_agent_message_response") {
@@ -4316,7 +4471,10 @@ export class DaemonClient {
       },
     });
     if (!payload.accepted) {
-      throw new Error(payload.error ?? "sendAgentMessage rejected");
+      throw new AgentMessageSendError({
+        message: payload.error ?? "sendAgentMessage rejected",
+        deliveryOutcome: payload.deliveryOutcome ?? "unknown",
+      });
     }
     return {
       ...(payload.deliveryStatus ? { deliveryStatus: payload.deliveryStatus } : {}),
@@ -4344,6 +4502,32 @@ export class DaemonClient {
         "Update the Paseo host to steer a running turn from an agent. Leave the behavior out to queue the message, or use interrupt.",
       );
     return requested === "interrupt" ? "interrupt" : undefined;
+  }
+
+  async getAgentMessageDeliveryStatus(
+    input: SendMessageOptions & { agentId: string; text: string; messageId: string },
+  ) {
+    if (this.getLastServerInfoMessage()?.features?.messageDeliveryStatus !== true)
+      throw new Error("Update the Paseo host to check message delivery status.");
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      ...input,
+      type: "agent.message.get_delivery_status.request",
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.message.get_delivery_status.response" &&
+        msg.payload.requestId === requestId
+          ? msg.payload
+          : null,
+    });
+    if (payload.error || payload.status === null)
+      throw new Error(payload.error ?? "Could not check message delivery");
+    return { status: payload.status, failure: payload.failure };
   }
 
   async sendMessage(
@@ -5230,7 +5414,15 @@ export class DaemonClient {
 
   async checkoutPrCreate(
     cwd: string,
-    input: { title?: string; body?: string; baseRef?: string },
+    input: {
+      title?: string;
+      body?: string;
+      draft?: boolean;
+      baseRef?: string;
+      previewOnly?: boolean;
+      proposalId?: string;
+      issueLinks?: Array<{ number: number; relation: "reference" | "close" }>;
+    },
     requestId?: string,
   ): Promise<CheckoutPrCreatePayload> {
     return this.sendCorrelatedSessionRequest({
@@ -5240,6 +5432,10 @@ export class DaemonClient {
         cwd,
         title: input.title,
         body: input.body,
+        draft: input.draft,
+        previewOnly: input.previewOnly,
+        proposalId: input.proposalId,
+        issueLinks: input.issueLinks,
         baseRef: input.baseRef,
       },
       responseType: "checkout_pr_create_response",
@@ -5521,21 +5717,28 @@ export class DaemonClient {
     input: CreateWorkspaceRequestOptions,
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
-    const resolvedRequestId = this.createRequestId(requestId ?? input.requestId);
-    if (input.background !== undefined || input.callerAgentId) this.requireBackgroundWorkspaces();
-    if (input.agent?.background !== undefined)
-      throw new Error("Configure background on the workspace, not its initial agent.");
-    if (input.metadata !== undefined || input.agent?.metadata !== undefined)
-      this.requireEntityMetadata();
-    let agentConfig = input.agent ? resolveAgentConfig(input.agent) : undefined;
-    if (agentConfig && this.carriesLegacyOptions(agentConfig)) {
-      agentConfig = await this.routeLegacyCreateConfig(agentConfig);
+    let resolvedRequestId: string;
+    let prepared: CreateWorkspaceRequestOptions;
+    try {
+      resolvedRequestId = this.createRequestId(requestId ?? input.requestId);
+      if (input.background !== undefined || input.callerAgentId) this.requireBackgroundWorkspaces();
+      if (input.agent?.background !== undefined)
+        throw new Error("Configure background on the workspace, not its initial agent.");
+      if (input.metadata !== undefined || input.agent?.metadata !== undefined)
+        this.requireEntityMetadata();
+      let agentConfig = input.agent ? resolveAgentConfig(input.agent) : undefined;
+      if (agentConfig && this.carriesLegacyOptions(agentConfig)) {
+        agentConfig = await this.routeLegacyCreateConfig(agentConfig);
+      }
+      prepared = {
+        ...input,
+        requestId: resolvedRequestId,
+        ...(input.agent && agentConfig ? { agent: { ...input.agent, config: agentConfig } } : {}),
+      };
+    } catch (error) {
+      throw new CreationNotSentError(error);
     }
-    const result = await this.creations.createWorkspace({
-      ...input,
-      requestId: resolvedRequestId,
-      ...(input.agent && agentConfig ? { agent: { ...input.agent, config: agentConfig } } : {}),
-    });
+    const result = await this.creations.createWorkspace(prepared);
     return {
       ...result,
       workspace: result.workspace ?? null,
@@ -7409,6 +7612,66 @@ export class DaemonClient {
     return this.terminalStreams.onEvent(handler);
   }
 
+  async openNetworkTunnel(): Promise<NetworkTunnel> {
+    // COMPAT(networkTunnel): added in v0.12.0, remove after 2027-10-08.
+    if (this.lastServerInfoMessage?.features?.networkTunnel !== true) {
+      throw new NetworkTunnelRpcError(
+        "open",
+        "unsupported_feature",
+        "Update the host to use network tunneling.",
+      );
+    }
+    const openingTransport = this.transport;
+    let payload: CorrelatedResponsePayload<"network.tunnel.open.response">;
+    let tunnel: NetworkTunnel | undefined;
+    try {
+      payload = await this.sendCorrelatedSessionRequest({
+        message: { type: "network.tunnel.open.request", limits: CLIENT_NETWORK_TUNNEL_LIMITS },
+        responseType: "network.tunnel.open.response",
+        selectPayload: (response) => {
+          if (response.ok) {
+            const limits = {
+              initialWindowBytes: response.initialWindowBytes,
+              maxDataBytes: response.maxDataBytes,
+              maxStreams: response.maxStreams,
+              connectTimeoutMs: response.connectTimeoutMs,
+            };
+            if (withinClientNetworkTunnelLimits(limits)) {
+              // A closure can arrive in the same transport turn as this reply.
+              tunnel = this.networkTunnels.open(response.subscriptionId, limits);
+            }
+          }
+          return response;
+        },
+      });
+    } catch (error) {
+      if (error instanceof DaemonRpcError) {
+        throw new NetworkTunnelRpcError("open", error.code ?? "rpc_error", error.message);
+      }
+      throw error;
+    }
+    if (this.transport !== openingTransport || this.connectionState.status !== "connected") {
+      throw new NetworkTunnelRpcError(
+        "open",
+        "disconnected",
+        "The host connection changed before the network tunnel opened.",
+      );
+    }
+    if (!payload.ok) {
+      throw new NetworkTunnelRpcError("open", payload.error.code, payload.error.message);
+    }
+    if (!tunnel) {
+      // Refuse at open rather than tear the tunnel down in the middle of a download.
+      await this.closeNetworkTunnelSubscription(payload.subscriptionId);
+      throw new NetworkTunnelRpcError(
+        "open",
+        "protocol_error",
+        "The host answered with tunnel limits above the ones this client asked for.",
+      );
+    }
+    return tunnel;
+  }
+
   async waitForTerminalStreamEvent(
     predicate: (event: TerminalStreamEvent) => boolean,
     timeout = 5000,
@@ -7444,6 +7707,37 @@ export class DaemonClient {
   private legacyProviderOptions(): LegacyProviderOptions | null {
     const info = this.lastServerInfoMessage;
     return info && usesLegacyProviderOptions(info) ? this.legacyOptions : null;
+  }
+
+  private closeNetworkTunnelInBackground(subscriptionId: string, failureMessage: string): void {
+    void this.closeNetworkTunnelSubscription(subscriptionId).catch((error) => {
+      this.logger.warn({ err: error, subscriptionId }, failureMessage);
+    });
+  }
+
+  private async closeNetworkTunnelSubscription(subscriptionId: string): Promise<void> {
+    let payload: CorrelatedResponsePayload<"network.tunnel.close.response">;
+    try {
+      payload = await this.sendCorrelatedSessionRequest({
+        message: { type: "network.tunnel.close.request", subscriptionId },
+        responseType: "network.tunnel.close.response",
+      });
+    } catch (error) {
+      if (error instanceof DaemonRpcError) {
+        throw new NetworkTunnelRpcError("close", error.code ?? "rpc_error", error.message);
+      }
+      throw error;
+    }
+    if (!payload.ok) {
+      throw new NetworkTunnelRpcError("close", payload.error.code, payload.error.message);
+    }
+    if (payload.subscriptionId !== subscriptionId) {
+      throw new NetworkTunnelRpcError(
+        "close",
+        "invalid_response",
+        "Network tunnel close response did not match the subscription",
+      );
+    }
   }
 
   getLastServerInfoMessage(): ServerInfoStatusPayload | null {
@@ -7513,6 +7807,7 @@ export class DaemonClient {
     this.chunkedTransport = null;
     this.owned.disconnected();
     this.diffStreams.disconnected();
+    this.networkTunnels.disconnected();
     this.providerSnapshotUpdates.clear();
     this.stopLivenessHeartbeat();
     this.cleanupTransport();
@@ -7726,6 +8021,29 @@ export class DaemonClient {
       return true;
     }
 
+    const opcode = rawBytes[0];
+    if (opcode >= TunnelOpcode.Data && opcode <= TunnelOpcode.WindowUpdate) {
+      // A malformed frame or unknown subscription drops the transport and reconnects: ownership
+      // cannot be trusted, so the bad frame cannot be isolated (late frames for recently closed
+      // streams are ignored).
+      const tunnelFrame = decodeTunnelFrame(rawBytes);
+      if (!tunnelFrame) {
+        this.handleNetworkTunnelProtocolError("Malformed network tunnel frame");
+        return true;
+      }
+      this.traceInstant("paseo.ws.message.inbound", {
+        envelopeType: "binary",
+        messageType: "network_tunnel",
+        opcode: String(tunnelFrame.opcode),
+      });
+      this.consecutiveLivenessFailures = 0;
+      if (this.networkTunnels.receive(tunnelFrame) === "unknown_subscription") {
+        this.handleNetworkTunnelProtocolError("Unknown network tunnel subscription");
+      }
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
     const frame = decodeTerminalStreamFrame(rawBytes);
     if (!frame) {
       return false;
@@ -7753,6 +8071,16 @@ export class DaemonClient {
       perfNow() - binaryStartMs,
     );
     return true;
+  }
+
+  private handleNetworkTunnelProtocolError(reason: string): void {
+    this.networkTunnels.disconnected();
+    this.disposeTransport(1002, reason);
+    this.scheduleReconnect({
+      reason,
+      event: "NETWORK_TUNNEL_PROTOCOL_ERROR",
+      reasonCode: "protocol_error",
+    });
   }
 
   private handleFileTransferFrame(frame: FileTransferFrame): void {
@@ -7911,6 +8239,7 @@ export class DaemonClient {
 
     this.owned.disconnected();
     this.diffStreams.disconnected();
+    this.networkTunnels.disconnected();
     this.providerSnapshotUpdates.clear();
 
     // Clear all pending waiters and queued sends since the connection was lost
@@ -8074,6 +8403,8 @@ export class DaemonClient {
       this.config.providerSnapshots !== "wire",
     );
 
+    this.handleNetworkTunnelClosed(consumerMessage);
+
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
@@ -8137,6 +8468,11 @@ export class DaemonClient {
     }
     this.resolveWaiters(consumerMessage);
     this.owned.receive(consumerMessage);
+  }
+
+  private handleNetworkTunnelClosed(message: SessionOutboundMessage): void {
+    if (message.type !== "network.tunnel.closed") return;
+    this.networkTunnels.daemonClosed(message.payload.subscriptionId, message.payload.reason);
   }
 
   private resolveWaiters(msg: SessionOutboundMessage): void {

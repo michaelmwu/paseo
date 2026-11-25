@@ -2,6 +2,19 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "浏览器",
+    permissionDenied: "此连接无权使用主机网络。请联系主机所有者以允许网络访问。",
+    title: "浏览器标签页使用主机网络",
+    description: "此主机的标签页使用其网络和独立配置文件，Cookie 单独保存。",
+    updateHost: "请更新此主机，以便浏览器标签页使用其网络。",
+    settingFailed: "无法保存或加载此设置。请重试。",
+    viaHost: "经由 {{host}}",
+    proxyUnavailable: "浏览器无法连接到主机 {{host}} 的网络。请重新连接主机并刷新。",
+    destinationFailed: "无法通过主机 {{host}} 的网络访问此地址。请检查地址和主机连接。",
+    connectionClosed: "通过主机 {{host}} 网络的连接已关闭。请重新连接主机并刷新。",
+    notReady: "浏览器无法准备主机 {{host}} 的网络。请尝试重新打开标签页。",
+  },
   pluginCombobox: {
     searching: "搜索中…",
     empty: "无结果",
@@ -131,6 +144,20 @@ export const zhCN: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "查找消息",
+    outbox: {
+      pending: "已保存在此设备，等待主机或代理就绪。",
+      sending: "发送中…",
+      needsReview: "发送结果未确认，请先检查状态。",
+      retry: "重试发送",
+      discard: "丢弃已保存的消息",
+      attachmentMessage: "带附件的消息",
+
+      failed: "未发送。可重试此消息。",
+      inFlight: "主机仍在处理此消息，正在自动检查…",
+      checking: "正在检查发送状态…",
+      check: "检查发送状态",
+    },
     placeholders: {
       desktop: "给 Agent 发消息，标记 @files，或使用 /commands 和 /skills",
       mobile: "发消息，@files，/commands",
@@ -193,8 +220,11 @@ export const zhCN: TranslationResources = {
       removeReview: "移除 review 附件",
     },
     errors: {
+      messageLookupFailed: "无法刷新对话。仍无法确认是否已送达。请重新连接后再次查找消息。",
+      messageNotFound: "在可用历史记录中未找到此消息。仍无法确认是否已送达。",
       failedToSend: "发送消息失败",
       failedToCreateAgent: "创建 Agent 失败",
+      creationOutcomeUnknown: "上一次启动可能仍在进行中。再次启动前，请检查工作区和智能体。",
       noHostSelected: "未选择 Host",
       initialPromptRequired: "初始 prompt 必填",
       alreadyLoading: "正在加载",
@@ -268,6 +298,11 @@ export const zhCN: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "请更新主机以查看单轮对话中的更改。",
+      viewChanges: "本轮期间的更改",
+      backToConversation: "返回对话",
+    },
     states: {
       notFound: "未找到 Agent",
       failedToLoad: "加载 Agent 失败",
@@ -395,6 +430,8 @@ export const zhCN: TranslationResources = {
     },
     question: {
       responseFailed: "未能发送你的回复，请重试。",
+      sendToChat: "发送到聊天",
+      chatDeliveryWarning: "你的回答会显示在聊天中。请勿输入密码或其他秘密信息。",
       submit: "提交",
       next: "下一步",
       answerPlaceholder: "输入你的回答...",
@@ -803,7 +840,7 @@ export const zhCN: TranslationResources = {
         view: "查看终端",
       },
       accessibility: {
-        trigger: "Workspace scripts",
+        trigger: "运行工作区命令",
         openService: "查看 {{scriptName}} 服务",
         viewTerminal: "查看 {{scriptName}} Terminal",
         runScript: "运行 {{scriptName}} script",
@@ -824,6 +861,34 @@ export const zhCN: TranslationResources = {
         stopFailed: "停止 {{scriptName}} 失败",
         running: "运行中",
         runningCount: "{{count}} 个运行中",
+      },
+    },
+    launches: {
+      title: "启动配置",
+      actions: {
+        switch: "切换",
+        start: "启动",
+        stop: "停止",
+        view: "输出",
+        openService: "查看服务",
+      },
+      accessibility: {
+        switchLaunch: "停止 {{activeLaunchName}} 并启动 {{launchName}}",
+        trigger: "工作区启动配置",
+        launch: "{{launchName}} 启动配置",
+        startLaunch: "启动 {{launchName}}",
+        stopLaunch: "停止 {{launchName}}",
+        viewTerminal: "查看 {{launchName}} 的终端",
+        openService: "查看 {{hostname}} 服务",
+      },
+      states: {
+        running: "运行中",
+        stopped: "已停止",
+        stopping: "正在停止…",
+        noListeners: "尚未检测到监听端口",
+        startFailed: "无法启动 {{launchName}}",
+        stopFailed: "无法停止 {{launchName}}",
+        portRange: "端口 {{base}}–{{end}}",
       },
     },
     tree: {
@@ -856,6 +921,7 @@ export const zhCN: TranslationResources = {
         },
         viewPr: "查看 PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "创建 PR",
           pending: "正在创建 PR...",
           success: "PR 已创建",
@@ -2300,6 +2366,7 @@ export const zhCN: TranslationResources = {
   },
   settings: {
     title: "设置",
+    searchResults: "搜索结果",
     loading: "正在加载设置...",
     groups: {
       app: "应用",
@@ -2316,6 +2383,43 @@ export const zhCN: TranslationResources = {
     projectList: {
       hostLoadFailed: "无法从 Host {{hostName}} 加载 projects：{{message}}",
       editProject: "编辑 {{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "跨主机的项目",
+        linkProjects: "关联项目",
+        matches: "有 {{count}} 个已验证的匹配项待查看",
+        matches_one: "有 {{count}} 个已验证的匹配项待查看",
+        matches_other: "有 {{count}} 个已验证的匹配项待查看",
+        savedLinks: "关联已保存在此设备上",
+        linkAction: "关联项目…",
+        manageAction: "项目关联…",
+        hint: "在侧边栏中归组同一 Git 仓库的副本。",
+      },
+      sheet: {
+        title: "跨主机关联项目",
+        deviceOnly: "关联后，项目会在此设备的侧边栏中归组。工作区、设置和文件仍留在各自的主机上。",
+        matchesTitle: "已验证的匹配项",
+        matchesDescription: "这些条目具有相同的 Git 远程仓库和项目子目录，但仍然是分开的。",
+        linkedTitle: "已链接的项目",
+        noMatchesTitle: "没有要查看的项目链接",
+        noMatchesDescription:
+          "在两台主机上打开同一仓库中的工作区。匹配且仍单独显示的项目会出现在这里。",
+        linkProjects: "链接 {{count}} 个项目",
+        remote: "Git 远程仓库",
+        subdirectory: "项目子目录",
+        path: "路径",
+        needsReviewTitle: "需要查看",
+        needsReviewDescription: "最新的 Git 信息已无法确认此链接，因此 Paseo 会保持这些项目分开。",
+        projectUnavailable: "此项目当前不可用。",
+        saving: "正在保存项目链接…",
+        saveFailed: "无法保存项目链接。请重试。",
+        unlink: "取消链接",
+      },
+      toasts: {
+        linked: "已在此设备上链接项目",
+        unlinked: "已移除项目链接",
+      },
     },
     groupInfo: "关于 {{title}}",
     sections: {
@@ -2464,11 +2568,12 @@ export const zhCN: TranslationResources = {
       browserData: {
         title: "浏览器数据",
         siteData: "Cookie 和网站数据",
-        description: "浏览器标签页在 Paseo 中共享登录状态和网站数据。",
+        description:
+          "浏览器标签页在 Paseo 中共享登录状态和网站数据。开启“浏览器标签页使用主机网络”的主机会保留单独的配置文件，清除时会一并删除。",
         clear: "清除浏览器数据",
         clearing: "正在清除...",
         confirmTitle: "清除浏览器数据？",
-        confirmMessage: "网站帐号将退出登录，打开的浏览器标签页将重新加载。",
+        confirmMessage: "所有配置文件中的网站帐号将退出登录，打开的浏览器标签页将重新加载。",
         success: "浏览器数据已清除。",
         error: "无法清除浏览器数据。",
       },
@@ -2701,6 +2806,8 @@ export const zhCN: TranslationResources = {
         closeCurrentTab: "关闭当前标签",
         jumpToWorkspace: "跳转到 workspace",
         jumpToTab: "跳转到标签",
+        goBack: "后退",
+        goForward: "前进",
         previousWorkspace: "上一个 workspace",
         nextWorkspace: "下一个 workspace",
         previousTab: "上一个标签",
@@ -2820,6 +2927,7 @@ export const zhCN: TranslationResources = {
         removeErrorMessage: "无法移除连接",
         timeout: "超时",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "配对设备",
         rowTitle: "配对设备",
@@ -3135,6 +3243,13 @@ export const zhCN: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "项目详情",
+        sourceDirectory: "源目录",
+        copySourceDirectory: "复制源目录",
+        repository: "仓库",
+        openRepositoryFailed: "无法打开仓库。",
+      },
       noEditableTarget: "此项目无法在这个 Host 上编辑。",
       backToProjects: "返回 Projects",
       edit: {
@@ -3195,6 +3310,27 @@ export const zhCN: TranslationResources = {
           edit: "编辑",
           remove: "移除",
         },
+      },
+      launches: {
+        title: "启动配置",
+        info: "可从此项目的任何工作区启动的开发配置",
+        empty: "还没有启动配置。",
+        untitled: "未命名启动配置",
+        menuAccessibility: "打开启动配置菜单",
+        removeTitle: "移除启动配置？",
+        removeMessage: "移除 {{name}}？",
+        removeFallbackName: "此启动配置",
+        name: "名称",
+        command: "命令",
+        nameAccessibility: "启动配置名称",
+        commandAccessibility: "启动配置命令",
+        nameRequired: "必须填写名称",
+        nameDuplicate: "每个启动配置都必须有唯一的名称",
+        commandRequired: "必须填写命令",
+        newLaunch: "新建启动配置",
+        editLaunch: "编辑 {{name}}",
+        commandHint: "Paseo 会使用工作区端口块和 Compose 项目名称作为环境变量运行此命令。",
+        actions: { add: "添加启动配置", edit: "编辑", remove: "移除" },
       },
       metadata: {
         title: "元数据生成",

@@ -2446,6 +2446,42 @@ you reach from outside:
 - Drafts and the New workspace screen are not addressable by reference. Only an item inside one
   reaches its composer, through `useComposer()`.
 
+## Composer sections
+
+`client.addComposerSection({ id, Component })` mounts inline content below a running agent's
+composer tracks and above its normal message input. It adds no pill, popover, title, padding,
+or dismiss control. Return `null` when your section has nothing to show; it reserves no space.
+Sections stay inline on compact layouts instead of moving into the toolbar overflow sheet.
+
+The component receives `PluginComposerSectionProps`: the usual `theme`, `host`, and `layout`,
+plus `agentId` and `workspaceId`. Read and edit that agent's composer with
+`useComposers({ agentId })`. The section is under the installation's normal SDK, RPC,
+translation, toast, and client-state providers. `useComposer()` is for toolbar items;
+sections address their agent by reference.
+
+```tsx
+function Suggestions({ agentId, theme }: PluginComposerSectionProps) {
+  const [composer] = useComposers({ agentId });
+  if (!composer || composer.prompt) return null;
+  return <Text style={{ color: theme.colors.foregroundMuted }}>Suggested replies</Text>;
+}
+client.addComposerSection({ id: "suggestions", Component: Suggestions });
+```
+
+This client API is unreleased. A plugin adopting it must require a client built with this API;
+the 0.16.0-beta.2 published client does not supply it. No daemon protocol change is needed.
+
+Register once per installation. Paseo scopes the section to that installation's host and
+passes each mounted agent's identity; it does not render sections for new-agent or
+New workspace drafts. Plugin and registration order determine section order. Each section
+has its own render error boundary. The registration returns an idempotent remover; plugin
+teardown removes it as well.
+
+Your plugin owns section content and visibility. For suggested replies, generate off the input
+path, reject stale results, clear them after acceptance, typing, or a new turn, and insert into
+the normal composer without sending. Do not let suggestions reappear when the user clears a
+draft. The host does not generate model output or intercept keyboard shortcuts for sections.
+
 ## New workspace items
 
 `client.addNewWorkspaceItem({ id, Component })` puts a field on the New workspace screen, beside
@@ -2878,7 +2914,7 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-Inputs are parsed once in the plugin process; outputs are parsed once on the client. Send schema inputs from the client and return output-schema inputs from the handler; schema transforms run at the receiving side. RPC names start with a lowercase letter and contain lowercase letters, numbers, dots, hyphens, or underscores. `useRpc()` returns a typed async function. Use TanStack Query for request state, caching, and mutations.
+Inputs are parsed once in the plugin process; outputs are parsed once on the client. Send schema inputs from the client and return output-schema inputs from the handler; schema transforms run at the receiving side. RPC names start with a lowercase letter and contain lowercase letters, numbers, dots, hyphens, or underscores. They identify methods inside the existing `plugin.rpc.invoke.request` and `plugin.rpc.invoke.response` WebSocket pair, so plugin method names do not add direction suffixes. `useRpc()` returns a typed async function. Use TanStack Query for request state, caching, and mutations.
 
 Backend handlers receive the same `PaseoApi` as `{ paseo }`. Their connection belongs to the subprocess and closes when the plugin stops. It does not subscribe to timelines or catalog events until plugin code subscribes. Follow the [SDK event contract](/docs/sdk/events) for cleanup and timeline replacements. Backend code can use Node APIs and dependencies installed in the plugin directory.
 
@@ -2964,6 +3000,15 @@ render's callback, so an inline function does not resubscribe. `client.subscribe
 `{ signal, onClosed }`; `onClosed` receives `{ error? }`.
 
 ### Bytes
+
+**Unreleased API.** For user-selected files, `usePluginFileTransfer()` on a plugin surface offers `pick()` and
+`send(file, rpc, header?)`. The system picker returns the filename, size, and an opaque handle.
+Paseo reads the bytes only on `send`, delivers them to that installation's binary RPC handler
+over a protected connection, and returns the validated RPC result. An optional binary header
+up to 4 KiB precedes the file bytes. The plugin defines the header format and the destination.
+Files are limited to 1 MiB. Handles expire after five minutes and are consumed by sending.
+The API returns `null` when the surface has no file transfer capability. See the
+[Local Files example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/local-files).
 
 A top-level `Uint8Array` crosses the wire as binary, without JSON or base64. Everything else is
 JSON. The rule applies to subscription events, RPC outputs, and RPC inputs. A Node `Buffer` is a
@@ -3100,6 +3145,7 @@ export const searchIssues = defineRpc({
         url: z.string().url(),
         text: z.string(),
         resourceType: z.string(),
+        contextKind: z.literal("chat_history").optional(),
       }),
     ),
   }),
@@ -3111,6 +3157,8 @@ export const issues = defineAttachmentSource({
   icon: "CircleDot",
   pickerTitle: "Attach Acme issue",
   searchPlaceholder: "Search by identifier or title",
+  newAgentShortcut: true,
+  crossHost: true,
   search: searchIssues,
 });
 ```
@@ -3151,13 +3199,17 @@ export default function contribute(server: PluginServerContext) {
 }
 ```
 
-Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. `icon` is a Lucide name or `{ svg }`; see [Icons](#icons).
+Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent. `icon` is a Lucide name or `{ svg }`; see [Icons](#icons). Set `contextKind` to `"chat_history"` for an earlier conversation that must appear before the new user instruction; omit it for an ordinary resource appended afterward. Set `newAgentShortcut` to `true` to show the source beside Import Session on same-host New Agent drafts as well as in the attachment menu.
+
+Set `crossHost` to `true` only when the source is safe to offer on other connected hosts. Paseo lists it under its source host in the attachment menu and asks for confirmation before searching that host. The plugin's search results, including readable `text`, are copied to the app. A selected snapshot is copied to the destination host on send. The plugin runs on the source host; it does not install or invoke itself on the destination host. Remote sources do not get the New Agent shortcut. Keep search results bounded and redact secrets before returning them.
+
+The [Linear example](https://github.com/getpaseo/paseo/tree/main/plugin-examples/linear) shows a complete attachment source for a vendor resource.
 
 ## Hosts and lifecycle
 
 Plugins are installed per daemon. When the same contribution exists on several connected hosts, Paseo shows one sidebar item and adds a host picker. The selected host supplies the bundle, Paseo API, RPC transport, and query cache. Calls never fall through to another host when the selected host is offline.
 
-Attachment sources remain scoped to each composer's host.
+Attachment sources remain scoped to each composer's host unless they opt into `crossHost`. A remote source stays on its installation host; the app asks before searching it and sends only the selected text snapshot to the destination host with the prompt.
 
 A dropped connection keeps client plugin registrations, mounted surfaces, local state, and query caches. Reconnecting through the existing `DaemonClient` object keeps unchanged installations and refreshes their settings. Consume SDK observation snapshots to refresh other daemon state; setup does not run again for an unchanged installation. Daemon calls still depend on connectivity.
 

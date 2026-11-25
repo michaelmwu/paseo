@@ -2,6 +2,25 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Navigateur",
+    permissionDenied:
+      "Cette connexion n’a pas l’autorisation d’utiliser le réseau de l’hôte. Demandez au propriétaire de l’hôte d’autoriser l’accès au réseau.",
+    title: "Utiliser le réseau de l’hôte pour les onglets du navigateur",
+    description:
+      "Les onglets de cet hôte utilisent son réseau et un profil distinct avec leurs propres cookies.",
+    updateHost: "Mettez cet hôte à jour pour utiliser son réseau dans les onglets du navigateur.",
+    settingFailed: "Impossible d’enregistrer ou de charger ce réglage. Réessayez.",
+    viaHost: "via {{host}}",
+    proxyUnavailable:
+      "La connexion du navigateur au réseau de l’hôte {{host}} est indisponible. Reconnectez l’hôte et rechargez.",
+    destinationFailed:
+      "Impossible d’accéder à cette adresse via le réseau de l’hôte {{host}}. Vérifiez l’adresse et la connexion de l’hôte.",
+    connectionClosed:
+      "La connexion via le réseau de l’hôte {{host}} a été fermée. Reconnectez l’hôte et rechargez.",
+    notReady:
+      "Le navigateur n’a pas pu préparer le réseau de l’hôte {{host}}. Réessayez d’ouvrir l’onglet.",
+  },
   pluginCombobox: {
     searching: "Recherche…",
     empty: "Aucun résultat",
@@ -133,6 +152,20 @@ export const fr: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "Rechercher le message",
+    outbox: {
+      pending: "Enregistré sur cet appareil. En attente de l’hôte ou de l’agent.",
+      sending: "Envoi en cours…",
+      needsReview: "Livraison non confirmée. Vérifiez son état avant toute autre action.",
+      retry: "Réessayer l’envoi",
+      discard: "Supprimer le message enregistré",
+      attachmentMessage: "Message avec pièces jointes",
+
+      failed: "Non livré. Réessayez ce message enregistré.",
+      inFlight: "L’hôte traite encore ce message. Vérification automatique…",
+      checking: "Vérification de la livraison…",
+      check: "Vérifier la livraison",
+    },
     placeholders: {
       desktop: "Écrivez à l’agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
@@ -195,8 +228,14 @@ export const fr: TranslationResources = {
       removeReview: "Retirer la revue jointe",
     },
     errors: {
+      messageLookupFailed:
+        "Impossible d’actualiser la conversation. La livraison reste incertaine. Reconnectez-vous et recherchez le message à nouveau.",
+      messageNotFound:
+        "Ce message est introuvable dans l’historique disponible. Sa livraison reste incertaine.",
       failedToSend: "Impossible d’envoyer le message",
       failedToCreateAgent: "Impossible de créer l’agent",
+      creationOutcomeUnknown:
+        "Le démarrage précédent est peut-être encore en cours. Vérifiez vos espaces de travail et vos agents avant de relancer.",
       noHostSelected: "Aucun hôte sélectionné",
       initialPromptRequired: "Un prompt initial est requis",
       alreadyLoading: "Chargement déjà en cours",
@@ -271,6 +310,11 @@ export const fr: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Mettez à jour l’hôte pour examiner les modifications d’un tour.",
+      viewChanges: "Modifications pendant ce tour",
+      backToConversation: "Retour à la conversation",
+    },
     states: {
       notFound: "Agent introuvable",
       failedToLoad: "Impossible de charger l’agent",
@@ -401,6 +445,9 @@ export const fr: TranslationResources = {
     question: {
       responseFailed: "Impossible d’envoyer votre réponse. Réessayez.",
       submit: "Envoyer",
+      sendToChat: "Envoyer dans le chat",
+      chatDeliveryWarning:
+        "Votre réponse apparaîtra dans le chat. Ne saisissez pas de mot de passe ni d'information secrète.",
       next: "Suivant",
       answerPlaceholder: "Saisissez votre réponse…",
       otherPlaceholder: "Autre…",
@@ -816,7 +863,7 @@ export const fr: TranslationResources = {
         view: "Voir le terminal",
       },
       accessibility: {
-        trigger: "Scripts de l’espace de travail",
+        trigger: "Exécuter les commandes de l’espace de travail",
         openService: "Voir le service {{scriptName}}",
         viewTerminal: "Voir le terminal de {{scriptName}}",
         runScript: "Lancer le script {{scriptName}}",
@@ -837,6 +884,34 @@ export const fr: TranslationResources = {
         stopFailed: "Impossible d’arrêter {{scriptName}}",
         running: "En cours",
         runningCount: "{{count}} en cours",
+      },
+    },
+    launches: {
+      title: "Lancements",
+      actions: {
+        switch: "Basculer",
+        start: "Démarrer",
+        stop: "Arrêter",
+        view: "Sortie",
+        openService: "Voir le service",
+      },
+      accessibility: {
+        switchLaunch: "Arrêter {{activeLaunchName}} et démarrer {{launchName}}",
+        trigger: "Lancements de l’espace de travail",
+        launch: "Lancement {{launchName}}",
+        startLaunch: "Démarrer {{launchName}}",
+        stopLaunch: "Arrêter {{launchName}}",
+        viewTerminal: "Voir le terminal de {{launchName}}",
+        openService: "Voir le service {{hostname}}",
+      },
+      states: {
+        running: "En cours",
+        stopped: "Arrêté",
+        stopping: "Arrêt en cours…",
+        noListeners: "Aucun port en écoute détecté pour le moment",
+        startFailed: "Échec du démarrage de {{launchName}}",
+        stopFailed: "Échec de l’arrêt de {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -869,6 +944,7 @@ export const fr: TranslationResources = {
         },
         viewPr: "Voir la PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "Créer une PR",
           pending: "Création de la PR…",
           success: "PR créée",
@@ -2373,6 +2449,7 @@ export const fr: TranslationResources = {
   },
   settings: {
     title: "Paramètres",
+    searchResults: "Résultats de recherche",
     loading: "Chargement des paramètres…",
     groups: {
       app: "Application",
@@ -2389,6 +2466,46 @@ export const fr: TranslationResources = {
     projectList: {
       hostLoadFailed: "Impossible de charger les projets depuis l’hôte {{hostName}} : {{message}}",
       editProject: "Modifier {{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Projets sur plusieurs hôtes",
+        linkProjects: "Associer des projets",
+        matches: "{{count}} correspondances vérifiées à examiner",
+        matches_one: "{{count}} correspondance vérifiée à examiner",
+        matches_other: "{{count}} correspondances vérifiées à examiner",
+        savedLinks: "Liens enregistrés sur cet appareil",
+        linkAction: "Associer des projets…",
+        manageAction: "Liens entre projets…",
+        hint: "Regroupez les copies du même dépôt Git dans la barre latérale.",
+      },
+      sheet: {
+        title: "Associer des projets entre hôtes",
+        deviceOnly:
+          "L’association regroupe les projets dans la barre latérale sur cet appareil. Les espaces de travail, les paramètres et les fichiers restent sur leurs hôtes.",
+        matchesTitle: "Correspondances vérifiées",
+        matchesDescription:
+          "Ces entrées ont le même dépôt distant Git et le même sous-répertoire de projet, mais restent séparées.",
+        linkedTitle: "Projets liés",
+        noMatchesTitle: "Aucun lien de projet à examiner",
+        noMatchesDescription:
+          "Ouvrez un espace de travail dans le même dépôt sur deux hôtes. Les projets correspondants qui sont encore séparés apparaissent ici.",
+        linkProjects: "Lier {{count}} projets",
+        remote: "Dépôt distant Git",
+        subdirectory: "Sous-répertoire du projet",
+        path: "Chemin",
+        needsReviewTitle: "À examiner",
+        needsReviewDescription:
+          "Les dernières informations Git ne confirment plus ce lien ; Paseo garde donc ces projets séparés.",
+        projectUnavailable: "Ce projet n'est pas disponible actuellement.",
+        saving: "Enregistrement du lien du projet…",
+        saveFailed: "Impossible d’enregistrer le lien du projet. Réessayez.",
+        unlink: "Délier",
+      },
+      toasts: {
+        linked: "Projets liés sur cet appareil",
+        unlinked: "Lien de projet supprimé",
+      },
     },
     groupInfo: "À propos de {{title}}",
     sections: {
@@ -2540,11 +2657,12 @@ export const fr: TranslationResources = {
         title: "Données du navigateur",
         siteData: "Cookies et données des sites",
         description:
-          "Les onglets du navigateur partagent les connexions et les données des sites dans Paseo.",
+          "Les onglets du navigateur partagent les connexions et les données des sites dans Paseo. Les hôtes avec « Utiliser le réseau de l’hôte pour les onglets du navigateur » activé conservent un profil distinct, et l’effacement supprime les deux.",
         clear: "Effacer les données du navigateur",
         clearing: "Effacement…",
         confirmTitle: "Effacer les données du navigateur ?",
-        confirmMessage: "Vous serez déconnecté des sites et les onglets ouverts seront rechargés.",
+        confirmMessage:
+          "Vous serez déconnecté des sites sur tous les profils et les onglets ouverts seront rechargés.",
         success: "Données du navigateur effacées.",
         error: "Impossible d’effacer les données du navigateur.",
       },
@@ -2791,6 +2909,8 @@ export const fr: TranslationResources = {
         closeCurrentTab: "Fermer l’onglet actuel",
         jumpToWorkspace: "Aller à l’espace de travail",
         jumpToTab: "Aller à l’onglet",
+        goBack: "Revenir en arrière",
+        goForward: "Avancer",
         previousWorkspace: "Espace de travail précédent",
         nextWorkspace: "Espace de travail suivant",
         previousTab: "Onglet précédent",
@@ -2912,6 +3032,7 @@ export const fr: TranslationResources = {
         removeErrorMessage: "Impossible de supprimer la connexion",
         timeout: "Délai dépassé",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Associer des appareils",
         rowTitle: "Associer un appareil",
@@ -3241,6 +3362,13 @@ export const fr: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "Détails du projet",
+        sourceDirectory: "Dossier source",
+        copySourceDirectory: "Copier le dossier source",
+        repository: "Dépôt",
+        openRepositoryFailed: "Impossible d’ouvrir le dépôt.",
+      },
       noEditableTarget: "Ce projet n’est pas modifiable sur cet hôte.",
       backToProjects: "Retour aux projets",
       edit: {
@@ -3303,6 +3431,28 @@ export const fr: TranslationResources = {
           edit: "Modifier",
           remove: "Supprimer",
         },
+      },
+      launches: {
+        title: "Lancements",
+        info: "Configurations de développement que vous pouvez démarrer depuis n’importe quel espace de travail de ce projet",
+        empty: "Aucun lancement pour le moment.",
+        untitled: "Lancement sans titre",
+        menuAccessibility: "Ouvrir le menu de lancement",
+        removeTitle: "Supprimer le lancement ?",
+        removeMessage: "Supprimer {{name}} ?",
+        removeFallbackName: "ce lancement",
+        name: "Nom",
+        command: "Commande",
+        nameAccessibility: "Nom du lancement",
+        commandAccessibility: "Commande du lancement",
+        nameRequired: "Le nom est requis",
+        nameDuplicate: "Chaque lancement doit avoir un nom unique",
+        commandRequired: "La commande est requise",
+        newLaunch: "Nouveau lancement",
+        editLaunch: "Modifier {{name}}",
+        commandHint:
+          "Paseo exécute cette commande avec le bloc de ports de l’espace de travail et le nom du projet Compose dans son environnement.",
+        actions: { add: "Ajouter un lancement", edit: "Modifier", remove: "Supprimer" },
       },
       metadata: {
         title: "Génération des métadonnées",

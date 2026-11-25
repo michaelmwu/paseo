@@ -59,6 +59,30 @@ export interface KeyboardShortcutHelpSection {
   rows: KeyboardShortcutHelpRow[];
 }
 
+/**
+ * Returns the translated labels and notes rendered by the shortcut settings page on every
+ * supported platform. Keeping this derived from the help-section builder prevents the settings
+ * index from drifting when a shortcut is added or moved.
+ */
+export function getKeyboardShortcutSearchText(translate: (key: string) => string): string {
+  const keys = new Set<string>();
+  for (const input of [
+    { isMac: true, usesDesktopBindings: true },
+    { isMac: true, usesDesktopBindings: false },
+    { isMac: false, usesDesktopBindings: true },
+    { isMac: false, usesDesktopBindings: false },
+  ]) {
+    for (const section of buildKeyboardShortcutHelpSections(input)) {
+      keys.add(section.titleKey);
+      for (const row of section.rows) {
+        keys.add(row.labelKey);
+        if (row.noteKey) keys.add(row.noteKey);
+      }
+    }
+  }
+  return Array.from(keys, translate).join(" ");
+}
+
 // --- Binding definition types ---
 
 interface KeyboardShortcutPlatformContext {
@@ -165,6 +189,8 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "new-agent",
     "new-workspace",
     "workspace-jump-index",
+    "workspace-history-back",
+    "workspace-history-forward",
     "workspace-prev",
     "workspace-next",
     "pin-workspace",
@@ -220,6 +246,8 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "workspace-tab-close-current": "settings.shortcuts.help.closeCurrentTab",
   "workspace-jump-index": "settings.shortcuts.help.jumpToWorkspace",
   "workspace-tab-jump-index": "settings.shortcuts.help.jumpToTab",
+  "workspace-history-back": "settings.shortcuts.help.goBack",
+  "workspace-history-forward": "settings.shortcuts.help.goForward",
   "workspace-prev": "settings.shortcuts.help.previousWorkspace",
   "workspace-next": "settings.shortcuts.help.nextWorkspace",
   "workspace-tab-prev": "settings.shortcuts.help.previousTab",
@@ -648,7 +676,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-cmd-left-mac",
     action: "workspace.navigate.relative",
-    combo: "Cmd+[",
+    combo: "",
     when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "delta", delta: -1 },
     help: {
@@ -660,7 +688,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-ctrl-left-non-mac",
     action: "workspace.navigate.relative",
-    combo: "Ctrl+[",
+    combo: "",
     when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     payload: { type: "delta", delta: -1 },
     help: {
@@ -672,7 +700,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-cmd-right-mac",
     action: "workspace.navigate.relative",
-    combo: "Cmd+]",
+    combo: "",
     when: { mac: true, desktopBindings: true, commandCenter: false },
     payload: { type: "delta", delta: 1 },
     help: {
@@ -684,7 +712,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-ctrl-right-non-mac",
     action: "workspace.navigate.relative",
-    combo: "Ctrl+]",
+    combo: "",
     when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
     payload: { type: "delta", delta: 1 },
     help: {
@@ -696,7 +724,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-alt-left-web",
     action: "workspace.navigate.relative",
-    combo: "Alt+[",
+    combo: "",
     when: { desktopBindings: false, commandCenter: false },
     payload: { type: "delta", delta: -1 },
     help: {
@@ -708,13 +736,81 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   {
     id: "workspace-navigate-relative-alt-right-web",
     action: "workspace.navigate.relative",
-    combo: "Alt+]",
+    combo: "",
     when: { desktopBindings: false, commandCenter: false },
     payload: { type: "delta", delta: 1 },
     help: {
       id: "workspace-next",
       section: "workspaces",
       label: "Next workspace",
+    },
+  },
+
+  // --- Workspace visit history ---
+  {
+    id: "workspace-history-back-cmd-mac",
+    action: "workspace.history.back",
+    combo: "Cmd+[",
+    when: { mac: true, desktopBindings: true, commandCenter: false },
+    help: {
+      id: "workspace-history-back",
+      section: "workspaces",
+      label: "Go back",
+    },
+  },
+  {
+    id: "workspace-history-back-ctrl-non-mac",
+    action: "workspace.history.back",
+    combo: "Ctrl+[",
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
+    help: {
+      id: "workspace-history-back",
+      section: "workspaces",
+      label: "Go back",
+    },
+  },
+  {
+    id: "workspace-history-forward-cmd-mac",
+    action: "workspace.history.forward",
+    combo: "Cmd+]",
+    when: { mac: true, desktopBindings: true, commandCenter: false },
+    help: {
+      id: "workspace-history-forward",
+      section: "workspaces",
+      label: "Go forward",
+    },
+  },
+  {
+    id: "workspace-history-forward-ctrl-non-mac",
+    action: "workspace.history.forward",
+    combo: "Ctrl+]",
+    when: { mac: false, desktopBindings: true, commandCenter: false, terminal: false },
+    help: {
+      id: "workspace-history-forward",
+      section: "workspaces",
+      label: "Go forward",
+    },
+  },
+  {
+    id: "workspace-history-back-alt-web",
+    action: "workspace.history.back",
+    combo: "Alt+[",
+    when: { desktopBindings: false, commandCenter: false },
+    help: {
+      id: "workspace-history-back",
+      section: "workspaces",
+      label: "Go back",
+    },
+  },
+  {
+    id: "workspace-history-forward-alt-web",
+    action: "workspace.history.forward",
+    combo: "Alt+]",
+    when: { desktopBindings: false, commandCenter: false },
+    help: {
+      id: "workspace-history-forward",
+      section: "workspaces",
+      label: "Go forward",
     },
   },
 

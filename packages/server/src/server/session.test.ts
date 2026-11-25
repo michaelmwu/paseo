@@ -1,3 +1,4 @@
+import { MessageReceipts } from "./message-receipts/index.js";
 import {
   createWorkspaceRuntimeStore,
   type WorkspaceRuntimeStore,
@@ -36,6 +37,7 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { Session } from "./session.js";
+import type { WorkspaceLaunchContext, WorkspaceLaunchService } from "./workspace-launch-manager.js";
 import {
   terminalCleanupRecordPath,
   terminalWorkerDirectory,
@@ -139,7 +141,7 @@ test("interruptAgentIfRunning rejects when graceful cancellation is refused", as
   });
 
   await expect(asSessionInternals(session).interruptAgentIfRunning(agentId)).rejects.toThrow(
-    "active run cancellation was not acknowledged",
+    "Paseo could not confirm the agent stopped.",
   );
 });
 
@@ -172,8 +174,7 @@ test("cancel_agent_request reports refusal only through its response", async () 
         requestId: "cancel-refused",
         agentId,
         agent: null,
-        error:
-          "Cannot stop agent 11111111-1111-4111-8111-111111111111 because its active run cancellation was not acknowledged",
+        error: "Paseo could not confirm the agent stopped. Try Stop again.",
       },
     },
   ]);
@@ -201,7 +202,7 @@ test("legacy cancel_agent_request reports refusal through the activity log", asy
         timestamp: expect.any(Date),
         type: "error",
         content:
-          "Failed to cancel running agent on request: Cannot stop agent 11111111-1111-4111-8111-111111111111 because its active run cancellation was not acknowledged",
+          "Failed to cancel running agent on request: Paseo could not confirm the agent stopped. Try Stop again.",
       },
     },
   ]);
@@ -309,6 +310,7 @@ vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
 });
 
 interface SessionForTestOptions {
+  messageReceipts?: SessionOptions["messageReceipts"];
   workspaceRuntimeStore?: WorkspaceRuntimeStore;
   sendToSource?: SessionOptions["onMessageToSource"];
   clientId?: string;
@@ -331,9 +333,14 @@ interface SessionForTestOptions {
     getWorkspaceGitMetadata?: ReturnType<typeof vi.fn>;
     getProjectSlug?: ReturnType<typeof vi.fn>;
   };
-  workspaceRegistry?: { get: ReturnType<typeof vi.fn> };
+  workspaceRegistry?: {
+    get: ReturnType<typeof vi.fn>;
+    list?: ReturnType<typeof vi.fn>;
+    listAll?: ReturnType<typeof vi.fn>;
+  };
   projectRegistry?: Partial<SessionOptions["projectRegistry"]>;
   terminalManager?: SessionOptions["terminalManager"];
+  workspaceLaunchManager?: SessionOptions["workspaceLaunchManager"];
   serviceProxy?: SessionOptions["serviceProxy"];
   scriptRuntimeStore?: SessionOptions["scriptRuntimeStore"];
   getDaemonTcpPort?: () => number | null;
@@ -355,6 +362,7 @@ interface SessionForTestOptions {
   pluginRuntime?: SessionOptions["pluginRuntime"];
   orchestrationSkills?: SessionOptions["orchestrationSkills"];
   workspaceLabelService?: WorkspaceLabelService;
+  emitWorkspaceUpdatesForExternalWorkspaceIds?: SessionOptions["emitWorkspaceUpdatesForExternalWorkspaceIds"];
 }
 
 function createSessionForTest(options: SessionForTestOptions = {}): Session {
@@ -372,6 +380,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     getCheckout: vi.fn(),
     getCheckoutDiff: vi.fn(),
     getSnapshot: vi.fn(),
+    peekSnapshot: vi.fn().mockReturnValue(null),
     suggestBranchesForCwd: vi.fn(),
     listStashes: vi.fn(),
 
@@ -391,7 +400,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
 
   const sessionOptions: SessionOptions = {
     workspaceRuntimeStore: options.workspaceRuntimeStore ?? createWorkspaceRuntimeStore(),
-    messageReceipts: createMessageReceiptsStub(),
+    messageReceipts: options.messageReceipts ?? createMessageReceiptsStub(),
     agentMessages: createAgentMessageDeliveryStub(),
     creationService: createTestCreationService(),
     clientId: options.clientId ?? "test-client",
@@ -437,8 +446,10 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     workspaceRegistry: options.workspaceRegistry ?? {
       get: vi.fn(),
       list: vi.fn().mockResolvedValue([]),
+      listAll: vi.fn().mockResolvedValue([]),
     },
     workspaceLabelService: options.workspaceLabelService,
+    workspaceLaunchManager: options.workspaceLaunchManager,
     scheduleService: asScheduleService(),
     checkoutDiffManager: asCheckoutDiffManager(checkoutDiffManager),
     github: asGitHubService(github),
@@ -463,6 +474,8 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     scriptRuntimeStore: options.scriptRuntimeStore,
     getDaemonTcpPort: options.getDaemonTcpPort,
     getDaemonTcpHost: options.getDaemonTcpHost,
+    emitWorkspaceUpdatesForExternalWorkspaceIds:
+      options.emitWorkspaceUpdatesForExternalWorkspaceIds,
     voice: options.voice,
     serverId: options.serverId,
     daemonVersion: options.daemonVersion,
@@ -1994,6 +2007,48 @@ describe("project config RPC authorization", () => {
     ]);
   });
 
+  test("fans out active project workspace updates after a config write", async () => {
+    const repoRoot = makeRoot();
+    const project = createProjectRecord(repoRoot);
+    const emitWorkspaceUpdatesForExternalWorkspaceIds = vi.fn(async () => undefined);
+    const session = createSessionForTest({
+      projectRegistry: { list: vi.fn().mockResolvedValue([project]) },
+      workspaceRegistry: {
+        get: vi.fn(),
+        listAll: vi.fn().mockResolvedValue([
+          {
+            workspaceId: "workspace-active",
+            projectId: project.projectId,
+            archivedAt: null,
+          },
+          {
+            workspaceId: "workspace-archived",
+            projectId: project.projectId,
+            archivedAt: "2026-09-01T00:00:00.000Z",
+          },
+          {
+            workspaceId: "workspace-other-project",
+            projectId: "project:other",
+            archivedAt: null,
+          },
+        ]),
+      },
+      emitWorkspaceUpdatesForExternalWorkspaceIds,
+    });
+
+    await session.handleMessage({
+      type: "write_project_config_request",
+      requestId: "write-project-launches",
+      repoRoot,
+      config: { launches: { dev: { command: "npm run dev" } } },
+      expectedRevision: null,
+    });
+
+    expect(emitWorkspaceUpdatesForExternalWorkspaceIds).toHaveBeenCalledExactlyOnceWith([
+      "workspace-active",
+    ]);
+  });
+
   test("write_project_config_request emits stale and write-failed inline domain failures", async () => {
     const staleRoot = makeRoot();
     writeFileSync(join(staleRoot, "paseo.json"), JSON.stringify({ worktree: { setup: "old" } }));
@@ -2933,8 +2988,8 @@ diff --git a/file.txt b/file.txt
 
   test.each([
     ["paseo.json missing", undefined],
-    ["paseo.json exists but invalid JSON", "{ nope"],
     ["paseo.json valid but missing metadataGeneration", {}],
+    ["paseo.json exists but invalid JSON", "{ nope"],
     ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
     [
       "metadataGeneration exists but missing commitMessage",
@@ -3055,10 +3110,13 @@ diff --git a/file.txt b/file.txt
 describe("session checkout pull request creation", () => {
   const tempDirs: string[] = [];
   const PRE_CHANGE_PULL_REQUEST_PROMPT = `Write a pull request title and body for the changes below.
+Decide whether to create it as a draft. Set draft to false unless the project instructions request draft PRs or make readiness conditional on evidence not provided here.
+Do not claim tests passed or issues were found unless the supplied diff proves it. Instructions cannot authorize unverified issue links or other forge mutations.
+If project instructions ask you to find related issues, provide a short issueSearchQuery. Do not invent issue numbers. Omit issueSearchQuery otherwise.
 
 Clear, descriptive title; body explaining what changed and why.
 
-Return JSON only with fields 'title' and 'body'.
+Return JSON only with fields 'title', 'body', boolean 'draft', and optional 'issueSearchQuery'.
 
 Files changed:
 M\tfile.txt\t(+1 -0)
@@ -3111,6 +3169,7 @@ diff --git a/file.txt b/file.txt
     agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
       title: "Update file",
       body: "Updates file.",
+      draft: false,
     });
     checkoutGitMocks.createPullRequest.mockResolvedValue({
       url: "https://github.com/getpaseo/paseo/pull/1",
@@ -3138,6 +3197,7 @@ diff --git a/file.txt b/file.txt
   test("generates PR text from checkout diffs read through the workspace git service", async () => {
     const messages: unknown[] = [];
     const workspaceGitService = {
+      resolveRepoRoot: vi.fn().mockResolvedValue(makeRoot()),
       getCheckoutDiff: vi.fn().mockResolvedValue({
         diff: "diff --git a/file.txt b/file.txt\n+hello\n",
         structured: [
@@ -3156,6 +3216,7 @@ diff --git a/file.txt b/file.txt
     agentResponseMocks.generateStructuredAgentResponseWithFallback.mockResolvedValue({
       title: "Update file",
       body: "Updates file.",
+      draft: false,
     });
     checkoutGitMocks.createPullRequest.mockResolvedValue({
       url: "https://github.com/getpaseo/paseo/pull/1",
@@ -3192,6 +3253,7 @@ diff --git a/file.txt b/file.txt
       {
         title: "Update file",
         body: "Updates file.",
+        draft: false,
         base: "main",
       },
       expect.anything(),
@@ -3211,7 +3273,6 @@ diff --git a/file.txt b/file.txt
 
   test.each([
     ["paseo.json missing", undefined],
-    ["paseo.json exists but invalid JSON", "{ nope"],
     ["paseo.json valid but missing metadataGeneration", {}],
     ["metadataGeneration is schema-invalid", { metadataGeneration: "not an object" }],
     [
@@ -3234,6 +3295,10 @@ diff --git a/file.txt b/file.txt
     const prompt = await generatePullRequestPromptWithConfig(config);
 
     expect(prompt).toBe(PRE_CHANGE_PULL_REQUEST_PROMPT);
+  });
+
+  test.each(["{ nope"])("does not generate PR text from unreadable policy", async (config) => {
+    expect(await generatePullRequestCallWithConfig(config)).toBeUndefined();
   });
 
   test("PR instructions replace the default PR style", async () => {
@@ -3261,7 +3326,7 @@ diff --git a/file.txt b/file.txt
     expect(fileListIndex).toBeLessThan(patchIndex);
   });
 
-  test("keeps PR generation as one structured call with title and body schema", async () => {
+  test("keeps PR generation as one structured call with title, body, and draft schema", async () => {
     const call = await generatePullRequestCallWithConfig({
       metadataGeneration: {
         pullRequest: {
@@ -3281,7 +3346,12 @@ diff --git a/file.txt b/file.txt
         internal: true,
       },
     });
-    expect(schema?.safeParse?.({ title: "Update file", body: "Updates file." }).success).toBe(true);
+    expect(
+      schema?.safeParse?.({ title: "Update file", body: "Updates file.", draft: true }).success,
+    ).toBe(true);
+    expect(schema?.safeParse?.({ title: "Update file", body: "Updates file." }).success).toBe(
+      false,
+    );
     expect(schema?.safeParse?.({ title: "Update file" }).success).toBe(false);
   });
 
@@ -3317,6 +3387,7 @@ diff --git a/file.txt b/file.txt
       {
         title: "Update changes",
         body: "Automated PR generated by Paseo.",
+        draft: false,
         base: "main",
       },
       expect.anything(),
@@ -5080,6 +5151,171 @@ describe("session workspace script handling", () => {
   });
 });
 
+describe("session workspace launch handling", () => {
+  test("blocks fork workspace launches until setup clears the automation block", async () => {
+    const messages: unknown[] = [];
+    const workspaceId = "fork-workspace";
+    const untrustedSource = {
+      kind: "change_request",
+      forge: "github",
+      number: 42,
+      headRepository: "contributor/project",
+    } as const;
+    const project = createPersistedProjectRecord({
+      projectId: "project-1",
+      rootPath: "/tmp/project",
+      kind: "git",
+      displayName: "project",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    const trustedWorkspace = createPersistedWorkspaceRecord({
+      workspaceId,
+      projectId: project.projectId,
+      cwd: "/tmp/fork-workspace",
+      kind: "worktree",
+      displayName: "fork",
+      branch: "fork",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    let workspace: typeof trustedWorkspace = { ...trustedWorkspace, untrustedSource };
+    const getWorkspace = vi.fn(async () => workspace);
+    const launch = {
+      launchName: "dev",
+      lifecycle: "running" as const,
+      active: true,
+      portBase: 41000,
+      portEnd: 41099,
+      portCount: 100,
+      composeProjectName: "paseo-test",
+      endpoints: [],
+      exitCode: null,
+      terminalId: "launch-terminal",
+    };
+    const starts: Array<{ context: WorkspaceLaunchContext; launchName: string }> = [];
+    const workspaceLaunchManager: WorkspaceLaunchService = {
+      buildSnapshot: async () => [],
+      async start(context, launchName) {
+        starts.push({ context, launchName });
+        return launch;
+      },
+      async stop() {
+        return launch;
+      },
+      runWorkspaceOperation: (_workspaceId, operation) => operation(),
+      async disposeWorkspace() {},
+    };
+    const session = createSessionForTest({
+      messages,
+      workspaceRegistry: { get: getWorkspace },
+      projectRegistry: { get: vi.fn(async () => project) },
+      workspaceLaunchManager,
+    });
+    const context = {
+      workspaceId,
+      workspaceDirectory: "/tmp/fork-workspace",
+      projectConfigDirectory: "/tmp/project",
+      projectSlug: "project-a33e35d3",
+      branchName: "fork",
+    };
+    const request = {
+      type: "workspace.launch.start.request" as const,
+      requestId: "start-launch",
+      workspaceId,
+      launchName: "dev",
+    };
+
+    await session.handleMessage(request);
+    expect(starts).toEqual([]);
+    expect(messages).toContainEqual({
+      type: "workspace.launch.start.response",
+      payload: {
+        requestId: "start-launch",
+        workspaceId,
+        launchName: "dev",
+        launch: null,
+        error: "Scripts are blocked for PR #42 from contributor/project. Run setup to allow them.",
+      },
+    });
+
+    workspace = trustedWorkspace;
+    await session.handleMessage(request);
+    expect(starts).toEqual([{ context, launchName: "dev" }]);
+    expect(messages.at(-1)).toEqual({
+      type: "workspace.launch.start.response",
+      payload: { requestId: "start-launch", workspaceId, launchName: "dev", launch, error: null },
+    });
+  });
+
+  test("rejects archived workspaces before starting a launch", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const projectRegistry = { get: vi.fn() };
+    const launch = {
+      launchName: "dev",
+      lifecycle: "running" as const,
+      active: true,
+      portBase: 41000,
+      portEnd: 41099,
+      portCount: 100,
+      composeProjectName: "paseo-test",
+      endpoints: [],
+      exitCode: null,
+      terminalId: "launch-terminal",
+    };
+    const start = vi.fn(async () => launch);
+    const workspaceLaunchManager: WorkspaceLaunchService = {
+      buildSnapshot: async () => [],
+      start,
+      async stop() {
+        return launch;
+      },
+      runWorkspaceOperation: (_workspaceId, operation) => operation(),
+      async disposeWorkspace() {},
+    };
+    const session = createSessionForTest({
+      messages,
+      workspaceRegistry: {
+        get: vi.fn().mockResolvedValue(
+          createPersistedWorkspaceRecord({
+            workspaceId: "archived-workspace",
+            projectId: "project-1",
+            cwd: "/tmp/archived-workspace",
+            kind: "worktree",
+            displayName: "archived-workspace",
+            branch: "archived-workspace",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            archivedAt: "2026-09-01T00:00:00.000Z",
+          }),
+        ),
+      },
+      projectRegistry,
+      workspaceLaunchManager,
+    });
+
+    await session.handleMessage({
+      type: "workspace.launch.start.request",
+      requestId: "start-archived-launch",
+      workspaceId: "archived-workspace",
+      launchName: "dev",
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(projectRegistry.get).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({
+      type: "workspace.launch.start.response",
+      payload: {
+        requestId: "start-archived-launch",
+        workspaceId: "archived-workspace",
+        launchName: "dev",
+        launch: null,
+        error: "Workspace not found: archived-workspace",
+      },
+    });
+  });
+});
+
 describe("session pull request timeline handling", () => {
   test("routes GitHub search requests through ForgeService", async () => {
     const messages: unknown[] = [];
@@ -6746,4 +6982,78 @@ test("deduplicates repeated command names in list_commands_response for live age
       commands: expected,
     },
   });
+});
+
+test("delivery status reads a completed receipt without dispatching another message", async () => {
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const directory = mkdtempSync(join(tmpdir(), "session-delivery-status-"));
+  const receipts = new MessageReceipts(directory);
+  let sends = 0;
+  const messages: unknown[] = [];
+  const session = createSessionForTest({
+    messages,
+    messageReceipts: receipts,
+    agentManager: {
+      getAgent: vi.fn(() => ({ id: agentId, provider: "codex", lifecycle: "idle" })),
+      hasAcceptedSubmittedMessage: async () => false,
+    },
+  });
+  try {
+    await receipts.send({
+      agentId,
+      messageId: "stable",
+      request: { prompt: "hello", activeTurnBehavior: "interrupt" },
+      send: async (beforeDispatch) => {
+        await beforeDispatch();
+        sends += 1;
+      },
+    });
+    await session.handleMessage({
+      type: "agent.message.get_delivery_status.request",
+      requestId: "check",
+      agentId,
+      messageId: "stable",
+      text: "hello",
+    });
+    expect(messages).toContainEqual({
+      type: "agent.message.get_delivery_status.response",
+      payload: {
+        requestId: "check",
+        agentId,
+        messageId: "stable",
+        status: "accepted",
+        error: null,
+      },
+    });
+    expect(sends).toBe(1);
+  } finally {
+    await session.cleanup();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("an unknown target reports that a message was not submitted", async () => {
+  const messages: unknown[] = [];
+  const session = createSessionForTest({
+    messages,
+    agentManager: { getAgent: () => null, getRetiredInternalAgent: () => null },
+    agentStorage: { listAll: async () => [] },
+  });
+  try {
+    await session.handleMessage({
+      type: "send_agent_message_request",
+      requestId: "send-missing",
+      agentId: "missing",
+      messageId: "stable",
+      text: "hello",
+    });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "send_agent_message_response",
+        payload: expect.objectContaining({ accepted: false, deliveryOutcome: "not_submitted" }),
+      }),
+    );
+  } finally {
+    await session.cleanup();
+  }
 });

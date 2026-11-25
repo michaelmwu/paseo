@@ -91,6 +91,8 @@ export type {
   PluginComposerFocusOptions,
   PluginComposerItemContribution,
   PluginComposerItemProps,
+  PluginComposerSectionProps,
+  PluginComposerSectionContribution,
   PluginComposerSelector,
 } from "./composer.js";
 export { useNewWorkspace } from "./new-workspace.js";
@@ -100,6 +102,11 @@ export type {
   PluginNewWorkspaceItemProps,
 } from "./new-workspace.js";
 export { useRpc, useSubscription, type PluginSubscriptionState } from "./rpc-context.js";
+export {
+  usePluginFileTransfer,
+  type PluginFileTransfer,
+  type PluginPickedFile,
+} from "./file-transfer.js";
 export type {
   PluginSubscribeOptions,
   PluginSubscriptionClosed,

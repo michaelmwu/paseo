@@ -5,6 +5,8 @@ import { connectSeedClient, seedWorkspace } from "../support/helpers/seed-client
 import {
   blockPaseoConfigWrites,
   bumpPaseoConfigOnDisk,
+  cancelNewProjectLaunch,
+  cancelProjectLaunchEdit,
   chooseProjectIconImage,
   clickReloadProjectSettings,
   clickRetryProjectSettingsSave,
@@ -21,6 +23,7 @@ import {
   expectProjectEditName,
   expectProjectEditSaved,
   expectProjectEditsSaveDisabled,
+  expectProjectLaunchesSaved,
   expectProjectSettingsError,
   expectProjectSettingsFormHidden,
   expectProjectSettingsFormVisible,
@@ -58,6 +61,9 @@ import {
   buildSettingsRoute,
 } from "@/utils/host-routes";
 import { getServerId } from "../support/helpers/server-id";
+import { TEST_HOST_LABEL } from "../support/helpers/daemon-registry";
+import { installLocalDesktopHost } from "../support/helpers/local-desktop-host";
+import type { OpenDesktopTargetInput } from "@/workspace/desktop-open-targets";
 
 const updatedSetup = ["npm install", "npm run build"];
 
@@ -89,6 +95,11 @@ const initialPaseoConfig = {
       type: "server",
       port: 3000,
       customScriptField: "preserved",
+    },
+  },
+  launches: {
+    dev: {
+      command: "./bin/dev",
     },
   },
   customTopLevelField: "preserved",
@@ -165,6 +176,42 @@ async function readProjectConfigFile(project: ProjectsSettingsProject): Promise<
   return readFile(path.join(project.path, "paseo.json"), "utf8");
 }
 
+function blockClipboardWrites(): void {
+  navigator.clipboard.writeText = () =>
+    Promise.reject(new DOMException("Denied", "NotAllowedError"));
+  // Expo falls back to the legacy copy command when the Clipboard API is denied.
+  document.execCommand = () => {
+    throw new DOMException("Denied", "NotAllowedError");
+  };
+}
+
+async function installFinderTarget(
+  page: Page,
+  open: (input: OpenDesktopTargetInput) => void,
+): Promise<void> {
+  await page.exposeFunction("openTestFinderTarget", open);
+  await page.evaluate(() => {
+    const desktop = window.paseoDesktop;
+    if (!desktop) throw new Error("Test desktop bridge is missing");
+    const openTarget = (
+      window as typeof window & {
+        openTestFinderTarget: (input: OpenDesktopTargetInput) => Promise<void>;
+      }
+    ).openTestFinderTarget;
+    desktop.editor = {
+      listTargets: async () => [
+        {
+          id: "finder",
+          label: "Finder",
+          kind: "file-manager",
+          icon: { kind: "symbol", name: "folder" },
+        },
+      ],
+      openTarget,
+    };
+  });
+}
+
 async function addProjectFromSidebar(page: Page, projectPath: string): Promise<string> {
   await openAddProjectFlow(page);
   await chooseAddProjectMethod(page, "directory-search");
@@ -195,14 +242,68 @@ async function openProjectSettingsFromSidebar(page: Page, projectId: string): Pr
 
   const openSettingsItem = page.getByTestId(`sidebar-project-menu-open-settings-${projectId}`);
   await expect(openSettingsItem).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId(`sidebar-project-menu-project-links-${projectId}`)).toHaveCount(0);
   await openSettingsItem.click();
 }
 
 test.describe("Projects settings", () => {
+  test("opens the source directory in Finder on the local desktop", async ({
+    page,
+    editableProject,
+  }) => {
+    const opened: OpenDesktopTargetInput[] = [];
+    let failOpen = false;
+    await installLocalDesktopHost(page, editableProject.path);
+    await openProjects(page);
+    await installFinderTarget(page, (target) => {
+      if (failOpen) throw new Error("Unable to open directory");
+      opened.push(target);
+    });
+    await openProjectSettings(page, editableProject.name);
+
+    const details = page.getByTestId("project-details-section");
+    const worktreeHeading = page.getByText("Worktree lifecycle hooks", { exact: true });
+    const groupFontSize = await worktreeHeading.evaluate((heading) => {
+      return getComputedStyle(heading).fontSize;
+    });
+    await expect(details.getByText("Project details", { exact: true })).toHaveCSS(
+      "font-size",
+      groupFontSize,
+    );
+
+    const open = details.getByRole("button", { name: "Open in Finder" });
+    await open.click();
+    await expect
+      .poll(() => opened)
+      .toEqual([{ editorId: "finder", workspacePath: editableProject.path }]);
+
+    failOpen = true;
+    await open.click();
+    await expect(page.getByText("Couldn't open folder", { exact: true })).toBeVisible();
+  });
+
+  test("keeps only the copy action for a project on another host", async ({
+    page,
+    editableProject,
+  }) => {
+    await installLocalDesktopHost(page, editableProject.path, "srv_other_desktop");
+    await openProjects(page);
+    await installFinderTarget(page, () => {
+      throw new Error("Should not open a path from a remote host");
+    });
+    await openProjectSettings(page, editableProject.name);
+
+    const details = page.getByTestId("project-details-section");
+    await expect(details.getByRole("button", { name: "Copy source directory" })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Open in Finder" })).toHaveCount(0);
+  });
+
   test("freshly-added project with no workspace is editable from the sidebar without a reload", async ({
     page,
   }) => {
-    const repo = await createTempGitRepo("projects-settings-empty-");
+    const repo = await createTempGitRepo("projects-settings-empty-", {
+      originUrl: "https://gitlab.com/acme/empty-project.git",
+    });
     const client = await connectSeedClient();
     let projectViewKey: string | null = null;
 
@@ -213,7 +314,28 @@ test.describe("Projects settings", () => {
       await openProjectSettingsFromSidebar(page, projectViewKey);
 
       await expectProjectSettingsFormVisible(page);
+      const details = page.getByTestId("project-details-section");
+      await expect(details.getByText(repo.path, { exact: true })).toBeVisible();
+      await expect(details.getByRole("link", { name: "Repository" })).toBeVisible();
       await expect(page.getByTestId("project-settings-back-button")).not.toBeVisible();
+      const linksGroup = page.getByTestId("project-links-group");
+      await expect(linksGroup.getByText("Projects across hosts", { exact: true })).toBeVisible();
+      expect(
+        await page
+          .getByRole("main")
+          .locator(
+            '[data-testid="scripts-group"], [data-testid="project-links-group"], [data-testid="metadata-group"], [data-testid="save-button"]',
+          )
+          .evaluateAll((elements) => {
+            const ids = [];
+            for (const element of elements) ids.push(element.getAttribute("data-testid"));
+            return ids;
+          }),
+      ).toEqual(["scripts-group", "project-links-group", "metadata-group", "save-button"]);
+      await linksGroup.getByRole("button", { name: "Link projects", exact: true }).click();
+      await expect(page.getByTestId("project-links-no-matches")).toBeVisible();
+      await page.getByTestId("project-links-close").click();
+      await expectProjectSettingsFormVisible(page);
     } finally {
       if (projectViewKey) {
         const project = (await client.listProjects()).projects.find(
@@ -236,6 +358,10 @@ test.describe("Projects settings", () => {
   }) => {
     await openProjects(page);
     await openProjectSettings(page, editableProject.name);
+    const details = page.getByTestId("project-details-section");
+    await expect(details.getByText(TEST_HOST_LABEL, { exact: true })).toBeVisible();
+    await expect(details.getByText(editableProject.path, { exact: true })).toBeVisible();
+    await expect(details.getByRole("link", { name: "Repository" })).toHaveCount(0);
     await expectNoUncommittedSetupWarning(page);
     await editWorktreeSetup(page, updatedSetup);
     await clickSaveProjectSettings(page);
@@ -264,16 +390,55 @@ test.describe("Projects settings", () => {
     });
   });
 
-  test("user edits worktree setup on a non-GitHub remote project", async ({
+  test("canceling launch edits discards them before a later project save", async ({
     page,
+    editableProject,
+  }) => {
+    await openProjects(page);
+    await openProjectSettings(page, editableProject.name);
+    await cancelProjectLaunchEdit(page, {
+      launchName: "dev",
+      nextName: "renamed",
+      nextCommand: "./bin/renamed",
+      originalCommand: "./bin/dev",
+    });
+    await cancelNewProjectLaunch(page, "partial");
+    await editWorktreeSetup(page, updatedSetup);
+    await clickSaveProjectSettings(page);
+    await expectProjectLaunchesSaved(editableProject.path, initialPaseoConfig.launches);
+  });
+
+  test("opens the GitLab repository, copies the source directory, and edits worktree setup", async ({
+    page,
+    context,
     gitlabRemoteProject,
   }) => {
     expect(gitlabRemoteProject.name).toBe(path.basename(gitlabRemoteProject.path));
     await openProjects(page);
     await openProjectSettings(page, gitlabRemoteProject.name);
+
+    const details = page.getByTestId("project-details-section");
+    const repositoryUrl = "https://gitlab.com/acme/app";
+    await expect(details.getByText(repositoryUrl, { exact: true })).toBeVisible();
+    await context.route(repositoryUrl, (route) => route.fulfill({ body: "GitLab repository" }));
+    const popupPromise = page.waitForEvent("popup");
+    await details.getByRole("link", { name: "Repository" }).click();
+    const popup = await popupPromise;
+    await expect(popup).toHaveURL(repositoryUrl);
+    await popup.close();
+
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await details.getByRole("button", { name: "Copy source directory" }).click();
+    const readClipboard = () => page.evaluate(() => navigator.clipboard.readText());
+    await expect.poll(readClipboard).toBe(gitlabRemoteProject.path);
+
     await editWorktreeSetup(page, updatedSetup);
     await clickSaveProjectSettings(page);
     await expectProjectConfigSaved(gitlabRemoteProject);
+
+    await page.evaluate(blockClipboardWrites);
+    await details.getByRole("button", { name: "Copy source directory" }).click();
+    await expect(page.getByText("Unable to copy", { exact: true })).toBeVisible();
   });
 
   test("renames a project, reopens the saved edit sheet, and adds an icon", async ({
@@ -347,6 +512,9 @@ test.describe("Projects settings — compact navigation", () => {
     await expect(page).toHaveURL(buildProjectsSettingsRoute(getServerId()));
 
     await openProjectSettings(page, editableProject.name);
+    const details = page.getByTestId("project-details-section");
+    await expect(details.getByText(editableProject.path, { exact: true })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Copy source directory" })).toBeInViewport();
     await expect(page.getByRole("button", { name: "Back", exact: true })).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Back to projects", exact: true })).toHaveCount(
       0,
@@ -394,6 +562,7 @@ test.describe("Projects settings — error UX", () => {
 
     await expectProjectSettingsError(page, "invalid");
     await expectProjectSettingsFormHidden(page);
+    await expect(page.getByRole("button", { name: "Link projects", exact: true })).toBeVisible();
 
     // Restore a valid config so the reload succeeds.
     await restorePaseoConfig(editableProject.path, initialPaseoConfig);

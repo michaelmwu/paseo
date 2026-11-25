@@ -87,6 +87,16 @@ export interface TerminalActivityTransition {
   previous: TerminalActivity | null;
 }
 
+export interface WorkspacePortBlockTerminalMetadata {
+  portBase: number;
+  portCount: number;
+}
+
+export interface WorkspaceLaunchTerminalMetadata extends WorkspacePortBlockTerminalMetadata {
+  launchName: string;
+  command: string;
+}
+
 export interface TerminalSession {
   /** Absent on terminal workers started before creation timestamps were tracked. */
   createdAt?: string;
@@ -94,6 +104,9 @@ export interface TerminalSession {
   name: string;
   cwd: string;
   workspaceId: string;
+  readonly workspaceLaunch?: WorkspaceLaunchTerminalMetadata;
+  readonly workspacePortBlock?: WorkspacePortBlockTerminalMetadata;
+  readonly workspaceScriptName?: string;
   send(msg: ClientMessage): void;
   subscribe(listener: (msg: ServerMessage) => void): () => void;
   onExit(listener: (info: TerminalExitInfo) => void): () => void;
@@ -144,6 +157,10 @@ export interface CreateTerminalOptions {
   id?: string;
   cwd: string;
   workspaceId: string;
+  workspaceLaunch?: WorkspaceLaunchTerminalMetadata;
+  workspacePortBlock?: WorkspacePortBlockTerminalMetadata;
+  workspaceScriptName?: string;
+  retainOnExit?: boolean;
   shell?: string;
   env?: Record<string, string>;
   activityEnv?: Record<string, string>;
@@ -1007,8 +1024,9 @@ export async function createTerminal(
     exitListeners.clear();
   }
 
-  function disposeResources(): void {
+  function disposeResources(preserveTerminal = false): void {
     if (disposed) {
+      if (!preserveTerminal) terminal.dispose();
       return;
     }
     disposed = true;
@@ -1025,7 +1043,7 @@ export async function createTerminal(
     disposeTitleChangeSubscription();
     disposeCommandLifecycleSubscription.dispose();
     activityTracker.dispose();
-    terminal.dispose();
+    if (!preserveTerminal) terminal.dispose();
     listeners.clear();
     exitListeners.clear();
     commandFinishedListeners.clear();
@@ -1090,7 +1108,9 @@ export async function createTerminal(
         signal: event.signal,
       }),
     );
-    disposeResources();
+    // Retained sessions still serve captures after process exit. Explicit kill
+    // disposes their emulator once the owner releases the retained session.
+    disposeResources(options.retainOnExit === true);
   });
 
   async function waitForPtyProcessStart(): Promise<void> {
@@ -1385,6 +1405,9 @@ export async function createTerminal(
     name,
     cwd,
     workspaceId,
+    workspaceLaunch: options.workspaceLaunch,
+    workspacePortBlock: options.workspacePortBlock,
+    workspaceScriptName: options.workspaceScriptName,
     send,
     subscribe,
     onExit,

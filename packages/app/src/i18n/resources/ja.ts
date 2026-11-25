@@ -2,6 +2,25 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "ブラウザー",
+    permissionDenied:
+      "この接続にはホストのネットワークを使用する権限がありません。ホストの所有者にネットワークへのアクセスを許可してもらってください。",
+    title: "ブラウザータブでホストのネットワークを使用",
+    description:
+      "このホストのタブはホストのネットワークと、Cookie が分離された専用プロファイルを使用します。",
+    updateHost: "ブラウザータブでネットワークを使用するには、このホストを更新してください。",
+    settingFailed: "この設定を保存または読み込めませんでした。もう一度お試しください。",
+    viaHost: "{{host}} 経由",
+    proxyUnavailable:
+      "ホスト {{host}} のネットワークへのブラウザー接続を利用できません。ホストに再接続して再読み込みしてください。",
+    destinationFailed:
+      "ホスト {{host}} のネットワーク経由でこのアドレスに接続できませんでした。アドレスとホストの接続を確認してください。",
+    connectionClosed:
+      "ホスト {{host}} のネットワーク経由の接続が切断されました。ホストに再接続して再読み込みしてください。",
+    notReady:
+      "ホスト {{host}} のネットワークを準備できませんでした。タブをもう一度開いてください。",
+  },
   pluginCombobox: {
     searching: "検索中…",
     empty: "結果がありません",
@@ -132,6 +151,20 @@ export const ja: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "メッセージを探す",
+    outbox: {
+      pending: "この端末に保存済みです。ホストまたはエージェントの準備を待っています。",
+      sending: "送信中…",
+      needsReview: "配信は未確認です。操作する前に状態を確認してください。",
+      retry: "送信を再試行",
+      discard: "保存したメッセージを破棄",
+      attachmentMessage: "添付ファイル付きメッセージ",
+
+      failed: "未配信です。このメッセージを再試行できます。",
+      inFlight: "ホストが処理中です。自動確認しています…",
+      checking: "配信を確認中…",
+      check: "配信状態を確認",
+    },
     placeholders: {
       desktop: "エージェントにメッセージ、@ファイル、/コマンドや/スキルを入力",
       mobile: "メッセージ、@ファイル、/コマンド",
@@ -194,8 +227,14 @@ export const ja: TranslationResources = {
       removeReview: "レビュー添付ファイルを削除",
     },
     errors: {
+      messageLookupFailed:
+        "会話を更新できませんでした。配信はまだ確認できていません。再接続してメッセージをもう一度探してください。",
+      messageNotFound:
+        "利用可能な履歴でこのメッセージを見つけられませんでした。配信はまだ確認できていません。",
       failedToSend: "メッセージの送信に失敗しました",
       failedToCreateAgent: "エージェントの作成に失敗しました",
+      creationOutcomeUnknown:
+        "前の起動処理がまだ実行中の可能性があります。もう一度起動する前に、ワークスペースとエージェントを確認してください。",
       noHostSelected: "ホストが選択されていません",
       initialPromptRequired: "初期プロンプトが必要です",
       alreadyLoading: "すでに読み込み中です",
@@ -270,6 +309,11 @@ export const ja: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "ターン中の変更を確認するにはホストを更新してください。",
+      viewChanges: "このターン中の変更",
+      backToConversation: "会話に戻る",
+    },
     states: {
       notFound: "エージェントが見つかりません",
       failedToLoad: "エージェントの読み込みに失敗しました",
@@ -401,6 +445,9 @@ export const ja: TranslationResources = {
     question: {
       responseFailed: "回答を送信できませんでした。もう一度お試しください。",
       submit: "送信",
+      sendToChat: "チャットに送信",
+      chatDeliveryWarning:
+        "回答はチャットに表示されます。パスワードや秘密情報を入力しないでください。",
       next: "次へ",
       answerPlaceholder: "回答を入力...",
       otherPlaceholder: "その他...",
@@ -811,7 +858,7 @@ export const ja: TranslationResources = {
         view: "ターミナルを表示",
       },
       accessibility: {
-        trigger: "ワークスペーススクリプト",
+        trigger: "ワークスペースのコマンドを実行",
         openService: "{{scriptName}}サービスを表示",
         viewTerminal: "{{scriptName}}ターミナルを表示",
         runScript: "{{scriptName}}スクリプトを実行",
@@ -832,6 +879,34 @@ export const ja: TranslationResources = {
         stopFailed: "{{scriptName}}の停止に失敗しました",
         running: "実行中",
         runningCount: "{{count}} 件実行中",
+      },
+    },
+    launches: {
+      title: "起動",
+      actions: {
+        switch: "切り替え",
+        start: "起動",
+        stop: "停止",
+        view: "出力",
+        openService: "サービスを表示",
+      },
+      accessibility: {
+        switchLaunch: "{{activeLaunchName}} を停止して {{launchName}} を起動",
+        trigger: "ワークスペースの起動",
+        launch: "{{launchName}} 起動",
+        startLaunch: "{{launchName}} を起動",
+        stopLaunch: "{{launchName}} を停止",
+        viewTerminal: "{{launchName}} のターミナルを表示",
+        openService: "{{hostname}} サービスを表示",
+      },
+      states: {
+        running: "実行中",
+        stopped: "停止中",
+        stopping: "停止しています…",
+        noListeners: "待ち受けポートはまだ検出されていません",
+        startFailed: "{{launchName}} の起動に失敗しました",
+        stopFailed: "{{launchName}} の停止に失敗しました",
+        portRange: "ポート {{base}}–{{end}}",
       },
     },
     tree: {
@@ -864,6 +939,7 @@ export const ja: TranslationResources = {
         },
         viewPr: "PRを表示",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "PRを作成",
           pending: "PRを作成中...",
           success: "PRが作成されました",
@@ -2347,6 +2423,7 @@ export const ja: TranslationResources = {
   },
   settings: {
     title: "設定",
+    searchResults: "検索結果",
     loading: "設定を読み込み中...",
     groups: {
       app: "アプリ",
@@ -2363,6 +2440,46 @@ export const ja: TranslationResources = {
     projectList: {
       hostLoadFailed: "ホスト{{hostName}}からプロジェクトを読み込めませんでした: {{message}}",
       editProject: "{{projectName}}を編集",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "ホスト間のプロジェクト",
+        linkProjects: "プロジェクトをリンク",
+        matches: "確認済みの候補 {{count}} 件",
+        matches_one: "確認済みの候補 {{count}} 件",
+        matches_other: "確認済みの候補 {{count}} 件",
+        savedLinks: "このデバイスに保存済みのリンク",
+        linkAction: "プロジェクトをリンク…",
+        manageAction: "プロジェクトのリンク…",
+        hint: "同じ Git リポジトリのコピーをサイドバーでまとめます。",
+      },
+      sheet: {
+        title: "ホスト間でプロジェクトをリンク",
+        deviceOnly:
+          "リンクすると、このデバイスのサイドバーでプロジェクトがまとまります。ワークスペース、設定、ファイルは各ホストに残ります。",
+        matchesTitle: "確認済みの一致",
+        matchesDescription:
+          "これらのエントリは同じ Git リモートとプロジェクトサブディレクトリを持ちますが、まだ別々です。",
+        linkedTitle: "リンク済みプロジェクト",
+        noMatchesTitle: "確認するプロジェクトリンクはありません",
+        noMatchesDescription:
+          "2 台のホストで同じリポジトリのワークスペースを開きます。一致していて、まだ別々に表示されているプロジェクトがここに表示されます。",
+        linkProjects: "{{count}} 個のプロジェクトをリンク",
+        remote: "Git リモート",
+        subdirectory: "プロジェクトサブディレクトリ",
+        path: "パス",
+        needsReviewTitle: "確認が必要",
+        needsReviewDescription:
+          "最新の Git 情報ではこのリンクを確認できないため、Paseo はこれらのプロジェクトを別々に保持します。",
+        projectUnavailable: "このプロジェクトは現在利用できません。",
+        saving: "プロジェクトリンクを保存しています…",
+        saveFailed: "プロジェクトリンクを保存できませんでした。もう一度お試しください。",
+        unlink: "リンクを解除",
+      },
+      toasts: {
+        linked: "このデバイスでプロジェクトをリンクしました",
+        unlinked: "プロジェクトリンクを削除しました",
+      },
     },
     groupInfo: "{{title}}について",
     sections: {
@@ -2513,11 +2630,13 @@ export const ja: TranslationResources = {
       browserData: {
         title: "ブラウザーデータ",
         siteData: "Cookie とサイトデータ",
-        description: "ブラウザータブ間でログイン情報とサイトデータが共有されます。",
+        description:
+          "ブラウザータブ間でログイン情報とサイトデータが共有されます。「ブラウザータブでホストのネットワークを使用」がオンのホストは別のプロファイルを持ち、消去すると両方が削除されます。",
         clear: "ブラウザーデータを消去",
         clearing: "消去中...",
         confirmTitle: "ブラウザーデータを消去しますか？",
-        confirmMessage: "サイトからログアウトし、開いているブラウザータブを再読み込みします。",
+        confirmMessage:
+          "すべてのプロファイルでサイトからログアウトし、開いているブラウザータブを再読み込みします。",
         success: "ブラウザーデータを消去しました。",
         error: "ブラウザーデータを消去できませんでした。",
       },
@@ -2757,6 +2876,8 @@ export const ja: TranslationResources = {
         closeCurrentTab: "現在のタブを閉じる",
         jumpToWorkspace: "ワークスペースにジャンプ",
         jumpToTab: "タブにジャンプ",
+        goBack: "戻る",
+        goForward: "進む",
         previousWorkspace: "前のワークスペース",
         nextWorkspace: "次のワークスペース",
         previousTab: "前のタブ",
@@ -2878,6 +2999,7 @@ export const ja: TranslationResources = {
         removeErrorMessage: "接続を削除できません",
         timeout: "タイムアウト",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "デバイスをペアリング",
         rowTitle: "デバイスをペアリング",
@@ -3203,6 +3325,13 @@ export const ja: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "プロジェクトの詳細",
+        sourceDirectory: "ソースディレクトリ",
+        copySourceDirectory: "ソースディレクトリをコピー",
+        repository: "リポジトリ",
+        openRepositoryFailed: "リポジトリを開けませんでした。",
+      },
       noEditableTarget: "このホストではこのプロジェクトを編集できません。",
       backToProjects: "プロジェクトに戻る",
       edit: {
@@ -3265,6 +3394,28 @@ export const ja: TranslationResources = {
           edit: "編集",
           remove: "削除",
         },
+      },
+      launches: {
+        title: "起動",
+        info: "このプロジェクトの任意のワークスペースから開始できる開発構成",
+        empty: "起動構成がまだありません。",
+        untitled: "無題の起動",
+        menuAccessibility: "起動メニューを開く",
+        removeTitle: "起動を削除しますか？",
+        removeMessage: "{{name}}を削除しますか？",
+        removeFallbackName: "この起動",
+        name: "名前",
+        command: "コマンド",
+        nameAccessibility: "起動名",
+        commandAccessibility: "起動コマンド",
+        nameRequired: "名前は必須です",
+        nameDuplicate: "各起動には一意の名前が必要です",
+        commandRequired: "コマンドは必須です",
+        newLaunch: "新しい起動",
+        editLaunch: "{{name}}を編集",
+        commandHint:
+          "Paseoは、ワークスペースのポートブロックとComposeプロジェクト名を環境変数としてこのコマンドを実行します。",
+        actions: { add: "起動を追加", edit: "編集", remove: "削除" },
       },
       metadata: {
         title: "メタデータ生成",

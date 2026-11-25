@@ -2,6 +2,23 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "المتصفح",
+    permissionDenied:
+      "ليس لهذا الاتصال إذن لاستخدام شبكة المضيف. اطلب من مالك المضيف السماح بالوصول إلى الشبكة.",
+    title: "استخدام شبكة المضيف لعلامات تبويب المتصفح",
+    description:
+      "تستخدم علامات تبويب هذا المضيف شبكته وملف تعريف منفصلًا بملفات تعريف ارتباط خاصة بها.",
+    updateHost: "حدّث هذا المضيف لاستخدام شبكته في علامات تبويب المتصفح.",
+    settingFailed: "تعذّر حفظ هذا الإعداد أو تحميله. حاول مرة أخرى.",
+    viaHost: "عبر {{host}}",
+    proxyUnavailable:
+      "اتصال المتصفح بشبكة المضيف {{host}} غير متاح. أعد الاتصال بالمضيف وأعد التحميل.",
+    destinationFailed:
+      "تعذّر الوصول إلى هذا العنوان عبر شبكة المضيف {{host}}. تحقق من العنوان واتصال المضيف.",
+    connectionClosed: "أُغلق الاتصال عبر شبكة المضيف {{host}}. أعد الاتصال بالمضيف وأعد التحميل.",
+    notReady: "تعذّر على المتصفح تجهيز شبكة المضيف {{host}}. حاول فتح علامة التبويب مرة أخرى.",
+  },
   pluginCombobox: {
     searching: "جارٍ البحث…",
     empty: "لا توجد نتائج",
@@ -131,6 +148,20 @@ export const ar: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "البحث عن الرسالة",
+    outbox: {
+      pending: "تم الحفظ على هذا الجهاز. بانتظار جاهزية المضيف أو الوكيل.",
+      sending: "جارٍ الإرسال…",
+      needsReview: "لم يتم تأكيد التسليم. تحقق من الحالة قبل أي إجراء آخر.",
+      retry: "إعادة محاولة الإرسال",
+      discard: "حذف الرسالة المحفوظة",
+      attachmentMessage: "رسالة مع مرفقات",
+
+      failed: "لم يتم التسليم. أعد إرسال هذه الرسالة المحفوظة.",
+      inFlight: "لا يزال المضيف يعالج الرسالة. جارٍ التحقق تلقائيًا…",
+      checking: "جارٍ التحقق من التسليم…",
+      check: "التحقق من حالة التسليم",
+    },
     placeholders: {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
@@ -193,8 +224,13 @@ export const ar: TranslationResources = {
       removeReview: "إزالة مرفق المراجعة",
     },
     errors: {
+      messageLookupFailed:
+        "تعذر تحديث المحادثة. لا يزال التسليم غير مؤكد. أعد الاتصال وحاول البحث عن الرسالة مرة أخرى.",
+      messageNotFound: "تعذر العثور على هذه الرسالة في السجل المتاح. لا يزال التسليم غير مؤكد.",
       failedToSend: "فشل في إرسال الرسالة",
       failedToCreateAgent: "فشل في إنشاء الوكيل",
+      creationOutcomeUnknown:
+        "قد تكون عملية البدء السابقة لا تزال جارية. تحقق من مساحات العمل والوكلاء قبل بدء عملية أخرى.",
       noHostSelected: "لم يتم تحديد مضيف",
       initialPromptRequired: "مطلوب موجه الأولي",
       alreadyLoading: "جارٍ التحميل بالفعل",
@@ -268,6 +304,11 @@ export const ar: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "حدّث المضيف لمراجعة التغييرات خلال الجولة.",
+      viewChanges: "التغييرات خلال هذا الدور",
+      backToConversation: "العودة إلى المحادثة",
+    },
     states: {
       notFound: "لم يتم العثور على Agent",
       failedToLoad: "فشل تحميل الوكيل",
@@ -395,6 +436,8 @@ export const ar: TranslationResources = {
     },
     question: {
       responseFailed: "تعذر إرسال ردك. حاول مرة أخرى.",
+      sendToChat: "إرسال إلى الدردشة",
+      chatDeliveryWarning: "ستظهر إجابتك في الدردشة. لا تُدخل كلمات مرور أو معلومات سرية.",
       submit: "يُقدِّم",
       next: "التالي",
       answerPlaceholder: "اكتب إجابتك...",
@@ -807,7 +850,7 @@ export const ar: TranslationResources = {
         view: "عرض الوحدة الطرفية",
       },
       accessibility: {
-        trigger: "البرامج النصية Workspace",
+        trigger: "تشغيل أوامر مساحة العمل",
         openService: "عرض خدمة {{scriptName}}",
         viewTerminal: "عرض محطة{{scriptName}}",
         runScript: "قم بتشغيل البرنامج النصي{{scriptName}}",
@@ -828,6 +871,34 @@ export const ar: TranslationResources = {
         stopFailed: "فشل إيقاف{{scriptName}}",
         running: "قيد التشغيل",
         runningCount: "{{count}} قيد التشغيل",
+      },
+    },
+    launches: {
+      title: "عمليات التشغيل",
+      actions: {
+        switch: "تبديل",
+        start: "بدء",
+        stop: "إيقاف",
+        view: "المخرجات",
+        openService: "عرض الخدمة",
+      },
+      accessibility: {
+        switchLaunch: "إيقاف {{activeLaunchName}} وتشغيل {{launchName}}",
+        trigger: "عمليات تشغيل مساحة العمل",
+        launch: "تشغيل {{launchName}}",
+        startLaunch: "بدء {{launchName}}",
+        stopLaunch: "إيقاف {{launchName}}",
+        viewTerminal: "عرض محطة {{launchName}}",
+        openService: "عرض خدمة {{hostname}}",
+      },
+      states: {
+        running: "قيد التشغيل",
+        stopped: "متوقف",
+        stopping: "جارٍ الإيقاف…",
+        noListeners: "لم يتم اكتشاف منافذ استماع بعد",
+        startFailed: "تعذر بدء {{launchName}}",
+        stopFailed: "تعذر إيقاف {{launchName}}",
+        portRange: "المنافذ {{base}}–{{end}}",
       },
     },
     tree: {
@@ -860,6 +931,7 @@ export const ar: TranslationResources = {
         },
         viewPr: "عرض PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "إنشاء PR",
           pending: "إنشاء PR...",
           success: "تم إنشاء PR",
@@ -2359,6 +2431,7 @@ export const ar: TranslationResources = {
   },
   settings: {
     title: "إعدادات",
+    searchResults: "نتائج البحث",
     loading: "جارٍ تحميل الإعدادات...",
     groups: {
       app: "برنامج",
@@ -2375,6 +2448,48 @@ export const ar: TranslationResources = {
     projectList: {
       hostLoadFailed: "تعذر تحميل المشاريع من المضيف{{hostName}}:{{message}}",
       editProject: "تحرير{{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "المشاريع عبر المضيفين",
+        linkProjects: "ربط المشاريع",
+        matches: "{{count}} تطابق مؤكّد للمراجعة",
+        matches_one: "{{count}} تطابق مؤكّد للمراجعة",
+        matches_other: "{{count}} تطابق مؤكّد للمراجعة",
+        savedLinks: "روابط محفوظة على هذا الجهاز",
+        linkAction: "ربط المشاريع…",
+        manageAction: "روابط المشاريع…",
+        matches_two: "{{count}} من التطابقات المؤكّدة للمراجعة",
+        matches_few: "{{count}} تطابقات مؤكّدة للمراجعة",
+        hint: "اجمع نُسخ مستودع Git نفسه في الشريط الجانبي.",
+      },
+      sheet: {
+        title: "ربط المشاريع عبر المضيفين",
+        deviceOnly:
+          "يجمع الربط المشاريع في الشريط الجانبي على هذا الجهاز. تبقى مساحات العمل والإعدادات والملفات على مضيفيها.",
+        matchesTitle: "تطابقات تم التحقق منها",
+        matchesDescription:
+          "تمتلك هذه الإدخالات نفس مستودع Git البعيد والدليل الفرعي للمشروع، لكنها ما زالت منفصلة.",
+        linkedTitle: "المشاريع المرتبطة",
+        noMatchesTitle: "لا توجد روابط مشاريع لمراجعتها",
+        noMatchesDescription:
+          "افتح مساحة عمل في المستودع نفسه على مضيفين. تظهر هنا المشاريع المطابقة التي لا تزال منفصلة.",
+        linkProjects: "ربط {{count}} مشاريع",
+        remote: "مستودع Git البعيد",
+        subdirectory: "الدليل الفرعي للمشروع",
+        path: "المسار",
+        needsReviewTitle: "تحتاج إلى مراجعة",
+        needsReviewDescription:
+          "لم تعد أحدث معلومات Git تؤكد هذا الرابط، لذلك يبقي Paseo هذه المشاريع منفصلة.",
+        projectUnavailable: "هذا المشروع غير متاح حاليًا.",
+        saving: "جارٍ حفظ رابط المشروع…",
+        saveFailed: "تعذر حفظ رابط المشروع. حاول مرة أخرى.",
+        unlink: "إلغاء الربط",
+      },
+      toasts: {
+        linked: "تم ربط المشاريع على هذا الجهاز",
+        unlinked: "تمت إزالة رابط المشروع",
+      },
     },
     groupInfo: "حول{{title}}",
     sections: {
@@ -2524,11 +2639,13 @@ export const ar: TranslationResources = {
       browserData: {
         title: "بيانات المتصفح",
         siteData: "ملفات تعريف الارتباط وبيانات المواقع",
-        description: "تتشارك علامات تبويب المتصفح تسجيلات الدخول وبيانات المواقع عبر Paseo.",
+        description:
+          "تتشارك علامات تبويب المتصفح تسجيلات الدخول وبيانات المواقع عبر Paseo. المضيفون الذين فُعّل لديهم «استخدام شبكة المضيف لعلامات تبويب المتصفح» يحتفظون بملف تعريف منفصل، والمسح يزيل الاثنين.",
         clear: "مسح بيانات المتصفح",
         clearing: "جارٍ المسح...",
         confirmTitle: "هل تريد مسح بيانات المتصفح؟",
-        confirmMessage: "سيتم تسجيل خروجك من المواقع وإعادة تحميل علامات تبويب المتصفح المفتوحة.",
+        confirmMessage:
+          "سيتم تسجيل خروجك من المواقع في كل ملفات التعريف وإعادة تحميل علامات تبويب المتصفح المفتوحة.",
         success: "تم مسح بيانات المتصفح.",
         error: "تعذر مسح بيانات المتصفح.",
       },
@@ -2767,6 +2884,8 @@ export const ar: TranslationResources = {
         closeCurrentTab: "إغلاق علامة التبويب الحالية",
         jumpToWorkspace: "انتقل إلى مساحة العمل",
         jumpToTab: "انتقل إلى علامة التبويب",
+        goBack: "رجوع",
+        goForward: "تقدّم",
         previousWorkspace: "مساحة العمل السابقة",
         nextWorkspace: "مساحة العمل التالية",
         previousTab: "علامة التبويب السابقة",
@@ -2886,6 +3005,7 @@ export const ar: TranslationResources = {
         removeErrorMessage: "غير قادر على إزالة الاتصال",
         timeout: "نفذ الوقت",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "إقران الأجهزة",
         rowTitle: "إقران جهاز",
@@ -3206,6 +3326,13 @@ export const ar: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "تفاصيل المشروع",
+        sourceDirectory: "مجلد المصدر",
+        copySourceDirectory: "نسخ مسار مجلد المصدر",
+        repository: "المستودع",
+        openRepositoryFailed: "تعذر فتح المستودع.",
+      },
       noEditableTarget: "هذا المشروع غير متاح للتحرير على هذا المضيف.",
       backToProjects: "العودة إلى المشاريع",
       edit: {
@@ -3267,6 +3394,27 @@ export const ar: TranslationResources = {
           edit: "يحرر",
           remove: "يزيل",
         },
+      },
+      launches: {
+        title: "عمليات التشغيل",
+        info: "تكوينات التطوير التي يمكنك تشغيلها من أي مساحة عمل في هذا المشروع",
+        empty: "لا توجد عمليات تشغيل بعد.",
+        untitled: "تشغيل بلا عنوان",
+        menuAccessibility: "فتح قائمة التشغيل",
+        removeTitle: "إزالة التشغيل؟",
+        removeMessage: "إزالة {{name}}؟",
+        removeFallbackName: "هذا التشغيل",
+        name: "الاسم",
+        command: "الأمر",
+        nameAccessibility: "اسم التشغيل",
+        commandAccessibility: "أمر التشغيل",
+        nameRequired: "الاسم مطلوب",
+        nameDuplicate: "يجب أن يكون لكل عملية تشغيل اسم فريد",
+        commandRequired: "الأمر مطلوب",
+        newLaunch: "تشغيل جديد",
+        editLaunch: "تعديل {{name}}",
+        commandHint: "يشغّل Paseo هذا الأمر مع كتلة منافذ مساحة العمل واسم مشروع Compose في البيئة.",
+        actions: { add: "إضافة تشغيل", edit: "تعديل", remove: "إزالة" },
       },
       metadata: {
         title: "توليد البيانات الوصفية",

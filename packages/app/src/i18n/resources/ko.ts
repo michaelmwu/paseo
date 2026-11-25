@@ -2,6 +2,23 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ko: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "브라우저",
+    permissionDenied:
+      "이 연결에는 호스트 네트워크를 사용할 권한이 없습니다. 호스트 소유자에게 네트워크 접근 허용을 요청하세요.",
+    title: "브라우저 탭에 호스트 네트워크 사용",
+    description: "이 호스트의 탭은 호스트 네트워크와 쿠키가 분리된 전용 프로필을 사용합니다.",
+    updateHost: "브라우저 탭에서 호스트 네트워크를 사용하려면 이 호스트를 업데이트하세요.",
+    settingFailed: "이 설정을 저장하거나 불러올 수 없습니다. 다시 시도하세요.",
+    viaHost: "{{host}} 경유",
+    proxyUnavailable:
+      "호스트 {{host}}의 네트워크에 대한 브라우저 연결을 사용할 수 없습니다. 호스트를 다시 연결하고 새로고침하세요.",
+    destinationFailed:
+      "호스트 {{host}}의 네트워크를 통해 이 주소에 연결할 수 없습니다. 주소와 호스트 연결을 확인하세요.",
+    connectionClosed:
+      "호스트 {{host}}의 네트워크를 통한 연결이 종료되었습니다. 호스트를 다시 연결하고 새로고침하세요.",
+    notReady: "호스트 {{host}}의 네트워크를 준비할 수 없습니다. 탭을 다시 열어 보세요.",
+  },
   pluginCombobox: {
     searching: "검색 중…",
     empty: "결과 없음",
@@ -131,6 +148,20 @@ export const ko: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "메시지 찾기",
+    outbox: {
+      pending: "기기에 저장되었습니다. 호스트 또는 에이전트를 기다리는 중입니다.",
+      sending: "전송 중…",
+      needsReview: "전송 결과가 확인되지 않았습니다. 먼저 상태를 확인하세요.",
+      retry: "전송 다시 시도",
+      discard: "저장된 메시지 삭제",
+      attachmentMessage: "첨부 파일이 있는 메시지",
+
+      failed: "전송되지 않았습니다. 이 메시지를 다시 시도하세요.",
+      inFlight: "호스트가 처리 중입니다. 자동으로 확인 중…",
+      checking: "전송 확인 중…",
+      check: "전송 상태 확인",
+    },
     placeholders: {
       desktop: "에이전트에게 메시지를 보내거나 @files 태그, /commands, /skills를 사용하세요",
       mobile: "메시지, @files, /commands",
@@ -193,8 +224,14 @@ export const ko: TranslationResources = {
       removeReview: "리뷰 첨부 제거",
     },
     errors: {
+      messageLookupFailed:
+        "대화를 새로 고칠 수 없습니다. 전달 여부는 아직 확인되지 않았습니다. 다시 연결한 후 메시지를 찾아보세요.",
+      messageNotFound:
+        "사용 가능한 기록에서 이 메시지를 찾을 수 없습니다. 전달 여부는 아직 확인되지 않았습니다.",
       failedToSend: "메시지를 보내지 못했습니다",
       failedToCreateAgent: "에이전트를 생성하지 못했습니다",
+      creationOutcomeUnknown:
+        "이전 시작 작업이 아직 진행 중일 수 있습니다. 다시 시작하기 전에 워크스페이스와 에이전트를 확인하세요.",
       noHostSelected: "선택된 호스트가 없습니다",
       initialPromptRequired: "초기 프롬프트가 필요합니다",
       alreadyLoading: "이미 불러오는 중입니다",
@@ -268,6 +305,11 @@ export const ko: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "턴 중 변경 사항을 검토하려면 호스트를 업데이트하세요.",
+      viewChanges: "이번 턴 동안의 변경 사항",
+      backToConversation: "대화로 돌아가기",
+    },
     states: {
       notFound: "에이전트를 찾을 수 없습니다",
       failedToLoad: "에이전트를 불러오지 못했습니다",
@@ -396,6 +438,8 @@ export const ko: TranslationResources = {
     },
     question: {
       responseFailed: "응답을 보내지 못했습니다. 다시 시도해 주세요.",
+      sendToChat: "채팅으로 보내기",
+      chatDeliveryWarning: "답변이 채팅에 표시됩니다. 비밀번호나 비밀 정보를 입력하지 마세요.",
       submit: "제출",
       next: "다음",
       answerPlaceholder: "답변을 입력하세요...",
@@ -807,7 +851,7 @@ export const ko: TranslationResources = {
         view: "터미널 보기",
       },
       accessibility: {
-        trigger: "워크스페이스 스크립트",
+        trigger: "작업 공간 명령 실행",
         openService: "{{scriptName}} 서비스 보기",
         viewTerminal: "{{scriptName}} 터미널 보기",
         runScript: "{{scriptName}} 스크립트 실행",
@@ -828,6 +872,34 @@ export const ko: TranslationResources = {
         stopFailed: "{{scriptName}}를 중지하지 못했습니다.",
         running: "실행 중",
         runningCount: "{{count}}개 실행 중",
+      },
+    },
+    launches: {
+      title: "실행 구성",
+      actions: {
+        switch: "전환",
+        start: "시작",
+        stop: "중지",
+        view: "출력",
+        openService: "서비스 보기",
+      },
+      accessibility: {
+        switchLaunch: "{{activeLaunchName}} 중지 후 {{launchName}} 시작",
+        trigger: "작업 공간 실행 구성",
+        launch: "{{launchName}} 실행 구성",
+        startLaunch: "{{launchName}} 시작",
+        stopLaunch: "{{launchName}} 중지",
+        viewTerminal: "{{launchName}} 터미널 보기",
+        openService: "{{hostname}} 서비스 보기",
+      },
+      states: {
+        running: "실행 중",
+        stopped: "중지됨",
+        stopping: "중지 중…",
+        noListeners: "아직 수신 대기 포트가 감지되지 않았습니다",
+        startFailed: "{{launchName}}을(를) 시작하지 못했습니다",
+        stopFailed: "{{launchName}}을(를) 중지하지 못했습니다",
+        portRange: "포트 {{base}}–{{end}}",
       },
     },
     tree: {
@@ -861,6 +933,7 @@ export const ko: TranslationResources = {
         viewPr: "PR 보기",
         viewPr_mr: "MR 보기",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "PR 생성",
           pending: "PR 생성 중...",
           success: "PR 생성됨",
@@ -2334,6 +2407,7 @@ export const ko: TranslationResources = {
   },
   settings: {
     title: "설정",
+    searchResults: "검색 결과",
     loading: "설정 불러오는 중...",
     groups: {
       app: "앱",
@@ -2350,6 +2424,46 @@ export const ko: TranslationResources = {
     projectList: {
       hostLoadFailed: "{{hostName}} 호스트에서 프로젝트를 불러올 수 없습니다: {{message}}",
       editProject: "{{projectName}} 편집",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "여러 호스트의 프로젝트",
+        linkProjects: "프로젝트 연결",
+        matches: "검토할 확인된 일치 항목 {{count}}개",
+        matches_one: "검토할 확인된 일치 항목 {{count}}개",
+        matches_other: "검토할 확인된 일치 항목 {{count}}개",
+        savedLinks: "이 기기에 저장된 링크",
+        linkAction: "프로젝트 연결…",
+        manageAction: "프로젝트 링크…",
+        hint: "같은 Git 저장소의 복사본을 사이드바에서 그룹으로 묶습니다.",
+      },
+      sheet: {
+        title: "호스트 간 프로젝트 연결",
+        deviceOnly:
+          "연결하면 이 기기의 사이드바에서 프로젝트가 그룹으로 묶입니다. 작업 공간, 설정, 파일은 각 호스트에 그대로 남습니다.",
+        matchesTitle: "확인된 일치 항목",
+        matchesDescription:
+          "이 항목들은 같은 Git 원격 저장소와 프로젝트 하위 디렉터리를 가지지만 아직 분리되어 있습니다.",
+        linkedTitle: "연결된 프로젝트",
+        noMatchesTitle: "검토할 프로젝트 연결이 없습니다",
+        noMatchesDescription:
+          "두 호스트에서 같은 저장소의 작업 공간을 여세요. 일치하지만 아직 별도로 표시되는 프로젝트가 여기에 나타납니다.",
+        linkProjects: "프로젝트 {{count}}개 연결",
+        remote: "Git 원격 저장소",
+        subdirectory: "프로젝트 하위 디렉터리",
+        path: "경로",
+        needsReviewTitle: "검토 필요",
+        needsReviewDescription:
+          "최신 Git 정보가 더 이상 이 연결을 확인하지 못하므로 Paseo는 이 프로젝트들을 분리된 상태로 유지합니다.",
+        projectUnavailable: "이 프로젝트는 현재 사용할 수 없습니다.",
+        saving: "프로젝트 링크를 저장하는 중…",
+        saveFailed: "프로젝트 링크를 저장하지 못했습니다. 다시 시도하세요.",
+        unlink: "연결 해제",
+      },
+      toasts: {
+        linked: "이 기기에서 프로젝트를 연결했습니다",
+        unlinked: "프로젝트 연결을 제거했습니다",
+      },
     },
     groupInfo: "{{title}} 정보",
     sections: {
@@ -2499,11 +2613,13 @@ export const ko: TranslationResources = {
       browserData: {
         title: "브라우저 데이터",
         siteData: "쿠키 및 사이트 데이터",
-        description: "브라우저 탭은 Paseo 전체에서 로그인 및 사이트 데이터를 공유합니다.",
+        description:
+          "브라우저 탭은 Paseo 전체에서 로그인 및 사이트 데이터를 공유합니다. “브라우저 탭에 호스트 네트워크 사용”이 켜진 호스트는 별도의 프로필을 유지하며, 지우기는 둘 다 삭제합니다.",
         clear: "브라우저 데이터 지우기",
         clearing: "삭제 중...",
         confirmTitle: "브라우저 데이터를 삭제하시겠습니까?",
-        confirmMessage: "사이트가 로그아웃되고 열려 있는 브라우저 탭이 다시 로드됩니다.",
+        confirmMessage:
+          "모든 프로필에서 사이트가 로그아웃되고 열려 있는 브라우저 탭이 다시 로드됩니다.",
         success: "브라우저 데이터가 삭제되었습니다.",
         error: "브라우저 데이터를 삭제할 수 없습니다.",
       },
@@ -2745,6 +2861,8 @@ export const ko: TranslationResources = {
         closeCurrentTab: "현재 탭 닫기",
         jumpToWorkspace: "워크스페이스로 이동",
         jumpToTab: "탭으로 이동",
+        goBack: "뒤로 이동",
+        goForward: "앞으로 이동",
         previousWorkspace: "이전 워크스페이스",
         nextWorkspace: "다음 워크스페이스",
         previousTab: "이전 탭",
@@ -2864,6 +2982,7 @@ export const ko: TranslationResources = {
         removeErrorMessage: "연결을 제거할 수 없습니다",
         timeout: "시간 초과",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "기기 페어링",
         rowTitle: "기기 페어링",
@@ -3188,6 +3307,13 @@ export const ko: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "프로젝트 세부 정보",
+        sourceDirectory: "소스 디렉터리",
+        copySourceDirectory: "소스 디렉터리 복사",
+        repository: "저장소",
+        openRepositoryFailed: "저장소를 열 수 없습니다.",
+      },
       noEditableTarget: "이 호스트에서는 이 프로젝트를 편집할 수 없습니다.",
       backToProjects: "프로젝트로 돌아가기",
       edit: {
@@ -3248,6 +3374,28 @@ export const ko: TranslationResources = {
           edit: "편집",
           remove: "제거",
         },
+      },
+      launches: {
+        title: "실행 구성",
+        info: "이 프로젝트의 모든 작업 공간에서 시작할 수 있는 개발 구성",
+        empty: "실행 구성이 아직 없습니다.",
+        untitled: "제목 없는 실행 구성",
+        menuAccessibility: "실행 구성 메뉴 열기",
+        removeTitle: "실행 구성을 제거할까요?",
+        removeMessage: "{{name}}을(를) 제거할까요?",
+        removeFallbackName: "이 실행 구성",
+        name: "이름",
+        command: "명령",
+        nameAccessibility: "실행 구성 이름",
+        commandAccessibility: "실행 구성 명령",
+        nameRequired: "이름이 필요합니다",
+        nameDuplicate: "각 실행 구성에는 고유한 이름이 필요합니다",
+        commandRequired: "명령이 필요합니다",
+        newLaunch: "새 실행 구성",
+        editLaunch: "{{name}} 편집",
+        commandHint:
+          "Paseo는 작업 공간 포트 블록과 Compose 프로젝트 이름을 환경에 넣어 이 명령을 실행합니다.",
+        actions: { add: "실행 구성 추가", edit: "편집", remove: "제거" },
       },
       metadata: {
         title: "메타데이터 생성",

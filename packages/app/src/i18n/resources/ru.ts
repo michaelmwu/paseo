@@ -2,6 +2,25 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Браузер",
+    permissionDenied:
+      "У этого подключения нет разрешения на использование сети хоста. Попросите владельца хоста разрешить доступ к сети.",
+    title: "Использовать сеть хоста для вкладок браузера",
+    description:
+      "Вкладки этого хоста используют его сеть и отдельный профиль с собственными файлами cookie.",
+    updateHost: "Обновите этот хост, чтобы использовать его сеть во вкладках браузера.",
+    settingFailed: "Не удалось сохранить или загрузить эту настройку. Повторите попытку.",
+    viaHost: "через {{host}}",
+    proxyUnavailable:
+      "Подключение браузера к сети хоста {{host}} недоступно. Подключитесь к хосту заново и обновите страницу.",
+    destinationFailed:
+      "Не удалось открыть этот адрес через сеть хоста {{host}}. Проверьте адрес и подключение к хосту.",
+    connectionClosed:
+      "Подключение через сеть хоста {{host}} закрыто. Подключитесь к хосту заново и обновите страницу.",
+    notReady:
+      "Браузеру не удалось подготовить сеть хоста {{host}}. Попробуйте открыть вкладку снова.",
+  },
   pluginCombobox: {
     searching: "Поиск…",
     empty: "Нет результатов",
@@ -132,6 +151,20 @@ export const ru: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "Найти сообщение",
+    outbox: {
+      pending: "Сохранено на устройстве. Ожидание готовности хоста или агента.",
+      sending: "Отправка…",
+      needsReview: "Доставка не подтверждена. Сначала проверьте статус.",
+      retry: "Повторить отправку",
+      discard: "Удалить сохранённое сообщение",
+      attachmentMessage: "Сообщение с вложениями",
+
+      failed: "Не доставлено. Повторите отправку сохранённого сообщения.",
+      inFlight: "Хост ещё обрабатывает сообщение. Автоматическая проверка…",
+      checking: "Проверка доставки…",
+      check: "Проверить доставку",
+    },
     placeholders: {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
@@ -194,8 +227,14 @@ export const ru: TranslationResources = {
       removeReview: "Удалить вложение проверки",
     },
     errors: {
+      messageLookupFailed:
+        "Не удалось обновить разговор. Доставка ещё не подтверждена. Подключитесь снова и повторите поиск сообщения.",
+      messageNotFound:
+        "Не удалось найти сообщение в доступной истории. Доставка ещё не подтверждена.",
       failedToSend: "Не удалось отправить сообщение",
       failedToCreateAgent: "Не удалось создать агента.",
+      creationOutcomeUnknown:
+        "Предыдущий запуск может всё ещё выполняться. Проверьте рабочие пространства и агентов, прежде чем запускать снова.",
       noHostSelected: "Хост не выбран",
       initialPromptRequired: "Необходим инициализирующий промпт",
       alreadyLoading: "Уже загружается",
@@ -270,6 +309,11 @@ export const ru: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Обновите хост, чтобы просмотреть изменения за ход.",
+      viewChanges: "Изменения за этот ход",
+      backToConversation: "Вернуться к беседе",
+    },
     states: {
       notFound: "Агент не найден",
       failedToLoad: "Не удалось загрузить агента",
@@ -399,6 +443,8 @@ export const ru: TranslationResources = {
     },
     question: {
       responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
+      sendToChat: "Отправить в чат",
+      chatDeliveryWarning: "Ваш ответ появится в чате. Не вводите пароли или секретные данные.",
       submit: "Отправить",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",
@@ -816,7 +862,7 @@ export const ru: TranslationResources = {
         view: "Открыть терминал",
       },
       accessibility: {
-        trigger: "Скрипты рабочего пространства",
+        trigger: "Запустить команды рабочего пространства",
         openService: "Открыть сервис {{scriptName}}",
         viewTerminal: "Открыть терминал скрипта {{scriptName}}",
         runScript: "Запустить скрипт {{scriptName}}",
@@ -837,6 +883,34 @@ export const ru: TranslationResources = {
         stopFailed: "Не удалось остановить скрипт {{scriptName}}",
         running: "Запущен",
         runningCount: "Запущено: {{count}}",
+      },
+    },
+    launches: {
+      title: "Запуски",
+      actions: {
+        switch: "Переключить",
+        start: "Запустить",
+        stop: "Остановить",
+        view: "Вывод",
+        openService: "Открыть сервис",
+      },
+      accessibility: {
+        switchLaunch: "Остановить {{activeLaunchName}} и запустить {{launchName}}",
+        trigger: "Запуски рабочего пространства",
+        launch: "Запуск {{launchName}}",
+        startLaunch: "Запустить {{launchName}}",
+        stopLaunch: "Остановить {{launchName}}",
+        viewTerminal: "Открыть терминал {{launchName}}",
+        openService: "Открыть сервис {{hostname}}",
+      },
+      states: {
+        running: "Выполняется",
+        stopped: "Остановлено",
+        stopping: "Остановка…",
+        noListeners: "Прослушиваемые порты пока не обнаружены",
+        startFailed: "Не удалось запустить {{launchName}}",
+        stopFailed: "Не удалось остановить {{launchName}}",
+        portRange: "порты {{base}}–{{end}}",
       },
     },
     tree: {
@@ -869,6 +943,7 @@ export const ru: TranslationResources = {
         },
         viewPr: "Посмотреть PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "Создать PR",
           pending: "Создание PR...",
           success: "PR создан",
@@ -2360,6 +2435,7 @@ export const ru: TranslationResources = {
   },
   settings: {
     title: "Настройки",
+    searchResults: "Результаты поиска",
     loading: "Загрузка настроек...",
     groups: {
       app: "Приложение",
@@ -2376,6 +2452,48 @@ export const ru: TranslationResources = {
     projectList: {
       hostLoadFailed: "Не удалось загрузить проекты с хоста {{hostName}}: {{message}}",
       editProject: "Изменить {{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Проекты на разных хостах",
+        linkProjects: "Связать проекты",
+        matches: "{{count}} подтверждённых совпадений для проверки",
+        matches_one: "{{count}} подтверждённое совпадение для проверки",
+        matches_other: "{{count}} подтверждённых совпадений для проверки",
+        savedLinks: "Связи сохранены на этом устройстве",
+        linkAction: "Связать проекты…",
+        manageAction: "Связи проектов…",
+        matches_few: "{{count}} подтверждённых совпадения для проверки",
+        matches_many: "{{count}} подтверждённых совпадений для проверки",
+        hint: "Объединяйте копии одного Git-репозитория в боковой панели.",
+      },
+      sheet: {
+        title: "Связать проекты между хостами",
+        deviceOnly:
+          "Связь группирует проекты в боковой панели на этом устройстве. Рабочие области, настройки и файлы остаются на своих хостах.",
+        matchesTitle: "Подтверждённые совпадения",
+        matchesDescription:
+          "У этих записей один и тот же удалённый Git-репозиторий и подкаталог проекта, но они всё ещё разделены.",
+        linkedTitle: "Связанные проекты",
+        noMatchesTitle: "Нет связей проектов для проверки",
+        noMatchesDescription:
+          "Откройте рабочую область в одном и том же репозитории на двух хостах. Здесь появятся совпадающие проекты, которые пока отображаются отдельно.",
+        linkProjects: "Связать {{count}} проекта",
+        remote: "Удалённый Git-репозиторий",
+        subdirectory: "Подкаталог проекта",
+        path: "Путь",
+        needsReviewTitle: "Требуется проверка",
+        needsReviewDescription:
+          "Последние данные Git больше не подтверждают эту связь, поэтому Paseo сохраняет эти проекты раздельно.",
+        projectUnavailable: "Этот проект сейчас недоступен.",
+        saving: "Сохранение связи проекта…",
+        saveFailed: "Не удалось сохранить связь проекта. Повторите попытку.",
+        unlink: "Отвязать",
+      },
+      toasts: {
+        linked: "Проекты связаны на этом устройстве",
+        unlinked: "Связь проекта удалена",
+      },
     },
     groupInfo: "О разделе «{{title}}»",
     sections: {
@@ -2527,12 +2645,13 @@ export const ru: TranslationResources = {
       browserData: {
         title: "Данные браузера",
         siteData: "Файлы cookie и данные сайтов",
-        description: "Вкладки браузера в Paseo используют общие данные входа и данные сайтов.",
+        description:
+          "Вкладки браузера в Paseo используют общие данные входа и данные сайтов. Хосты с включённой опцией «Использовать сеть хоста для вкладок браузера» хранят отдельный профиль, и очистка удаляет оба.",
         clear: "Очистить данные браузера",
         clearing: "Очистка...",
         confirmTitle: "Очистить данные браузера?",
         confirmMessage:
-          "Вы выйдете из аккаунтов на сайтах, а открытые вкладки браузера перезагрузятся.",
+          "Вы выйдете из аккаунтов на сайтах во всех профилях, а открытые вкладки браузера перезагрузятся.",
         success: "Данные браузера очищены.",
         error: "Не удалось очистить данные браузера.",
       },
@@ -2779,6 +2898,8 @@ export const ru: TranslationResources = {
         closeCurrentTab: "Закрыть текущую вкладку",
         jumpToWorkspace: "Перейти к рабочему пространству",
         jumpToTab: "Перейти на вкладку",
+        goBack: "Назад",
+        goForward: "Вперёд",
         previousWorkspace: "Предыдущее рабочее пространство",
         nextWorkspace: "Следующее рабочее пространство",
         previousTab: "Предыдущая вкладка",
@@ -2899,6 +3020,7 @@ export const ru: TranslationResources = {
         removeErrorMessage: "Не удалось удалить подключение",
         timeout: "Время ожидания истекло",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Подключение устройств",
         rowTitle: "Подключить устройство",
@@ -3228,6 +3350,13 @@ export const ru: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "Сведения о проекте",
+        sourceDirectory: "Исходный каталог",
+        copySourceDirectory: "Копировать путь к исходному каталогу",
+        repository: "Репозиторий",
+        openRepositoryFailed: "Не удалось открыть репозиторий.",
+      },
       noEditableTarget: "Этот проект нельзя редактировать на этом хосте.",
       backToProjects: "Вернуться к проектам",
       edit: {
@@ -3290,6 +3419,28 @@ export const ru: TranslationResources = {
           edit: "Редактировать",
           remove: "Удалить",
         },
+      },
+      launches: {
+        title: "Запуски",
+        info: "Конфигурации разработки, которые можно запустить из любого рабочего пространства этого проекта",
+        empty: "Запусков пока нет.",
+        untitled: "Запуск без названия",
+        menuAccessibility: "Открыть меню запуска",
+        removeTitle: "Удалить запуск?",
+        removeMessage: "Удалить {{name}}?",
+        removeFallbackName: "этот запуск",
+        name: "Имя",
+        command: "Команда",
+        nameAccessibility: "Имя запуска",
+        commandAccessibility: "Команда запуска",
+        nameRequired: "Укажите имя",
+        nameDuplicate: "У каждого запуска должно быть уникальное имя",
+        commandRequired: "Укажите команду",
+        newLaunch: "Новый запуск",
+        editLaunch: "Изменить {{name}}",
+        commandHint:
+          "Paseo запускает эту команду с блоком портов рабочего пространства и именем проекта Compose в окружении.",
+        actions: { add: "Добавить запуск", edit: "Изменить", remove: "Удалить" },
       },
       metadata: {
         title: "Генерация метаданных",

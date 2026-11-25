@@ -54,6 +54,13 @@ export class CodexAppServerResponseTooLargeError extends Error {
 // Codex serializes a response with `id` first, so its head names the request.
 const OVERSIZED_RESPONSE_HEAD = /^\{"id":(\d+),"result":/;
 
+export class CodexAppServerRequestTimeoutError extends Error {
+  constructor(readonly method: string) {
+    super(`Codex app-server request timed out for ${method}`);
+    this.name = "CodexAppServerRequestTimeoutError";
+  }
+}
+
 export class CodexAppServerRpcError extends Error {
   constructor(
     message: string,
@@ -78,11 +85,13 @@ export class CodexAppServerExitError extends Error {
   readonly stderr: string;
 
   constructor(details: CodexAppServerExitDetails) {
-    const message =
-      details.exitCode === 0 && !details.exitSignal
-        ? "Codex app-server exited"
-        : `Codex app-server exited with code ${details.exitCode ?? "null"} and signal ${details.exitSignal ?? "null"}`;
-    super(`${message}\n${details.stderr}`.trim());
+    super(
+      [
+        "Codex stopped unexpectedly.",
+        "Check any interrupted commands, then send a message to continue.",
+        "Technical details are in the host's daemon log.",
+      ].join("\n\n"),
+    );
     this.name = "CodexAppServerExitError";
     this.exitCode = details.exitCode;
     this.exitSignal = details.exitSignal;
@@ -269,6 +278,11 @@ export class CodexAppServerClient {
     });
 
     const reportExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (this.disposed) return;
+      this.logger.error(
+        { ...this.getTraceContext(), pid: child.pid, code, signal, stderr: this.stderrBuffer },
+        "Codex app-server terminated unexpectedly",
+      );
       this.handleUnexpectedTermination(
         new CodexAppServerExitError({
           exitCode: code,
@@ -304,6 +318,10 @@ export class CodexAppServerClient {
     return this.pending.size > 0 || this.activeProviderRequests > 0;
   }
 
+  isDisposed(): boolean {
+    return this.disposed;
+  }
+
   request(method: string, params?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<unknown> {
     if (this.disposed) {
       return Promise.reject(new Error("Codex app-server client is closed"));
@@ -315,7 +333,7 @@ export class CodexAppServerClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out for ${method}`));
+        reject(new CodexAppServerRequestTimeoutError(method));
       }, timeoutMs);
       this.pending.set(id, { method, resolve, reject, timer });
     });

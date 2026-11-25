@@ -900,6 +900,7 @@ export interface CheckoutStatusGitNonPaseo {
   isDirty: boolean;
   baseRef: string | null;
   baseRefExact?: string | null;
+  defaultBranchRef?: string | null;
   comparisonBaseRef?: string | null;
   aheadBehind: AheadBehind | null;
   // Remote-tracking ref for currentBranch, e.g. "refs/remotes/origin/main". Null when the
@@ -923,6 +924,7 @@ export interface CheckoutStatusGitPaseo {
   isDirty: boolean;
   baseRef: string;
   baseRefExact?: string | null;
+  defaultBranchRef?: string | null;
   comparisonBaseRef?: string | null;
   aheadBehind: AheadBehind | null;
   upstreamRef: string | null;
@@ -967,6 +969,9 @@ export interface CheckoutContext {
   logger?: Pick<Logger, "trace" | "warn">;
   facts?: CheckoutSnapshotFacts | null;
   runGitCommand?: RunGitCommand;
+  resolveDefaultBranchRef?: (
+    input: ResolveRepositoryDefaultBranchRefInput,
+  ) => Promise<string | null>;
 }
 
 export type CheckoutSnapshotFacts =
@@ -1715,6 +1720,54 @@ export async function resolveRepositoryDefaultBranch(
 
 async function resolveBaseRef(repoRoot: string, context?: CheckoutContext): Promise<string | null> {
   return resolveRepositoryDefaultBranch(repoRoot, context);
+}
+
+// Workspace creation prefers the remote tip. Diff and merge bases keep their existing
+// local-branch policy in resolveRepositoryDefaultBranch.
+export interface ResolveRepositoryDefaultBranchRefInput {
+  cwd: string;
+  context?: CheckoutContext;
+}
+
+export async function resolveRepositoryDefaultBranchRef({
+  cwd,
+  context,
+}: ResolveRepositoryDefaultBranchRefInput): Promise<string | null> {
+  const { stdout } = await getRunGitCommand(context)(
+    ["for-each-ref", "--format=%(refname)%00%(symref)%00%(upstream)", "refs/heads", "refs/remotes"],
+    { cwd, envOverlay: READ_ONLY_GIT_ENV },
+  );
+  const refs = new Map<string, string>();
+  const upstreams = new Map<string, string>();
+  const lines = stdout.split("\n");
+  const refLines = lines.filter(Boolean);
+  for (const line of refLines) {
+    const [ref, target = "", upstream = ""] = line.split("\0");
+    refs.set(ref, target);
+    upstreams.set(ref, upstream);
+  }
+  const originDefault = refs.get("refs/remotes/origin/HEAD");
+  if (originDefault && refs.has(originDefault)) return originDefault;
+  const remoteDefaults: string[] = [];
+  const localBranches: string[] = [];
+  for (const [ref, target] of refs) {
+    if (ref.startsWith("refs/heads/")) localBranches.push(ref);
+    const isRemoteDefault = ref.startsWith("refs/remotes/") && ref.endsWith("/HEAD");
+    if (isRemoteDefault && refs.has(target)) remoteDefaults.push(target);
+  }
+  if (remoteDefaults.length === 1) return remoteDefaults[0];
+  if (remoteDefaults.length > 1) return null;
+  const conventionalDefaults = ["main", "master", "trunk", "develop"];
+  const conventionalRefs = conventionalDefaults.map((branch) => `refs/heads/${branch}`);
+  let localDefault = conventionalRefs.find((ref) => refs.has(ref));
+  if (!localDefault && localBranches.length === 1) localDefault = localBranches[0];
+  if (!localDefault) return null;
+  const branch = localDefault.slice("refs/heads/".length);
+  const originRef = `refs/remotes/origin/${branch}`;
+  if (refs.has(originRef)) return originRef;
+  const upstream = upstreams.get(localDefault);
+  if (upstream?.startsWith("refs/remotes/") && refs.has(upstream)) return upstream;
+  return localDefault;
 }
 
 interface ComparisonBaseRefName {
@@ -2575,6 +2628,9 @@ export async function getCheckoutStatus(
     baseRef && currentBranch
       ? await getAheadBehind(cwd, baseRef, currentBranch, factsContext)
       : null;
+  const resolveDefaultBranchRef =
+    context?.resolveDefaultBranchRef ?? resolveRepositoryDefaultBranchRef;
+  const defaultBranchRef = await resolveDefaultBranchRef({ cwd, context: factsContext });
   // The wire carries the display name: clients label the base with it and send it back to
   // request diffs and merges. The exact ref stays in worktree.json and in facts, where the
   // comparisons and actions read it.
@@ -2590,6 +2646,7 @@ export async function getCheckoutStatus(
       isDirty,
       baseRef: displayBaseRef ?? baseRef,
       baseRefExact: baseRef,
+      defaultBranchRef,
       comparisonBaseRef,
       aheadBehind,
       ...upstream,
@@ -2609,6 +2666,7 @@ export async function getCheckoutStatus(
     isDirty,
     baseRef: displayBaseRef,
     baseRefExact: baseRef,
+    defaultBranchRef,
     comparisonBaseRef,
     aheadBehind,
     ...upstream,
@@ -4507,6 +4565,7 @@ function parseHeadPushRefspec(refspec: string | null): string | null {
 }
 
 export interface CreatePullRequestOptions {
+  approvedHeadSha?: string;
   title: string;
   body?: string;
   base?: string;
@@ -4572,6 +4631,25 @@ export type ChecksStatus = "none" | "pending" | "success" | "failure";
 
 export type ReviewDecision = "approved" | "changes_requested" | "pending" | null;
 
+export async function capturePrCheckoutState(
+  cwd: string,
+  requestedBaseRef?: string,
+  context?: CheckoutContext,
+) {
+  const head = await getCurrentBranch(cwd);
+  const { storedBaseRef, resolvedBaseRef } = await resolveBaseRefForCwd(cwd, context);
+  const base = resolveOperationBaseRef({ storedBaseRef, resolvedBaseRef, requestedBaseRef });
+  if (!head || !base) throw new Error("Unable to determine PR head and base");
+  const git = async (...args: string[]) => (await runGitCommand(args, { cwd })).stdout.trim();
+  return {
+    head,
+    base,
+    headSha: await git("rev-parse", "HEAD"),
+    baseSha: await git("rev-parse", await resolveBestComparisonBaseRef(cwd, base)),
+    origin: await git("remote", "get-url", "origin"),
+  };
+}
+
 export async function createPullRequest(
   cwd: string,
   options: CreatePullRequestOptions,
@@ -4601,12 +4679,21 @@ export async function createPullRequest(
   // the forge resolver has already matched the origin remote to a forge. If the
   // adapter still fails after the push, retrying is safe — the non-force push
   // of the head branch is idempotent.
-  await runGitCommand(["push", "-u", "origin", head], { cwd, timeout: 120_000 });
+  // Push the approved commit rather than a branch tip that may have moved
+  // since confirmation. This remains a non-force push.
+  const pushArgs = options.approvedHeadSha
+    ? ["push", "origin", `${options.approvedHeadSha}:refs/heads/${head}`]
+    : ["push", "-u", "origin", head];
+  await runGitCommand(pushArgs, { cwd, timeout: 120_000 });
+  if (options.approvedHeadSha) {
+    await runGitCommand(["branch", `--set-upstream-to=origin/${head}`, "--", head], { cwd });
+  }
 
   const result = await forgeService.createPullRequest({
     cwd,
     title: options.title,
     body: options.body,
+    draft: options.draft,
     head,
     base: normalizedBase,
   });

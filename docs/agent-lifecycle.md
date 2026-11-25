@@ -12,6 +12,12 @@ initializing → idle → running → idle (or error → closed)
 
 Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idle`, `running`, or `error`. `closed` is the persisted, resumable state for an agent record that has no live provider runtime. State transitions persist to disk and stream to subscribed clients via WebSocket.
 
+## Changes during a turn
+
+For a foreground turn in a Git worktree, the daemon captures the whole worktree before invoking the provider and again when the turn settles. The latest completed pair is retained as Git refs and exposed on the agent snapshot. The agent tab can compare the pair using the normal diff viewer. The capture uses a private index, includes untracked files, and respects Git ignore rules; it never changes the user's staging index.
+
+The comparison is a worktree time boundary, not attribution to the agent process. Edits from terminals, people, or other agents during that interval appear too. Changes made and reverted within the interval do not appear. The view is available after completion, and only the latest turn is shown. A non-Git directory or failed capture has no turn comparison.
+
 ## Daemon restart recovery
 
 Restart recovery is off by default. Enable `agents.resumeOnStartup` in host config or
@@ -116,6 +122,20 @@ arrives or the run was still waiting for its provider turn id. The captured run 
 older cancellation from settling a newer turn. If interruption is rejected or times out, the agent
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
+
+The manager gives provider interruption ten seconds. This outer budget includes the provider's
+own interrupt RPC and any bounded cleanup before acknowledging cancellation. Post-acknowledgement
+settlement still waits two seconds. Waiting for a starting run before replacement uses the same
+outer budget; it cannot hold later interruption requests indefinitely.
+
+Codex retires its app-server when an interrupt or startup acknowledgement is lost, and when Stop
+cancels an in-flight startup. It confirms process exit before allowing another prompt; a failed
+termination retains ownership so Stop can retry. The snapshot reports pending interrupt recovery
+separately from turn activity so Stop stays available even after a failed startup has settled. Stopping the runtime proves it cannot continue,
+but does not prove a prompt was never delivered: a turn may have executed before its reply was
+lost. Startup acknowledgement loss therefore stays explicitly unknown and is never replayed
+automatically. Retirement settles tool rows and questions before publishing cancellation so
+reopening cannot restore activity from the retired runtime.
 
 ## Relationships
 

@@ -6,6 +6,7 @@ type OutboundOperation = SessionOutboundMessage["type"];
 export type PermissionRequirement = DaemonPermission | readonly DaemonPermission[] | null;
 
 const INBOUND_PERMISSION = {
+  "host.instructions.manage.request": "access.manage",
   "hosts.list.request": "daemon.read",
   "hosts.add.request": "tunnel.manage",
   "hosts.update.request": "tunnel.manage",
@@ -15,6 +16,8 @@ const INBOUND_PERMISSION = {
   "hosts.route.open.request": null,
   "hosts.route.frame.request": null,
   "hosts.route.close.request": null,
+  "network.tunnel.open.request": "network.proxy",
+  "network.tunnel.close.request": "network.proxy",
   abort_request: "workspace.write",
   "agent.config.apply.request": ["workspace.write", "hub.execute"],
   "agent.detach.request": "workspace.write",
@@ -191,6 +194,7 @@ const INBOUND_PERMISSION = {
   "schedule/run-once": "automation.manage",
   "schedule/update": "automation.manage",
   send_agent_message_request: ["workspace.write", "hub.execute"],
+  "agent.message.get_delivery_status.request": ["workspace.read", "hub.execute"],
   set_agent_feature_request: "workspace.write",
   set_agent_mode_request: "workspace.write",
   set_agent_model_request: "workspace.write",
@@ -229,6 +233,9 @@ const INBOUND_PERMISSION = {
   "workspace.label.delete.request": "workspace.manage",
   "workspace.label.list.request": "workspace.read",
   "workspace.label.update.request": "workspace.manage",
+  "workspace.launch.list.request": "workspace.read",
+  "workspace.launch.start.request": "workspace.write",
+  "workspace.launch.stop.request": "workspace.write",
   "agent.metadata.update.request": "workspace.write",
   "workspace.metadata.update.request": "workspace.manage",
   "workspace.pin.set.request": "workspace.manage",
@@ -247,6 +254,7 @@ const INBOUND_PERMISSION = {
 } as const satisfies Record<InboundOperation, PermissionRequirement>;
 
 const OUTBOUND_PERMISSION = {
+  "host.instructions.manage.response": "access.manage",
   "hosts.list.response": "daemon.read",
   "hosts.changed": "daemon.read",
   "hosts.add.response": "tunnel.manage",
@@ -256,6 +264,9 @@ const OUTBOUND_PERMISSION = {
   "hosts.route.open.response": null,
   "hosts.route.frame": null,
   "hosts.route.closed": null,
+  "network.tunnel.open.response": "network.proxy",
+  "network.tunnel.close.response": "network.proxy",
+  "network.tunnel.closed": "network.proxy",
   "agent.create.response": ["workspace.write", "hub.execute"],
   "agent.create.update": ["workspace.write", "hub.execute"],
   "workspace.create.update": "workspace.manage",
@@ -452,6 +463,7 @@ const OUTBOUND_PERMISSION = {
   "schedule/update/response": "automation.manage",
   script_status_update: "workspace.read",
   send_agent_message_response: ["workspace.write", "hub.execute"],
+  "agent.message.get_delivery_status.response": ["workspace.read", "hub.execute"],
   set_agent_feature_response: "workspace.write",
   set_agent_mode_response: "workspace.write",
   set_agent_model_response: "workspace.write",
@@ -489,6 +501,9 @@ const OUTBOUND_PERMISSION = {
   "workspace.label.list.response": "workspace.read",
   "workspace.label.update": "workspace.read",
   "workspace.label.update.response": "workspace.manage",
+  "workspace.launch.list.response": "workspace.read",
+  "workspace.launch.start.response": "workspace.write",
+  "workspace.launch.stop.response": "workspace.write",
   "agent.metadata.update.response": "workspace.write",
   "workspace.metadata.update.response": "workspace.manage",
   "workspace.pin.set.response": "workspace.manage",

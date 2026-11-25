@@ -19,7 +19,7 @@ export function createTestAgentMessages(params: {
       params.agentManager.tryRunOutOfBand(
         request.recipientId,
         request.prompt,
-        { clientMessageId: request.messageIds[0] },
+        { clientMessageId: request.messageIds[0], submittedMessages: request.submittedMessages },
         onAccepted,
       ),
     isRunning: (agentId) => params.agentManager.hasInFlightRun(agentId),
@@ -50,7 +50,10 @@ export function createTestAgentMessages(params: {
         idleOnly: request.idleOnly,
         admit: request.admit,
         clearPendingPermissions: request.clearPendingPermissions,
-        runOptions: { clientMessageId: request.messageIds[0] },
+        runOptions: {
+          clientMessageId: request.messageIds[0],
+          submittedMessages: request.submittedMessages,
+        },
       });
       if (result.disposition === "turn_started")
         await waitForAgentRunStartWithTimeout(

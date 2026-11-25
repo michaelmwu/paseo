@@ -2,6 +2,24 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const es: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Navegador",
+    permissionDenied:
+      "Esta conexión no tiene permiso para usar la red del host. Pide al responsable del host que permita el acceso a la red.",
+    title: "Usar la red del host en las pestañas del navegador",
+    description: "Las pestañas de este host usan su red y un perfil propio con cookies separadas.",
+    updateHost: "Actualiza este host para usar su red en las pestañas del navegador.",
+    settingFailed: "No se pudo guardar o cargar esta opción. Inténtalo de nuevo.",
+    viaHost: "vía {{host}}",
+    proxyUnavailable:
+      "La conexión del navegador a la red del host {{host}} no está disponible. Vuelve a conectar el host y recarga.",
+    destinationFailed:
+      "No se pudo acceder a esta dirección a través de la red del host {{host}}. Comprueba la dirección y la conexión del host.",
+    connectionClosed:
+      "La conexión a través de la red del host {{host}} se cerró. Vuelve a conectar el host y recarga.",
+    notReady:
+      "El navegador no pudo preparar la red del host {{host}}. Intenta abrir la pestaña de nuevo.",
+  },
   pluginCombobox: {
     searching: "Buscando…",
     empty: "Sin resultados",
@@ -132,6 +150,20 @@ export const es: TranslationResources = {
     },
   },
   composer: {
+    viewMessage: "Buscar mensaje",
+    outbox: {
+      pending: "Guardado en este dispositivo. Esperando al host o al agente.",
+      sending: "Enviando…",
+      needsReview: "Entrega sin confirmar. Comprueba el estado antes de otra acción.",
+      retry: "Reintentar envío",
+      discard: "Descartar mensaje guardado",
+      attachmentMessage: "Mensaje con archivos adjuntos",
+
+      failed: "No entregado. Reintenta este mensaje guardado.",
+      inFlight: "El host sigue procesando el mensaje. Comprobando automáticamente…",
+      checking: "Comprobando la entrega…",
+      check: "Comprobar la entrega",
+    },
     placeholders: {
       desktop: "Envíe un mensaje al agente, etiquete@fileso use/commandsy/skills",
       mobile: "Mensaje,@files,/commands",
@@ -194,8 +226,14 @@ export const es: TranslationResources = {
       removeReview: "Eliminar archivo adjunto de reseña",
     },
     errors: {
+      messageLookupFailed:
+        "No se pudo actualizar la conversación. La entrega sigue sin confirmarse. Vuelve a conectarte e intenta buscar el mensaje de nuevo.",
+      messageNotFound:
+        "No se encontró este mensaje en el historial disponible. La entrega sigue sin confirmarse.",
       failedToSend: "No se pudo enviar el mensaje",
       failedToCreateAgent: "No se pudo crear el agente",
+      creationOutcomeUnknown:
+        "El inicio anterior podría seguir en curso. Revisa tus espacios de trabajo y agentes antes de iniciar otro.",
       noHostSelected: "Ningún anfitrión seleccionado",
       initialPromptRequired: "Se requiere aviso inicial",
       alreadyLoading: "Ya cargando",
@@ -270,6 +308,11 @@ export const es: TranslationResources = {
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Actualiza el host para revisar los cambios de un turno.",
+      viewChanges: "Cambios durante este turno",
+      backToConversation: "Volver a la conversación",
+    },
     states: {
       notFound: "Agentno encontrado",
       failedToLoad: "No se pudo cargar el agente",
@@ -400,6 +443,9 @@ export const es: TranslationResources = {
     },
     question: {
       responseFailed: "No se pudo enviar tu respuesta. Inténtalo de nuevo.",
+      sendToChat: "Enviar al chat",
+      chatDeliveryWarning:
+        "Tu respuesta aparecerá en el chat. No introduzcas contraseñas ni información secreta.",
       submit: "Entregar",
       next: "Siguiente",
       answerPlaceholder: "Escribe tu respuesta...",
@@ -815,7 +861,7 @@ export const es: TranslationResources = {
         view: "Ver terminal",
       },
       accessibility: {
-        trigger: "GuionesWorkspace",
+        trigger: "Ejecutar comandos del espacio de trabajo",
         openService: "Ver servicio {{scriptName}}",
         viewTerminal: "Ver terminal{{scriptName}}",
         runScript: "Ejecute el script{{scriptName}}",
@@ -836,6 +882,34 @@ export const es: TranslationResources = {
         stopFailed: "No se pudo detener{{scriptName}}",
         running: "En ejecución",
         runningCount: "{{count}} en ejecución",
+      },
+    },
+    launches: {
+      title: "Inicios",
+      actions: {
+        switch: "Cambiar",
+        start: "Iniciar",
+        stop: "Detener",
+        view: "Salida",
+        openService: "Ver servicio",
+      },
+      accessibility: {
+        switchLaunch: "Detener {{activeLaunchName}} e iniciar {{launchName}}",
+        trigger: "Inicios del espacio de trabajo",
+        launch: "Inicio {{launchName}}",
+        startLaunch: "Iniciar {{launchName}}",
+        stopLaunch: "Detener {{launchName}}",
+        viewTerminal: "Ver terminal de {{launchName}}",
+        openService: "Ver servicio {{hostname}}",
+      },
+      states: {
+        running: "En ejecución",
+        stopped: "Detenido",
+        stopping: "Deteniendo…",
+        noListeners: "Aún no se han detectado puertos en escucha",
+        startFailed: "No se pudo iniciar {{launchName}}",
+        stopFailed: "No se pudo detener {{launchName}}",
+        portRange: "puertos {{base}}–{{end}}",
       },
     },
     tree: {
@@ -868,6 +942,7 @@ export const es: TranslationResources = {
         },
         viewPr: "VerPR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "CrearPR",
           pending: "CreandoPR...",
           success: "PRcreado",
@@ -2373,6 +2448,7 @@ export const es: TranslationResources = {
   },
   settings: {
     title: "Ajustes",
+    searchResults: "Resultados de búsqueda",
     loading: "Cargando configuración...",
     groups: {
       app: "Aplicación",
@@ -2389,6 +2465,46 @@ export const es: TranslationResources = {
     projectList: {
       hostLoadFailed: "No se pudieron cargar proyectos desde el host{{hostName}}:{{message}}",
       editProject: "Editar{{projectName}}",
+    },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Proyectos en varios hosts",
+        linkProjects: "Vincular proyectos",
+        matches: "{{count}} coincidencias verificadas para revisar",
+        matches_one: "{{count}} coincidencia verificada para revisar",
+        matches_other: "{{count}} coincidencias verificadas para revisar",
+        savedLinks: "Vínculos guardados en este dispositivo",
+        linkAction: "Vincular proyectos…",
+        manageAction: "Vínculos de proyectos…",
+        hint: "Agrupa copias del mismo repositorio Git en la barra lateral.",
+      },
+      sheet: {
+        title: "Vincular proyectos entre hosts",
+        deviceOnly:
+          "La vinculación agrupa los proyectos en la barra lateral de este dispositivo. Los espacios de trabajo, la configuración y los archivos permanecen en sus hosts.",
+        matchesTitle: "Coincidencias verificadas",
+        matchesDescription:
+          "Estas entradas tienen el mismo remoto de Git y subdirectorio del proyecto, pero aún están separadas.",
+        linkedTitle: "Proyectos enlazados",
+        noMatchesTitle: "No hay enlaces de proyectos para revisar",
+        noMatchesDescription:
+          "Abre un espacio de trabajo en el mismo repositorio en dos hosts. Aquí aparecen los proyectos coincidentes que siguen separados.",
+        linkProjects: "Enlazar {{count}} proyectos",
+        remote: "Remoto de Git",
+        subdirectory: "Subdirectorio del proyecto",
+        path: "Ruta",
+        needsReviewTitle: "Requiere revisión",
+        needsReviewDescription:
+          "Los datos de Git más recientes ya no confirman este enlace, así que Paseo mantiene estos proyectos separados.",
+        projectUnavailable: "Este proyecto no está disponible actualmente.",
+        saving: "Guardando el enlace del proyecto…",
+        saveFailed: "No se pudo guardar el enlace del proyecto. Inténtalo de nuevo.",
+        unlink: "Desenlazar",
+      },
+      toasts: {
+        linked: "Proyectos enlazados en este dispositivo",
+        unlinked: "Enlace de proyecto eliminado",
+      },
     },
     groupInfo: "Acerca de{{title}}",
     sections: {
@@ -2540,12 +2656,12 @@ export const es: TranslationResources = {
         title: "Datos del navegador",
         siteData: "Cookies y datos de sitios",
         description:
-          "Las pestañas del navegador comparten inicios de sesión y datos de sitios en Paseo.",
+          "Las pestañas del navegador comparten inicios de sesión y datos de sitios en Paseo. Los hosts con “Usar la red del host en las pestañas del navegador” activado mantienen un perfil aparte, y borrar los datos elimina ambos.",
         clear: "Borrar datos del navegador",
         clearing: "Borrando...",
         confirmTitle: "¿Borrar los datos del navegador?",
         confirmMessage:
-          "Se cerrarán las sesiones de los sitios y se recargarán las pestañas abiertas del navegador.",
+          "Se cerrarán las sesiones de los sitios en todos los perfiles y se recargarán las pestañas abiertas del navegador.",
         success: "Datos del navegador borrados.",
         error: "No se pudieron borrar los datos del navegador.",
       },
@@ -2791,6 +2907,8 @@ export const es: TranslationResources = {
         closeCurrentTab: "Cerrar pestaña actual",
         jumpToWorkspace: "Saltar al espacio de trabajo",
         jumpToTab: "Saltar a la pestaña",
+        goBack: "Retroceder",
+        goForward: "Avanzar",
         previousWorkspace: "Espacio de trabajo anterior",
         nextWorkspace: "Siguiente espacio de trabajo",
         previousTab: "Pestaña anterior",
@@ -2910,6 +3028,7 @@ export const es: TranslationResources = {
         removeErrorMessage: "No se puede eliminar la conexión",
         timeout: "Se acabó el tiempo",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Emparejar dispositivos",
         rowTitle: "Emparejar un dispositivo",
@@ -3235,6 +3354,13 @@ export const es: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "Detalles del proyecto",
+        sourceDirectory: "Directorio de origen",
+        copySourceDirectory: "Copiar directorio de origen",
+        repository: "Repositorio",
+        openRepositoryFailed: "No se pudo abrir el repositorio.",
+      },
       noEditableTarget: "Este proyecto no se puede editar en este host.",
       backToProjects: "Volver a proyectos",
       edit: {
@@ -3297,6 +3423,28 @@ export const es: TranslationResources = {
           edit: "Editar",
           remove: "Eliminar",
         },
+      },
+      launches: {
+        title: "Inicios",
+        info: "Configuraciones de desarrollo que puedes iniciar desde cualquier espacio de trabajo de este proyecto",
+        empty: "Aún no hay inicios.",
+        untitled: "Inicio sin título",
+        menuAccessibility: "Abrir menú de inicio",
+        removeTitle: "¿Quitar inicio?",
+        removeMessage: "¿Quitar {{name}}?",
+        removeFallbackName: "este inicio",
+        name: "Nombre",
+        command: "Comando",
+        nameAccessibility: "Nombre del inicio",
+        commandAccessibility: "Comando del inicio",
+        nameRequired: "El nombre es obligatorio",
+        nameDuplicate: "Cada inicio debe tener un nombre único",
+        commandRequired: "El comando es obligatorio",
+        newLaunch: "Nuevo inicio",
+        editLaunch: "Editar {{name}}",
+        commandHint:
+          "Paseo ejecuta este comando con el bloque de puertos del espacio de trabajo y el nombre del proyecto Compose en su entorno.",
+        actions: { add: "Agregar inicio", edit: "Editar", remove: "Quitar" },
       },
       metadata: {
         title: "Generación de metadatos",

@@ -34,6 +34,7 @@ export class AgentTurnBusyError extends Error {}
 export class AgentTurnChangedError extends Error {}
 
 export interface StartAgentRunOptions {
+  allowOutOfBand?: boolean;
   idleOnly?: boolean;
   admit?: () => boolean;
   /** Called after selecting the run, before consuming its events. */
@@ -112,6 +113,17 @@ async function drainAgentRunIterator(
   }
 }
 
+function tryPromptOutOfBand(
+  agentManager: AgentRunController,
+  agentId: string,
+  prompt: AgentPromptInput,
+  options: StartAgentRunOptions | undefined,
+  admit: (() => void) | undefined,
+): Promise<boolean> {
+  if (options?.allowOutOfBand === false) return Promise.resolve(false);
+  return agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions, admit);
+}
+
 export async function startAgentRun(
   agentManager: AgentRunController,
   agentId: string,
@@ -141,7 +153,7 @@ export async function startAgentRun(
         if (!admit()) throw new Error("Queued agent message was withdrawn");
       }
     : undefined;
-  if (await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions, admitCommand)) {
+  if (await tryPromptOutOfBand(agentManager, agentId, prompt, options, admitCommand)) {
     options?.onDispatch?.("out_of_band");
     return { disposition: "out_of_band" };
   }
@@ -258,6 +270,7 @@ export async function unarchiveAgentState(
 
 export interface SendPromptToAgentParams {
   idleOnly?: boolean;
+  allowOutOfBand?: boolean;
   admit?: StartAgentRunOptions["admit"];
   /** Awaited after the agent is loaded and its mode is set, before the prompt is handed to a run. */
   beforeDispatch?: () => Promise<void>;
@@ -312,7 +325,9 @@ export interface StartCreatedAgentInitialPromptParams {
  * Not derived from the provider constant on purpose: this module is provider-agnostic
  * and must not depend on a specific provider's internals.
  */
-const AGENT_RUN_START_TIMEOUT_MS = 60_000;
+// This must outlast provider admission (Codex turn/start permits 90s), while
+// leaving headroom for the client's 180s message acknowledgement deadline.
+const AGENT_RUN_START_TIMEOUT_MS = 120_000;
 
 export async function waitForAgentRunStartWithTimeout(
   agentManager: Pick<AgentManager, "getAgent">,
@@ -399,8 +414,12 @@ export async function sendPromptToAgent(
         prompt: joined.prompt,
         sessionMode: joined.sessionMode,
         unarchive: joined.unarchive,
-        runOptions: joined.messageId
-          ? { ...send.runOptions, clientMessageId: joined.messageId }
+        runOptions: joined.submittedMessages.length
+          ? {
+              ...send.runOptions,
+              clientMessageId: joined.messageId,
+              submittedMessages: joined.submittedMessages,
+            }
           : send.runOptions,
       }),
   );
@@ -452,6 +471,7 @@ export async function sendPreparedPromptToAgent(
   return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
     replaceRunning: !params.idleOnly,
     idleOnly: params.idleOnly,
+    allowOutOfBand: params.allowOutOfBand,
     admit: params.admit,
     onDispatch: params.onDispatch,
     activeTurnBehavior: params.activeTurnBehavior,

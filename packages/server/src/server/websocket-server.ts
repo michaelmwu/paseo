@@ -1,3 +1,4 @@
+import type { HostInstructionsRuntime } from "./host-instructions/runtime.js";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -98,6 +99,8 @@ import {
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
+import type { WorkspaceLaunchManager } from "./workspace-launch-manager.js";
 import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import {
@@ -131,8 +134,11 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { reachableDirectEndpoints } from "./direct-endpoints.js";
+import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
+import { TunnelProtocolError } from "./network-tunnel/network-tunnel-session.js";
 
-import type { SecurityMode } from "@getpaseo/relay/e2ee";
+import type { KeyPair, SecurityMode } from "@getpaseo/relay/e2ee";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
@@ -191,6 +197,7 @@ interface WebSocketConnectionIdentity {
 }
 
 interface WebSocketServerConfig {
+  daemonKeyPair?: KeyPair;
   allowedOrigins?: Set<string>;
   hostnames?: HostnamesConfig;
   getAllowedOrigins?: () => Set<string>;
@@ -198,6 +205,7 @@ interface WebSocketServerConfig {
   daemonStatusRpc?: boolean;
   relayConfig?: boolean;
   startPaused?: boolean;
+  hostInstructions?: HostInstructionsRuntime;
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
@@ -278,6 +286,7 @@ function createFallbackWorkspaceGitService(): WorkspaceGitService {
       mainRepoRoot: null,
     }),
     getSnapshot: async (cwd: string) => createFallbackWorkspaceGitSnapshot(cwd),
+    peekSnapshot: () => null,
     resolveForge: async () => null,
     getCheckoutDiff: async () => ({ diff: "" }),
     validateBranchRef: async () => ({ kind: "not-found" }),
@@ -531,6 +540,7 @@ const HELLO_TIMEOUT_MS = 15_000;
 const WS_CLOSE_HELLO_TIMEOUT = 4001;
 const WS_CLOSE_INVALID_HELLO = 4002;
 const WS_CLOSE_INCOMPATIBLE_PROTOCOL = 4003;
+const WS_CLOSE_UNOWNED_TUNNEL_FRAME = 4004;
 const WS_CLOSE_SERVER_SHUTDOWN = 1001;
 const WS_PROTOCOL_VERSION = 1;
 const WS_RUNTIME_METRICS_FLUSH_MS = 30_000;
@@ -597,7 +607,9 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
+  private readonly hostInstructions: HostInstructionsRuntime | undefined;
   private readonly connectedHosts: ConnectedHosts;
+  private readonly httpServer: HTTPServer;
 
   toolHosts() {
     return createToolHosts(this.connectedHosts);
@@ -615,6 +627,8 @@ export class VoiceAssistantWebSocketServer {
   private terminalManager!: TerminalManager | null;
   private serviceProxy!: ServiceProxySubsystem | null;
   private scriptRuntimeStore!: WorkspaceScriptRuntimeStore | null;
+  private workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService | null = null;
+  private workspaceLaunchManager: WorkspaceLaunchManager | null = null;
   private getDaemonTcpPort!: (() => number | null) | null;
   private getDaemonTcpHost!: (() => string | null) | null;
   private serviceProxyPublicBaseUrl!: string | null;
@@ -644,6 +658,8 @@ export class VoiceAssistantWebSocketServer {
   private unsubscribeSpeechReadiness: (() => void) | null = null;
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
   private unsubscribeTerminalActivity: (() => void) | null = null;
+  private directEndpointsInterval: ReturnType<typeof setInterval> | null = null;
+  private lastDirectEndpoints = "";
   private readonly browserToolsBroker: BrowserToolsBroker | null;
   private readonly hubRelationships: HubRelationshipManagement | null;
   private connectionLifecycle: "starting" | "accepting" | "stopping" = "accepting";
@@ -745,7 +761,7 @@ export class VoiceAssistantWebSocketServer {
         agentManager.tryRunOutOfBand(
           request.recipientId,
           request.prompt,
-          { clientMessageId: request.messageIds[0] },
+          { clientMessageId: request.messageIds[0], submittedMessages: request.submittedMessages },
           onAccepted,
         ),
       isRunning: (agentId) => agentManager.hasInFlightRun(agentId),
@@ -771,7 +787,10 @@ export class VoiceAssistantWebSocketServer {
           sessionMode: batch.sessionMode,
           clearPendingPermissions: batch.clearPendingPermissions,
           unarchive: batch.unarchive,
-          runOptions: { clientMessageId: batch.messageIds[0] },
+          runOptions: {
+            clientMessageId: batch.messageIds[0],
+            submittedMessages: batch.submittedMessages,
+          },
           logger: this.logger,
         });
         if (dispatch.disposition === "turn_started")
@@ -814,7 +833,9 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.paseoHome = paseoHome;
+    this.hostInstructions = wsConfig.hostInstructions;
     this.connectedHosts = new ConnectedHosts(paseoHome, { serverId, label: getHostName() });
+    this.httpServer = server;
     this.passwordHash = auth?.password;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
@@ -869,10 +890,19 @@ export class VoiceAssistantWebSocketServer {
     });
 
     this.wss = this.createWebSocketServer(server, wsConfig, auth);
+    this.startDirectEndpointsInterval();
     this.startRuntimeMetricsInterval();
     this.startApplicationSocketLeaseInterval();
 
     this.logger.info("WebSocket server initialized on /ws");
+  }
+
+  setWorkspaceLaunchServices(params: {
+    workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService;
+    workspaceLaunchManager: WorkspaceLaunchManager;
+  }): void {
+    this.workspaceRuntimeEnvironment = params.workspaceRuntimeEnvironment;
+    this.workspaceLaunchManager = params.workspaceLaunchManager;
   }
 
   private assignOptionalServices(params: {
@@ -948,6 +978,22 @@ export class VoiceAssistantWebSocketServer {
       },
     });
     wss.on("connection", (ws, request) => {
+      if (new URL(request.url ?? "/ws", "http://localhost").searchParams.get("secure") === "1") {
+        if (!wsConfig.daemonKeyPair) {
+          ws.close(1011, "Secure direct transport unavailable");
+          return;
+        }
+        void admitSecuredRelaySocket(
+          ws,
+          {
+            daemonKeyPair: wsConfig.daemonKeyPair,
+            logger: this.logger,
+            requireProtectedMode: () => true,
+          },
+          async ({ socket }) => this.attachSocket(socket, request),
+        );
+        return;
+      }
       void this.attachAuthenticatedSocket(ws, request, password);
     });
     return wss;
@@ -974,6 +1020,21 @@ export class VoiceAssistantWebSocketServer {
     }, APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS);
     this.applicationSocketLeaseInterval = interval;
     (interval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private getDirectEndpoints(): string[] {
+    return reachableDirectEndpoints({ boundAddress: this.httpServer.address() });
+  }
+
+  private startDirectEndpointsInterval(): void {
+    this.lastDirectEndpoints = JSON.stringify(this.getDirectEndpoints());
+    this.directEndpointsInterval = setInterval(() => {
+      const current = JSON.stringify(this.getDirectEndpoints());
+      if (current === this.lastDirectEndpoints) return;
+      this.lastDirectEndpoints = current;
+      this.broadcastServerInfoUpdate();
+    }, 15_000);
+    this.directEndpointsInterval.unref?.();
   }
 
   // Main-loop stall visibility: terminal frames and agent traffic share one event
@@ -1129,7 +1190,7 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
     this.serverCapabilities = next;
-    this.broadcastCapabilitiesUpdate();
+    this.broadcastServerInfoUpdate();
   }
 
   public async attachExternalSocket(
@@ -1220,6 +1281,10 @@ export class VoiceAssistantWebSocketServer {
     if (this.applicationSocketLeaseInterval) {
       clearInterval(this.applicationSocketLeaseInterval);
       this.applicationSocketLeaseInterval = null;
+    }
+    if (this.directEndpointsInterval) {
+      clearInterval(this.directEndpointsInterval);
+      this.directEndpointsInterval = null;
     }
     this.applicationSocketLease.clear();
     this.flushRuntimeMetrics({ final: true });
@@ -1346,7 +1411,7 @@ export class VoiceAssistantWebSocketServer {
 
   private sendHelloResponse(ws: WebSocketLike, session: Session, hello: WSHelloMessage): void {
     // The peer learns our support from this ordinary response before receiving chunks.
-    this.sendToClient(ws, this.createServerInfoMessage(session));
+    this.sendToClient(ws, this.createServerInfoMessage(session, ws));
     this.chunkedSocket(ws).enabled = hello.capabilities?.[CLIENT_CAPS.binaryChunkingV1] === true;
   }
 
@@ -1716,10 +1781,19 @@ export class VoiceAssistantWebSocketServer {
           ),
         );
       },
+      emitWorkspaceUpdatesForExternalWorkspaceIds: async (workspaceIds) => {
+        const workspaceIdList = Array.from(workspaceIds);
+        await Promise.all(
+          this.listSessions().map((activeSession) =>
+            activeSession.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
+          ),
+        );
+      },
       publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
       downloadTokenStore: this.downloadTokenStore,
       pushNotifications: this.pushNotifications,
       paseoHome: this.paseoHome,
+      hostInstructions: this.hostInstructions,
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
@@ -1751,6 +1825,8 @@ export class VoiceAssistantWebSocketServer {
       hubRelationships: options.hubRelationships,
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
+      workspaceRuntimeEnvironment: this.workspaceRuntimeEnvironment ?? undefined,
+      workspaceLaunchManager: this.workspaceLaunchManager ?? undefined,
       workspaceSetupObservation: this.workspaceSetupObservation,
       workspaceSetupRuntime: this.workspaceSetupRuntime,
       workspaceArchiveOperations: this.workspaceArchiveOperations,
@@ -2057,7 +2133,10 @@ export class VoiceAssistantWebSocketServer {
     connection.session.setHostSource(sourceId);
   }
 
-  private buildServerInfoStatusPayload(session: Session): ServerInfoStatusPayload {
+  private buildServerInfoStatusPayload(
+    session: Session,
+    ws?: WebSocketLike,
+  ): ServerInfoStatusPayload {
     return {
       status: "server_info",
       protocolVersion: WS_PROTOCOL_VERSION,
@@ -2065,19 +2144,25 @@ export class VoiceAssistantWebSocketServer {
       hostname: getHostName(),
       version: this.daemonVersion,
       sourceId: session.getHostSourceId(),
-      permissions: session.getPermissions(),
+      directEndpoints: this.getDirectEndpoints(),
+      // Source-less callers publish through the session, which projects permissions per socket.
+      permissions: ws ? session.permissionsForSource(ws) : session.getPermissions(),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         connectedHosts: true,
+        hostInstructions: this.hostInstructions !== undefined,
+        hostInstructionWorkspacePolicies: this.hostInstructions !== undefined,
         hostMultiplexing: true,
+        learnedDirectEndpoints: true,
         // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.
         relayProtectedSecurity: true,
         usageSetting: true,
         usageSources: true,
         providerInstallation: true,
         ownedSubscriptions: true,
+        turnChanges: true,
         providerOptionControls: true,
         entityMetadata: true,
         diffSubscription: true,
@@ -2111,6 +2196,7 @@ export class VoiceAssistantWebSocketServer {
         // feature gate and legacy fallback after 2027-01-17 once the supported
         // daemon floor is >= v0.2.0.
         checkoutForgeSetAutoMerge: true,
+        checkoutPrPreview: true,
         // COMPAT(checkoutGithubSetAutoMerge): added in v0.1.75 and retained as
         // the fallback for checkoutForgeSetAutoMerge. Stop advertising it after
         // 2027-01-17 once supported floors are >= v0.2.0.
@@ -2229,6 +2315,7 @@ export class VoiceAssistantWebSocketServer {
         hubRelationship: true,
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
         projectGithubClone: true,
+        projectGithubCloneFolderName: true,
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
         workspaceGithubRepositorySearch: true,
         // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
@@ -2264,10 +2351,13 @@ export class VoiceAssistantWebSocketServer {
         agentMessageBatching: true,
         // COMPAT(agentActiveTurnBehaviors): added in v0.17.2, remove gate after 2027-05-22.
         agentActiveTurnBehaviors: true,
+        messageDeliveryStatus: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,
         // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.
         workspaceScriptManagement: true,
+        // COMPAT(workspaceLaunchManagement): added in v0.7.0, remove gate after 2027-08-29.
+        workspaceLaunchManagement: true,
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: true,
         // COMPAT(fsEntryOps): added in v0.3.0, remove gate after 2027-02-08.
@@ -2281,16 +2371,18 @@ export class VoiceAssistantWebSocketServer {
         agentProfiles: true,
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: true,
+        // COMPAT(networkTunnel): added in v0.12.0, remove after 2027-10-08 once daemon floor >= v0.12.0.
+        networkTunnel: true,
       },
     };
   }
 
-  private createServerInfoMessage(session: Session): WSOutboundMessage {
+  private createServerInfoMessage(session: Session, ws: WebSocketLike): WSOutboundMessage {
     return {
       type: "session",
       message: {
         type: "status",
-        payload: this.buildServerInfoStatusPayload(session),
+        payload: this.buildServerInfoStatusPayload(session, ws),
       },
     };
   }
@@ -2305,7 +2397,7 @@ export class VoiceAssistantWebSocketServer {
     });
   }
 
-  private broadcastCapabilitiesUpdate(): void {
+  private broadcastServerInfoUpdate(): void {
     for (const connection of new Set(this.sessions.values())) {
       if (
         ![...connection.sockets].some((socket) =>
@@ -2591,6 +2683,20 @@ export class VoiceAssistantWebSocketServer {
     }
     void Promise.resolve(activeConnection.session.handleBinaryFrame(decodedFrame, ws)).catch(
       (error: unknown) => {
+        if (error instanceof TunnelProtocolError) {
+          // Ownership could not be established, so only this physical socket goes; sibling
+          // sockets of the same session keep their subscriptions.
+          activeConnection.connectionLogger.warn(
+            { errorName: error.name },
+            "Closing socket after tunnel frame without ownership",
+          );
+          try {
+            ws.close(WS_CLOSE_UNOWNED_TUNNEL_FRAME, "Tunnel frame without ownership");
+          } catch {
+            // ignore close errors
+          }
+          return;
+        }
         this.handleRawMessageError({
           ws,
           data: buffer,

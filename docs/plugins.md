@@ -1,7 +1,7 @@
 # Plugins
 
 Local plugins contribute daemon RPCs, native app surfaces, workspace panels, Command Center items,
-client slash commands, timeline items, header buttons, composer pills, app themes, composer attachment sources, and settings screens.
+client slash commands, timeline items, header buttons, composer pills, inline composer sections, app themes, composer attachment sources, and settings screens.
 Paseo executes `index.server.ts` in a subprocess and `index.client.tsx` in every connected app.
 
 > **Trust every plugin you add.** `paseo plugin add` and `paseo plugin install` mean “I trust this codebase.” Plugins are unsandboxed: server code and preparation commands run with the daemon user's access on the daemon host, and client contributions run inside Paseo. The repository's dependencies and future updates are part of that trust decision. With `--host`, preparation runs on that remote daemon host.
@@ -378,6 +378,10 @@ attaches. Binary outputs reach only clients that send `pluginBinaryPayloads`. A 
 frame (`0x22`) becomes a synthetic `plugin.rpc.invoke.request` and runs through the normal message
 path, so it is authorized like any other invoke. The author contract, including the native upload
 limit, is in [stream events from the daemon](../public-docs/plugins/reference.md#subscriptions).
+
+`defineRpc()` names identify methods inside the existing `plugin.rpc.invoke.request` and
+`plugin.rpc.invoke.response` WebSocket pair. Do not add `.request` or `.response` to a plugin method
+name; those direction suffixes belong to the transport messages, not the method routed inside them.
 
 `usePaseo()` and the handler's `{ paseo }` context expose the same `PaseoApi`: projects,
 workspaces, agents, terminals, providers, and daemon config. They do not expose connection lifecycle.
@@ -809,6 +813,19 @@ The overflow sheet's content portals to the app root, away from the composer. Pa
 `useComposerSheetBridge()` as the sheet's `contextBridge`, or `useComposer()` returns nothing and
 the sheet draws no plugin rows.
 
+## Contribute inline composer sections
+
+Use `addComposerSection` for content that needs to stay above an agent's normal input rather
+than opening from a toolbar item or track pill. The [public contract](../public-docs/plugins/reference.md#composer-sections)
+owns props, lifecycle, and visibility rules.
+
+The agent panel mounts sections below the transcript and its floating `AgentTracks`, inside the
+composer's docked content. Keep tracks anchored to the transcript so they cannot cover section
+controls. Read-only sheets keep their tracks but do not mount composer sections.
+They receive the installation environment through `usePluginItemHost`; do not add separate
+SDK clients or cache contexts. Keep generation and section state in the plugin. The host
+supplies placement, identity, and per-section render boundaries only.
+
 ## Contribute New workspace items
 
 `addNewWorkspaceItem` mounts a plugin component on the New workspace screen. The public contract
@@ -961,10 +978,28 @@ export default function contribute(client: PluginClientContext) {
 }
 ```
 
-Attachment sources stay scoped to the composer's host. Unlike sidebar contributions, equal sources
-on several hosts are not coalesced. The selected snapshot submits as a text attachment with neutral
-external-resource presentation, so it remains readable if the plugin is removed or an older peer
-drops the optional presentation fields.
+Attachment sources stay scoped to the composer's host unless the source opts into `crossHost: true`.
+An opted-in source installed on another connected host appears in the attachment menu with its host
+name. Paseo asks before searching it: readable results cross from that host to the app, and the
+selected snapshot crosses to the composer's host when sent. Remote sources do not appear as New
+Agent shortcuts. Equal sources on several hosts are not coalesced. The selected snapshot submits as
+a text attachment with neutral external-resource presentation, so it remains readable if the plugin
+is removed or an older peer drops the optional presentation fields. No daemon export RPC or
+provider-native session state is involved.
+
+Set an item's optional `contextKind` to `"chat_history"` when its text is an earlier conversation.
+Paseo then places that snapshot before the new user instruction instead of appending it as an
+ordinary resource.
+
+Set the source's optional `newAgentShortcut` to `true` when New Agent drafts should show a direct
+action beside Import Session. The source remains available from the attachment menu everywhere.
+
+Set an item's optional `contextKind` to `"chat_history"` when its text is an earlier conversation.
+Paseo then places that snapshot before the new user instruction instead of appending it as an
+ordinary resource.
+
+Set the source's optional `newAgentShortcut` to `true` when New Agent drafts should show a direct
+action beside Import Session. The source remains available from the attachment menu everywhere.
 
 ## Contribute settings
 

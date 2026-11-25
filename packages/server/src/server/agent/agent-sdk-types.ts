@@ -206,7 +206,14 @@ export type AgentPromptContentBlock =
 
 export type AgentPromptInput = string | AgentPromptContentBlock[];
 
+/** Original daemon-submitted identities, before quoting or agent-message batching. */
+export interface SubmittedMessageFingerprint {
+  clientMessageId: string;
+  promptFingerprint: string;
+}
+
 export interface AgentRunOptions {
+  submittedMessages?: readonly SubmittedMessageFingerprint[];
   outputSchema?: unknown;
   resumeFrom?: AgentPersistenceHandle;
   maxThinkingTokens?: number;
@@ -763,6 +770,8 @@ export interface AgentSession {
    * still uncertain.
    */
   interrupt(): Promise<void>;
+  /** A failed stop still owns a runtime even after its local turn ended. */
+  hasPendingInterruptRecovery?(): boolean;
   /** Stop one currently owned background item and wait for provider confirmation. */
   stopBackgroundWork?(id: string): Promise<void>;
   /** True only when releasing this runtime loses no background work or pending replies.

@@ -712,6 +712,7 @@ describe("ClaudeAgentSession features", () => {
     const queryMock = {
       close: vi.fn(),
       return: queryReturn,
+      interrupt: vi.fn(async () => undefined),
       applyFlagSettings: vi.fn(async () => undefined),
       setModel: vi.fn(async () => undefined),
       getContextUsage: vi.fn(async () => undefined),
@@ -909,15 +910,16 @@ describe("ClaudeAgentSession features", () => {
       },
     }).createSession({ provider: "claude", cwd: process.cwd(), modeId: "default" });
     const turn = session.startTurn("must not run after closure");
+    const rejected = expect(turn).rejects.toThrow("Claude session is closed");
     try {
       await started;
       await session.close();
       allowOptions();
-      await turn;
+      await rejected;
       expect(queryFactory).not.toHaveBeenCalled();
     } finally {
       allowOptions();
-      await turn;
+      await rejected;
       await session.close();
     }
   });
@@ -4946,4 +4948,23 @@ describe("Claude import descriptor scheduling", () => {
     reads.get("later")!.resolve("later descriptor");
     await expect(later).resolves.toEqual(["later descriptor"]);
   });
+});
+
+test("Claude startTurn rejects when query startup fails before submitting the prompt", async () => {
+  const client = new ClaudeAgentClient({
+    logger: createTestLogger(),
+    resolveBinary: async () => "/test/claude/bin",
+    queryFactory: () => {
+      throw new Error("query startup failed");
+    },
+  });
+  const session = await client.createSession({ provider: "claude", cwd: process.cwd() });
+  const events: AgentStreamEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  try {
+    await expect(session.startTurn("never submitted")).rejects.toThrow("query startup failed");
+    expect(events.filter((event) => event.type === "turn_failed")).toHaveLength(1);
+  } finally {
+    await session.close();
+  }
 });

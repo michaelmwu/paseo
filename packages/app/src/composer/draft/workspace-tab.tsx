@@ -1,16 +1,14 @@
 import type { ComposerOptionControls } from "@/agent-controls/option-controls";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
-import { Keyboard, StyleSheet as RNStyleSheet, View } from "react-native";
+import { Keyboard, StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import invariant from "tiny-invariant";
 import { Composer } from "@/composer";
 import { type ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
-import { ComposerImportPill } from "@/composer/draft/import-pill";
-import { COMPOSER_PILL_CLEARANCE } from "@/composer/pill-styles";
+import { DraftAttachmentActions } from "@/composer/draft/attachment-actions";
 import { composerWorkspaceAttachment } from "@/composer/attachments/workspace";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
@@ -18,6 +16,7 @@ import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "@/composer/dra
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { buildWorkspaceDraftAgentConfig } from "@/screens/workspace/workspace-draft-agent-config";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
+import { prepareDraftCreation, useDraftStore } from "@/stores/draft-store";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { Agent } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
@@ -47,7 +46,7 @@ import {
 } from "@/workspace-tabs/model";
 import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
 import { useSettings } from "@/hooks/use-settings";
-import { draftCreationKey } from "@/composer/draft/creation-key";
+import { draftCreations } from "@/composer/draft/creation-attempts";
 
 interface AutoSubmitConfig {
   provider: string;
@@ -105,6 +104,8 @@ function resolveDraftModeId(input: {
 }
 
 async function submitDraftCreateRequest(input: {
+  draftStoreKey: string;
+  serverId: string;
   draftId: string;
   attempt: { clientMessageId: string };
   text: string;
@@ -165,18 +166,26 @@ async function submitDraftCreateRequest(input: {
 
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
   const imagesData = await encodeImages(images);
+  const creationDraftId = await prepareDraftCreation({
+    draftKey: input.draftStoreKey,
+    proposedId: input.draftId,
+  });
+  const metadata = useDraftStore.getState().metadataByDraftKey[input.draftStoreKey] ?? {};
   const request = {
     config,
     workspaceId,
     initialPrompt: text,
     clientMessageId: attempt.clientMessageId,
-    ...(Object.keys(composerState.metadata).length > 0 ? { metadata: composerState.metadata } : {}),
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
     ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
   };
-  const result = await client.createAgent({
-    ...request,
-    idempotencyKey: draftCreationKey(input.draftId, request),
+  const result = await draftCreations.submit({
+    serverId: input.serverId,
+    draftId: creationDraftId,
+    kind: "agent",
+    request,
+    send: (options) => client.createAgent({ ...request, ...options }),
   });
 
   return {
@@ -263,16 +272,6 @@ interface WorkspaceDraftComposerProps {
   editingSession: ComposerEditingSession;
   onCreated: (snapshot: AgentSnapshotPayload) => void;
   onOpenImportSheet?: () => void;
-}
-
-function resolveImportPillPress(
-  onOpenImportSheet: (() => void) | undefined,
-  isSubmitting: boolean,
-): (() => void) | null {
-  if (isSubmitting) {
-    return null;
-  }
-  return onOpenImportSheet ?? null;
 }
 
 /**
@@ -439,6 +438,8 @@ export function WorkspaceDraftComposer({
           return { agentId: result.id, result };
         }
         return submitDraftCreateRequest({
+          draftStoreKey,
+          serverId,
           draftId,
           attempt,
           text,
@@ -525,7 +526,6 @@ export function WorkspaceDraftComposer({
   const handleDropdownCloseFocus = useCallback(() => {
     focusInputRef.current?.();
   }, []);
-  const importPillPress = resolveImportPillPress(onOpenImportSheet, isSubmitting);
   const composerAgentControls = useMemo(
     () => ({
       ...composerState.agentControls,
@@ -536,12 +536,21 @@ export function WorkspaceDraftComposer({
   );
   return (
     <View style={animatedStaticStyles.inputAreaWrapper} onLayout={onInputAreaLayout}>
-      {importPillPress && !isComposerFullscreen ? (
-        <View style={styles.importPillRow} dataSet={CHAT_COLUMN_RAIL_DATASET}>
-          <View style={styles.importPillContent}>
-            <ComposerImportPill onPress={importPillPress} />
+      {formErrorMessage ? (
+        <View style={styles.formErrorRow}>
+          <View style={styles.formError}>
+            <Text style={styles.errorText}>{formErrorMessage}</Text>
           </View>
         </View>
+      ) : null}
+      {!isSubmitting && !isComposerFullscreen ? (
+        <DraftAttachmentActions
+          serverId={serverId}
+          client={client}
+          attachments={draftInput.attachments}
+          onChangeAttachments={draftInput.setAttachments}
+          onOpenImportSheet={onOpenImportSheet}
+        />
       ) : null}
       <Composer
         agentId={tabId}
@@ -583,22 +592,23 @@ const animatedStaticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme) => ({
-  importPillRow: {
+  formErrorRow: {
     width: "100%",
     paddingHorizontal: theme.spacing[4],
-    paddingTop: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
-    paddingBottom: {
-      xs: COMPOSER_PILL_CLEARANCE.compact,
-      md: COMPOSER_PILL_CLEARANCE.wide,
-    },
     alignItems: "center",
   },
-  importPillContent: {
+  formError: {
     width: "100%",
     maxWidth: theme.contentMaxWidth,
-    flexDirection: "row",
+    marginBottom: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.destructive,
+  },
+  errorText: {
+    color: theme.colors.destructive,
   },
 }));
