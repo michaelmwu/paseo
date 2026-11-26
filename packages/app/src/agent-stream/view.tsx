@@ -25,7 +25,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { MAX_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { useMutation } from "@tanstack/react-query";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { Check, ChevronDown, X } from "lucide-react-native";
+import { Check, ChevronDown, MessageSquare, PencilLine, X } from "lucide-react-native";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { openSidePanelView } from "@/workspace-tabs/side-panel";
 import {
@@ -40,7 +40,6 @@ import {
   type InlinePathTarget,
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
-import { Button } from "@/components/ui/button";
 import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
 import { PlanReviewForm, planReviewLabelKey } from "./plan-review-form";
 import type { StreamItem } from "@/types/stream";
@@ -1211,6 +1210,8 @@ function ToolCallSlot({
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedCheckIcon = withUnistyles(Check);
 const ThemedXIcon = withUnistyles(X);
+const ThemedMessageSquareIcon = withUnistyles(MessageSquare);
+const ThemedPencilLineIcon = withUnistyles(PencilLine);
 
 const primaryColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
@@ -1228,17 +1229,17 @@ const pressableStyle = ({
   pressed ? permissionStyles.optionButtonPressed : null,
 ];
 
-interface PermissionActionButtonProps {
-  action: AgentPermissionAction;
-  isRespondingAction: boolean;
+interface PermissionActionButtonProps<Action extends { label: string }> {
+  action: Action;
+  isRespondingAction?: boolean;
   isResponding: boolean;
-  isPrimary: boolean;
+  isPrimary?: boolean;
   Icon: typeof ThemedCheckIcon;
   testID: string;
-  onPress: (action: AgentPermissionAction) => void;
+  onPress: (action: Action) => void;
 }
 
-function PermissionActionButton({
+function PermissionActionButton<Action extends { label: string }>({
   action,
   isRespondingAction,
   isResponding,
@@ -1246,7 +1247,7 @@ function PermissionActionButton({
   Icon,
   testID,
   onPress,
-}: PermissionActionButtonProps) {
+}: PermissionActionButtonProps<Action>) {
   const handlePress = useCallback(() => onPress(action), [onPress, action]);
   const optionTextStyle = isPrimary
     ? [permissionStyles.optionText, permissionStyles.optionTextPrimary]
@@ -1397,12 +1398,27 @@ function PermissionRequestCard({
   const isMobile = useIsCompactFormFactor();
 
   const { request } = permission;
-  const requestPlanChanges = useCallback(() => {
-    onOpenPlanReview?.({ permission, action: "request_changes" });
-  }, [onOpenPlanReview, permission]);
-  const implementPlanWithNotes = useCallback(() => {
-    onOpenPlanReview?.({ permission, action: "implement_with_notes" });
-  }, [onOpenPlanReview, permission]);
+  const handlePlanReviewAction = useCallback(
+    ({ id }: { id: AgentPlanReviewAction }) => onOpenPlanReview?.({ permission, action: id }),
+    [onOpenPlanReview, permission],
+  );
+  const planReviewActions = useMemo(
+    () => [
+      {
+        id: "request_changes" as const,
+        label: t(planReviewLabelKey.request_changes),
+        Icon: ThemedMessageSquareIcon,
+        testID: "plan-request-changes",
+      },
+      {
+        id: "implement_with_notes" as const,
+        label: t(planReviewLabelKey.implement_with_notes),
+        Icon: ThemedPencilLineIcon,
+        testID: "plan-implement-with-notes",
+      },
+    ],
+    [t],
+  );
   const isPlanRequest = request.kind === "plan";
   const title = isPlanRequest
     ? t("agentStream.permission.plan")
@@ -1578,26 +1594,18 @@ function PermissionRequestCard({
         {onOpenPlanReview &&
         isPlanRequest &&
         planMarkdown?.trim() &&
-        (request.provider === "codex" || request.provider === "claude") ? (
-          <>
-            <Button
-              size="sm"
-              disabled={isResponding}
-              testID="plan-request-changes"
-              onPress={requestPlanChanges}
-            >
-              {t(planReviewLabelKey.request_changes)}
-            </Button>
-            <Button
-              size="sm"
-              disabled={isResponding}
-              testID="plan-implement-with-notes"
-              onPress={implementPlanWithNotes}
-            >
-              {t(planReviewLabelKey.implement_with_notes)}
-            </Button>
-          </>
-        ) : null}
+        (request.provider === "codex" || request.provider === "claude")
+          ? planReviewActions.map((action) => (
+              <PermissionActionButton
+                key={action.id}
+                action={action}
+                isResponding={isResponding}
+                Icon={action.Icon}
+                testID={action.testID}
+                onPress={handlePlanReviewAction}
+              />
+            ))
+          : null}
       </View>
     </>
   );
