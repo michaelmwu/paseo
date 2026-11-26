@@ -33,6 +33,7 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Native PR-watch composer/setup entry points #10736   | `9dc9ae0da` |
 | Shared workspace header management #10446            | `9d915bec3` |
 | Passive native PR/MR-watch running status #10845     | `b686ed6c1` |
+| Plan feedback actions, fork michaelmwu/paseo#16      | `4798c079c` |
 
 No selected feature PR is newly merged into v0.17.4, so none is removed.
 This release-only rebuild retains the verified feature revisions above, including
@@ -51,6 +52,13 @@ companion revisions stay pinned.
 #10845 adds the passive native PR/MR-watch registration from `f666920d5` for
 review. The release already supports passive Background work and its state buckets;
 no waiting-heartbeat backport is needed. Keep all other feature and plugin pins.
+
+Fork [michaelmwu/paseo#16](https://github.com/michaelmwu/paseo/pull/16) adds plan
+feedback from `8bd4a5102`. Apply only its four feature commits after `7db6dcefe`;
+its historical `daemon-patches-a7f3bf7` base is not an integration input. This is
+not upstream getpaseo/paseo#16. Keep release-era collapsible plan outcomes, turn
+capture, cancellation and message receipts. Codex Plan mode uses provider options,
+not the source branch's retired feature setter. Other feature and plugin pins stay fixed.
 
 #7782, #9580, #9757 and #9931 are already in the release; their merge commits
 are verified ancestors of v0.17.4. #6534 and #9549/#5633 remain included once
@@ -108,6 +116,10 @@ companion PR watcher plugin, migrate that plugin or start watches automatically.
 Shared workspace header management likewise needs a matching patched client;
 rebuilding or replacing only the daemon cannot add these menu rows to an official app.
 
+Plan feedback also needs a matching patched client. A host advertises `planReview`
+before the client offers Request changes or Implement with notes. Older hosts retain
+ordinary permission actions. This daemon rebuild does not distribute a client app.
+
 #10320 retains sender-wide Ask each time/Allow unattended defaults and workspace
 inherit/ask/unattended/blocked policies for existing conversations. Both hosts
 need that revision. New-agent creation through restricted grants is outside the
@@ -146,6 +158,33 @@ All heavy commands use `paseo-resources job`. Core dependencies use the official
 release lock and `npm ci --ignore-scripts`; reviewed repository patches run through
 `npm run postinstall` afterward. npm 10 lacks dependency-age cooldown support.
 Fresh validation logs remain in ignored `.dev/`.
+
+### Fork #16 plan-feedback build
+
+- Extract only `22ff84351` through `4798c079c` from the fork PR. Preserve current
+  plan disclosure/outcome rendering, foreground admission, cancellation, turn
+  capture and receipt handling. Use current Codex provider options for Plan mode.
+- Full dependency stack/server/CLI rebuild, full monorepo typecheck and lint pass.
+  CLI reports 0.17.4. Protocol validation is regenerated through the normal build.
+- Focused checks pass: 9 manager cases (including turn-capture cancellation),
+  3 session RPC/permission cases, 7 wire-schema cases, 5 client cases,
+  34 outbound-validation cases, 10 authorization cases and 45 locale cases.
+- Four real-Chromium component tests cover the shared draft, compact/wide controls,
+  failure/retry, cancellation/reopen, pending submission and stale proposals.
+- Compiled isolated-daemon smoke passes with `planReview`, a correlated unknown-agent
+  rejection and all eight pinned plugins running. Browser/JPEG streaming, real PTY,
+  launch recovery and retained output pass. No production restart or plugin migration.
+
+Remaining browser gate: `codex-plan-approval.spec.ts` cannot find the initial
+"Start chatting with this agent..." prompt before exercising the plan card. It
+fails on the original cold route and after two test-setup adjustments (directory
+hydration and sidebar navigation); neither adjustment is retained. The daemon
+inventory and sidebar preconditions passed in the adjusted runs. Post-cleanup
+"Workspace unavailable" screenshots do not establish the original failure's cause.
+Stop retrying this check for now; keep the regression test and report it as red.
+Logs: `.dev/fork-pr16-e2e.log`, `-e2e-final.log`, `-e2e-ui.log`; other fresh
+validation uses `.dev/fork-pr16-*.log`. No new real-provider, native-device,
+packaged Electron or installed-client QA is claimed.
 
 ### #10845 review build
 

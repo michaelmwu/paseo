@@ -2,7 +2,7 @@
   "release": { "tag": "v0.17.4", "commit": "2b3559b107243306986176b80beb0e779f9fe53e" },
   "retainedBundle": "b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe",
   "rebuildBase": "b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe",
-  "incrementalBuildBase": "f666920d5046db9cbf6d1ea70cd89d10e4e0133f",
+  "incrementalBuildBase": "8bd4a5102dda5ddeb23ab63ce6374946e8130016",
   "alreadyInRelease": [7782, 9580, 9757, 9931, 10507],
   "mergedPrerequisiteBackports": [],
   "features": [
@@ -103,6 +103,12 @@
       "pr": 10845,
       "branch": "fix/pr-watch-running-status",
       "commit": "b686ed6c190e52177ecef710c9cc1cb310e4dde3"
+    },
+    {
+      "repository": "michaelmwu/paseo",
+      "pr": 16,
+      "branch": "striped-snake",
+      "commit": "4798c079c8f960e47338cce55c9398298e0ce688"
     }
   ],
   "plugins": [

@@ -2333,6 +2333,7 @@ export class VoiceAssistantWebSocketServer {
         agentConfigApply: true,
         // COMPAT(networkTunnel): added in v0.12.0, remove after 2027-10-08 once daemon floor >= v0.12.0.
         networkTunnel: true,
+        planReview: true,
       },
     };
   }

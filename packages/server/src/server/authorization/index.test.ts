@@ -74,6 +74,19 @@ describe("SessionAuthorization", () => {
     ).toBe(false);
   });
 
+  test("plan review requires workspace write authority in both directions", () => {
+    for (const permissions of [["workspace.read"], ["workspace.write"]] as const) {
+      const authorization = new SessionAuthorization(permissions);
+      const allowed = permissions[0] === "workspace.write";
+      expect(authorization.allowsInbound(inboundMessage("agent.plan.review.request"))).toBe(
+        allowed,
+      );
+      expect(authorization.allowsOutbound(outboundMessage("agent.plan.review.response"))).toBe(
+        allowed,
+      );
+    }
+  });
+
   test("classifies native session continuation as workspace write authority", () => {
     const authorization = new SessionAuthorization(["workspace.write"]);
 

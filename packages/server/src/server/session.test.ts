@@ -6549,6 +6549,56 @@ test("publishes the current dormant inventory when an older update waits on stor
   await session.cleanup();
 });
 
+test.each([null, "This plan is no longer awaiting review."])(
+  "plan review returns its correlated result: %s",
+  async (error) => {
+    const messages: SessionOutboundMessage[] = [];
+    const reviewPlan = vi.fn(async () => {
+      if (error) throw new Error(error);
+    });
+    const session = createSessionForTest({ messages, agentManager: { reviewPlan } });
+    const request = {
+      type: "agent.plan.review.request" as const,
+      requestId: "review-rpc",
+      agentId: "agent",
+      permissionRequestId: "proposal",
+      action: "request_changes" as const,
+      text: "Keep existing lines.",
+    };
+    try {
+      await session.handleMessage(request);
+      expect(reviewPlan).toHaveBeenCalledExactlyOnceWith(request);
+      expect(findByType(messages, "agent.plan.review.response")).toEqual({
+        type: "agent.plan.review.response",
+        payload: { requestId: "review-rpc", agentId: "agent", error },
+      });
+    } finally {
+      await session.cleanup();
+    }
+  },
+);
+
+test("plan review cannot be submitted through a read-only session", async () => {
+  const reviewPlan = vi.fn();
+  const session = createSessionForTest({
+    permissions: ["workspace.read"],
+    agentManager: { reviewPlan },
+  });
+  try {
+    await session.handleMessage({
+      type: "agent.plan.review.request",
+      requestId: "read-only-review",
+      agentId: "agent",
+      permissionRequestId: "proposal",
+      action: "implement_with_notes",
+      text: "Keep existing lines.",
+    });
+    expect(reviewPlan).not.toHaveBeenCalled();
+  } finally {
+    await session.cleanup();
+  }
+});
+
 test("starts a change request watch only for an eligible agent with automation permission", async () => {
   const messages: SessionOutboundMessage[] = [];
   const active = createStoredAgentRecord({ id: "active", cwd: "/tmp/repo" });

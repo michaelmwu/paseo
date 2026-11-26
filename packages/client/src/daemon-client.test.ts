@@ -11648,6 +11648,68 @@ test("disposing a route before its deferred close does not reopen it on origin r
   expect(closed).toHaveBeenCalledTimes(1);
 });
 
+test.each([null, "The plan is no longer awaiting review."])(
+  "plan review correlates its response and surfaces error %s",
+  async (error) => {
+    const transport = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "plan-review",
+      transportFactory: () => transport.transport,
+      reconnect: { enabled: false },
+    });
+    clients.push(client);
+    const connecting = client.connect();
+    transport.triggerOpen({ features: { planReview: true } });
+    await connecting;
+    const input = {
+      agentId: "agent",
+      permissionRequestId: "proposal",
+      action: "implement_with_notes" as const,
+      text: "Keep existing lines.",
+    };
+    const review = client.reviewAgentPlan(input);
+    const request = parseSentFrame(transport.sent[0]);
+    expect(request).toEqual({
+      type: "agent.plan.review.request",
+      requestId: expect.any(String),
+      ...input,
+    });
+    transport.triggerMessage(
+      wrapSessionMessage({
+        type: "agent.plan.review.response",
+        payload: { requestId: request.requestId, agentId: "agent", error },
+      }),
+    );
+    if (error) await expect(review).rejects.toThrow(error);
+    else await expect(review).resolves.toBeUndefined();
+    expect(transport.sent).toHaveLength(1);
+  },
+);
+
+test("plan review rejects an older host without sending a request", async () => {
+  const transport = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "legacy-plan-review",
+    transportFactory: () => transport.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  transport.triggerOpen({ features: {} });
+  await connecting;
+  await expect(
+    client.reviewAgentPlan({
+      agentId: "agent",
+      permissionRequestId: "proposal",
+      action: "request_changes",
+      text: "Revise it.",
+    }),
+  ).rejects.toThrow("Update the Paseo host");
+  expect(transport.sent).toHaveLength(0);
+});
+
 test("message delivery checks require host support and never submit a message", async () => {
   const transport = createMockTransport();
   const client = new DaemonClient({

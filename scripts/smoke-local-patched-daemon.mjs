@@ -55,6 +55,16 @@ try {
   assert.equal(info.features.hostInstructions, true);
   assert.equal(info.features.hostInstructionWorkspacePolicies, true);
   assert.equal(info.features.agentChangeRequestSubscribe, true);
+  assert.equal(info.features.planReview, true);
+  await assert.rejects(
+    observer.reviewAgentPlan({
+      agentId: "00000000-0000-4000-8000-000000000016",
+      permissionRequestId: "missing-proposal",
+      action: "request_changes",
+      text: "Revise the proposal.",
+    }),
+    /Unknown agent/,
+  );
   await assert.rejects(
     observer.subscribeAgentChangeRequest({
       agentId: "missing-native-watch-smoke-agent",

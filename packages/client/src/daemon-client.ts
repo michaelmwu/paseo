@@ -4539,6 +4539,27 @@ export class DaemonClient {
     return this.sendAgentMessage(agentId, text, options);
   }
 
+  async reviewAgentPlan(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "agent.plan.review.request" }>,
+      "type" | "requestId"
+    >,
+  ): Promise<void> {
+    // COMPAT(planReview): added after v0.17.4, remove after 2027-05-27.
+    if (this.getLastServerInfoMessage()?.features?.planReview !== true) {
+      throw new Error("Update the Paseo host to send plan feedback.");
+    }
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.plan.review.response">(
+      {
+        message: { type: "agent.plan.review.request", ...input },
+        timeout: 60_000,
+      },
+    );
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+  }
+
   async rewindAgent(
     agentId: string,
     messageId: string,
