@@ -333,9 +333,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const resolvedServerId = serverId ?? context.serverId ?? "";
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
-    const supportsPlanReview = useSessionStore(
-      (state) => state.sessions[resolvedServerId]?.serverInfo?.features?.planReview === true,
-    );
     const sessionStreamHead = useSessionStore((state) =>
       state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
     );
@@ -875,22 +872,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ],
     );
 
-    const pendingPermissionItems = useMemo(
-      () => Array.from(pendingPermissions.values()).filter((perm) => perm.agentId === agentId),
-      [pendingPermissions, agentId],
-    );
-
-    const pendingPermissionsNode = useMemo(
-      () => (
-        <PendingPermissionCards
-          key={JSON.stringify([resolvedServerId, agentId])}
-          permissions={pendingPermissionItems}
-          client={client}
-          supportsPlanReview={supportsPlanReview}
-        />
-      ),
-      [agentId, client, pendingPermissionItems, resolvedServerId, supportsPlanReview],
-    );
+    const pendingPermissionsNode = usePendingPermissionsNode({
+      agentId,
+      resolvedServerId,
+      pendingPermissions,
+      client,
+    });
     const turnFooterNode = useMemo(
       () =>
         isTurnActive || bottomTurnFooterHost ? (
@@ -986,9 +973,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const renderLiveAuxiliary = useCallback<StreamSegmentRenderers["renderLiveAuxiliary"]>(() => {
       const existingTailSpacing =
-        auxiliary.turnFooter && pendingPermissionItems.length === 0
-          ? TURN_FOOTER_BOTTOM_SPACING
-          : 0;
+        auxiliary.turnFooter && !auxiliary.pendingPermissions ? TURN_FOOTER_BOTTOM_SPACING : 0;
       const bottomOverlayInset = resolveBottomOverlayTailInset({
         requiredTailClearance: bottomOverlayTailClearance,
         existingTailSpacing,
@@ -998,12 +983,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         turnFooter: auxiliary.turnFooter,
         bottomOverlayInset,
       });
-    }, [
-      auxiliary.pendingPermissions,
-      auxiliary.turnFooter,
-      bottomOverlayTailClearance,
-      pendingPermissionItems.length,
-    ]);
+    }, [auxiliary.pendingPermissions, auxiliary.turnFooter, bottomOverlayTailClearance]);
 
     const renderers = useMemo<StreamSegmentRenderers>(
       () => ({
@@ -1297,24 +1277,90 @@ interface PlanReviewSelection {
   action: AgentPlanReviewAction;
 }
 
+function usePendingPermissionsNode({
+  agentId,
+  resolvedServerId,
+  pendingPermissions,
+  client,
+}: {
+  agentId: string;
+  resolvedServerId: string;
+  pendingPermissions: AgentStreamViewProps["pendingPermissions"];
+  client: DaemonClient | null;
+}): ReactNode {
+  const supportsPlanReview = useSessionStore(
+    (state) => state.sessions[resolvedServerId]?.serverInfo?.features?.planReview === true,
+  );
+  const pendingPermissionItems = useMemo(
+    () => Array.from(pendingPermissions.values()).filter((perm) => perm.agentId === agentId),
+    [pendingPermissions, agentId],
+  );
+
+  const permissionScope = JSON.stringify([resolvedServerId, agentId]);
+  const [selectedPlanReview, setSelectedPlanReview] = useState<{
+    scope: string;
+    selection: PlanReviewSelection;
+  } | null>(null);
+  const planReview =
+    selectedPlanReview?.scope === permissionScope ? selectedPlanReview.selection : null;
+  useEffect(() => {
+    setSelectedPlanReview((current) => (current?.scope === permissionScope ? current : null));
+  }, [permissionScope]);
+  const openPlanReview = useCallback(
+    (selection: PlanReviewSelection) =>
+      setSelectedPlanReview({ scope: permissionScope, selection }),
+    [permissionScope],
+  );
+  const closePlanReview = useCallback(() => {
+    setSelectedPlanReview((current) => (current === selectedPlanReview ? null : current));
+  }, [selectedPlanReview]);
+
+  // A selected review keeps its card mounted if the host resolves the permission first.
+  return useMemo(
+    () =>
+      pendingPermissionItems.length > 0 || planReview ? (
+        <PendingPermissionCards
+          key={permissionScope}
+          permissions={pendingPermissionItems}
+          client={client}
+          supportsPlanReview={supportsPlanReview}
+          review={planReview}
+          onOpenReview={openPlanReview}
+          onCloseReview={closePlanReview}
+        />
+      ) : null,
+    [
+      client,
+      closePlanReview,
+      openPlanReview,
+      pendingPermissionItems,
+      permissionScope,
+      planReview,
+      supportsPlanReview,
+    ],
+  );
+}
+
 function PendingPermissionCards({
   permissions,
   client,
   supportsPlanReview,
+  review,
+  onOpenReview,
+  onCloseReview,
 }: {
   permissions: PendingPermission[];
   client: DaemonClient | null;
   supportsPlanReview: boolean;
+  review: PlanReviewSelection | null;
+  onOpenReview: (selection: PlanReviewSelection) => void;
+  onCloseReview: () => void;
 }) {
-  const [review, setReview] = useState<PlanReviewSelection | null>(null);
-  const closeReview = useCallback(() => setReview(null), []);
   const activeReview =
     review && permissions.some((permission) => permission.key === review.permission.key);
   // Keep the draft available if the host consumes or replaces the proposal before replying.
   const visiblePermissions =
     review && !activeReview ? [...permissions, review.permission] : permissions;
-  if (visiblePermissions.length === 0) return null;
-
   return (
     <View style={stylesheet.permissionsContainer}>
       {visiblePermissions.map((permission) => (
@@ -1322,10 +1368,10 @@ function PendingPermissionCards({
           key={permission.key}
           permission={permission}
           client={client}
-          onOpenPlanReview={supportsPlanReview && !review ? setReview : undefined}
+          onOpenPlanReview={supportsPlanReview && !review ? onOpenReview : undefined}
           reviewAction={review?.permission.key === permission.key ? review.action : undefined}
           canSubmitPlanReview={supportsPlanReview && Boolean(activeReview)}
-          onClosePlanReview={closeReview}
+          onClosePlanReview={onCloseReview}
         />
       ))}
     </View>
