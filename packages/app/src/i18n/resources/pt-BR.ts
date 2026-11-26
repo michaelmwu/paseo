@@ -212,9 +212,7 @@ export const ptBR: TranslationResources = {
       proposedPlan: "Plano proposto",
       requestChanges: "Solicitar alterações",
       implementWithNotes: "Implementar com notas",
-      revisionPlaceholder: "O que deve mudar no plano?",
-      implementationNotesPlaceholder:
-        "O que o agente deve fazer de forma diferente durante a implementação?",
+      feedbackPlaceholder: "Dê feedback sobre o plano",
       stalePlan: "Este plano não está mais aguardando revisão.",
       planReviewFailed: "Não foi possível enviar o feedback sobre o plano.",
     },

@@ -1396,6 +1396,11 @@ function PermissionRequestCard({
 }) {
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
+  const [planReviewDraft, setPlanReviewDraft] = useState("");
+  const finishPlanReview = useCallback(() => {
+    setPlanReviewDraft("");
+    onClosePlanReview();
+  }, [onClosePlanReview]);
 
   const { request } = permission;
   const handlePlanReviewAction = useCallback(
@@ -1555,11 +1560,15 @@ function PermissionRequestCard({
 
   const footer = reviewAction ? (
     <PlanReviewForm
-      action={reviewAction}
+      primaryAction={reviewAction}
       permission={permission}
       client={client}
       isAwaitingReview={canSubmitPlanReview}
+      isCompact={isMobile}
+      draft={planReviewDraft}
+      onChangeDraft={setPlanReviewDraft}
       onClose={onClosePlanReview}
+      onSubmitSuccess={finishPlanReview}
     />
   ) : (
     <>

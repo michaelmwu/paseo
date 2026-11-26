@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
 import { Button } from "@/components/ui/button";
@@ -13,65 +13,84 @@ export const planReviewLabelKey = {
   implement_with_notes: "agentStream.permission.implementWithNotes",
 } as const;
 
+const PlanFeedbackInput = withUnistyles(EditingTextInput, (theme) => ({
+  placeholderTextColor: theme.colors.foregroundMuted,
+}));
+
 export function PlanReviewForm({
-  action,
+  primaryAction,
   permission,
   client,
   isAwaitingReview,
+  isCompact,
+  draft,
+  onChangeDraft,
   onClose,
+  onSubmitSuccess,
 }: {
-  action: AgentPlanReviewAction;
+  primaryAction: AgentPlanReviewAction;
   permission: PendingPermission;
   client: DaemonClient | null;
   isAwaitingReview: boolean;
+  isCompact: boolean;
+  draft: string;
+  onChangeDraft: (text: string) => void;
   onClose: () => void;
+  onSubmitSuccess: () => void;
 }) {
   const { t } = useTranslation();
-  const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<AgentPlanReviewAction | null>(null);
   const submitting = useRef(false);
-  const label = t(planReviewLabelKey[action]);
-  const placeholder = t(
-    action === "request_changes"
-      ? "agentStream.permission.revisionPlaceholder"
-      : "agentStream.permission.implementationNotesPlaceholder",
-  );
+  const placeholder = t("agentStream.permission.feedbackPlaceholder");
+  const isSubmitting = submittingAction !== null;
   const stale = !isAwaitingReview && !isSubmitting;
   const errorText = error ?? (stale ? t("agentStream.permission.stalePlan") : null);
+  const submitDisabled = isSubmitting || stale || !client || !draft.trim();
 
-  const submit = useCallback(async () => {
-    if (submitting.current || !client || !isAwaitingReview || !text.trim()) return;
-    submitting.current = true;
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      await client.reviewAgentPlan({
-        agentId: permission.agentId,
-        permissionRequestId: permission.request.id,
-        action,
-        text,
-      });
-      onClose();
-    } catch (failure) {
-      setError(
-        failure instanceof Error ? failure.message : t("agentStream.permission.planReviewFailed"),
-      );
-    } finally {
-      submitting.current = false;
-      setIsSubmitting(false);
-    }
-  }, [action, client, isAwaitingReview, onClose, permission, t, text]);
+  const submit = useCallback(
+    async (action: AgentPlanReviewAction) => {
+      if (submitting.current || !client || !isAwaitingReview || !draft.trim()) return;
+      submitting.current = true;
+      setSubmittingAction(action);
+      setError(null);
+      try {
+        await client.reviewAgentPlan({
+          agentId: permission.agentId,
+          permissionRequestId: permission.request.id,
+          action,
+          text: draft,
+        });
+        onSubmitSuccess();
+      } catch (failure) {
+        setError(
+          failure instanceof Error ? failure.message : t("agentStream.permission.planReviewFailed"),
+        );
+      } finally {
+        submitting.current = false;
+        setSubmittingAction(null);
+      }
+    },
+    [client, draft, isAwaitingReview, onSubmitSuccess, permission, t],
+  );
+  const requestChanges = useCallback(() => submit("request_changes"), [submit]);
+  const implementWithNotes = useCallback(() => submit("implement_with_notes"), [submit]);
+  const cancelButton = (
+    <Button size="sm" variant="ghost" onPress={onClose} disabled={isSubmitting}>
+      {t("common.actions.cancel")}
+    </Button>
+  );
 
   return (
     <View style={styles.form}>
-      <EditingTextInput
+      <PlanFeedbackInput
         accessibilityLabel={placeholder}
         autoFocus
         multiline
         editable={!isSubmitting}
         placeholder={placeholder}
-        onChangeText={setText}
+        initialValue={draft}
+        onChangeText={onChangeDraft}
         style={styles.input}
         testID="plan-review-input"
       />
@@ -80,20 +99,29 @@ export function PlanReviewForm({
           {errorText}
         </Text>
       ) : null}
-      <View style={styles.actions}>
-        <Button size="sm" variant="ghost" onPress={onClose} disabled={isSubmitting}>
-          {t("common.actions.cancel")}
+      <View style={isCompact ? styles.compactActions : styles.actions}>
+        {isCompact ? null : cancelButton}
+        <Button
+          size={isCompact ? "md" : "sm"}
+          variant={primaryAction === "request_changes" ? "default" : "outline"}
+          onPress={requestChanges}
+          loading={submittingAction === "request_changes"}
+          disabled={submitDisabled}
+          testID="plan-review-submit-changes"
+        >
+          {t(planReviewLabelKey.request_changes)}
         </Button>
         <Button
-          size="sm"
-          variant="default"
-          onPress={submit}
-          loading={isSubmitting}
-          disabled={isSubmitting || stale || !client || !text.trim()}
-          testID="plan-review-submit"
+          size={isCompact ? "md" : "sm"}
+          variant={primaryAction === "implement_with_notes" ? "default" : "outline"}
+          onPress={implementWithNotes}
+          loading={submittingAction === "implement_with_notes"}
+          disabled={submitDisabled}
+          testID="plan-review-submit-implementation"
         >
-          {label}
+          {t(planReviewLabelKey.implement_with_notes)}
         </Button>
+        {isCompact ? cancelButton : null}
       </View>
     </View>
   );
@@ -119,6 +147,9 @@ const styles = StyleSheet.create((theme) => ({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "flex-end",
+    gap: theme.spacing[2],
+  },
+  compactActions: {
     gap: theme.spacing[2],
   },
   error: {

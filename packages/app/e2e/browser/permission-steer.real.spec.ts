@@ -170,46 +170,61 @@ test.describe("plan review actions", () => {
           enablePlanReview();
         }
         const input = page.getByTestId("plan-review-input");
-        const submit = page.getByTestId("plan-review-submit");
+        const requestChanges = page.getByTestId("plan-review-submit-changes");
+        const implementWithNotes = page.getByTestId("plan-review-submit-implementation");
 
-        await plan.getByTestId("plan-request-changes").click();
+        await plan.getByTestId("plan-implement-with-notes").click();
         await expect(input).toBeFocused();
-        await testInfo.attach("plan review editor", {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
-        await expect(submit).toBeDisabled();
+        await expect(input).toHaveAttribute("placeholder", "Give feedback on the plan");
+        await expect(requestChanges).toBeDisabled();
+        await expect(implementWithNotes).toBeDisabled();
         await input.fill("   ");
-        await expect(submit).toBeDisabled();
+        await expect(requestChanges).toBeDisabled();
+        await expect(implementWithNotes).toBeDisabled();
+        const revision =
+          "Change the marker to REVISED_PLAN_MARKER. Include it in the revised plan.";
+        await input.fill(revision);
         await plan.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(input).toHaveCount(0);
         await expect(plan).toContainText("FIRST_PLAN_MARKER");
 
-        await plan.getByTestId("plan-request-changes").click();
-        const revision =
-          "Change the marker to REVISED_PLAN_MARKER. Include it in the revised plan.";
-        await input.fill(revision);
-        await submit.click();
+        await plan.getByTestId("plan-implement-with-notes").click();
+        await expect(input).toHaveValue(revision);
+        await testInfo.attach("shared plan review editor", {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
+        await requestChanges.click();
         if (scenario.provider === "codex") {
           await expect(plan.getByTestId("plan-review-error")).toContainText("Try again");
           await expect(input).toHaveValue(revision);
-          await submit.click();
+          await requestChanges.click();
         }
         await expect(plan).toContainText("REVISED_PLAN_MARKER", { timeout: 120_000 });
         await expect(page.getByTestId("timeline-plan-card")).toContainText("FIRST_PLAN_MARKER");
         expect(readFileSync(readme, "utf8")).toBe(original);
 
-        await plan.getByTestId("plan-implement-with-notes").click();
+        await plan.getByTestId("plan-request-changes").click();
+        await expect(input).toHaveValue("");
         await input.fill(
           "Append FINAL_PLAN_MARKER instead of REVISED_PLAN_MARKER.\nKeep all existing lines.",
         );
-        await submit.click();
+        await implementWithNotes.click();
         await expect(
           page.getByTestId("user-message").filter({ hasText: "FINAL_PLAN_MARKER" }),
         ).toBeVisible({ timeout: 60_000 });
         await expect
-          .poll(() => readFileSync(readme, "utf8"), { timeout: 120_000 })
-          .toBe(`${original}FINAL_PLAN_MARKER\n`);
+          .poll(
+            () => {
+              const updated = readFileSync(readme, "utf8");
+              return {
+                existing: updated.slice(0, original.length),
+                appended: updated.slice(original.length).trim(),
+              };
+            },
+            { timeout: 120_000 },
+          )
+          .toEqual({ existing: original, appended: "FINAL_PLAN_MARKER" });
         await expect(plan).toHaveCount(0);
       } finally {
         await cleanupRewindFlow({ handle, cwd });
