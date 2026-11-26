@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import { fillComposerDraft, submitMessage } from "../support/helpers/composer";
 import { daemonWsRoutePattern } from "../support/helpers/daemon-port";
@@ -87,14 +87,12 @@ test.describe("composer steer supersedes plan approval", () => {
 async function simulateLegacyHostAndReviewRetry(page: Page): Promise<() => void> {
   let advertisePlanReview = false;
   let failNextReview = true;
-  let sendCurrentServerInfo: (() => void) | undefined;
   await page.routeWebSocket(daemonWsRoutePattern(), (browser) => {
     const server = browser.connectToServer();
     server.onMessage((message) => {
       if (typeof message === "string" && !advertisePlanReview) {
         const envelope = JSON.parse(message);
         if (envelope.message?.payload?.status === "server_info") {
-          sendCurrentServerInfo = () => browser.send(message);
           delete envelope.message.payload.features?.planReview;
           browser.send(JSON.stringify(envelope));
           return;
@@ -128,9 +126,13 @@ async function simulateLegacyHostAndReviewRetry(page: Page): Promise<() => void>
   });
   return () => {
     advertisePlanReview = true;
-    if (!sendCurrentServerInfo) throw new Error("The host did not send its feature flags");
-    sendCurrentServerInfo();
   };
+}
+
+async function capturePlanReview(plan: Locator, testInfo: TestInfo, name: string): Promise<void> {
+  const screenshot = testInfo.outputPath(`${name}.png`);
+  await plan.screenshot({ path: screenshot });
+  await testInfo.attach(name, { path: screenshot, contentType: "image/png" });
 }
 
 test.describe("plan review actions", () => {
@@ -158,26 +160,37 @@ test.describe("plan review actions", () => {
         const original = readFileSync(readme, "utf8");
         await fillComposerDraft(
           page,
-          "Present a concise plan to append FIRST_PLAN_MARKER to README.md. Include the literal marker in the plan. Do not implement or ask clarification.",
+          "Present a concise plan to append FIRST_PLAN_MARKER to README.md. Include the literal marker in the plan and use relative paths. Do not implement or ask clarification.",
         );
         await page.getByRole("button", { name: "Send message", exact: true }).click();
         const plan = page.getByTestId("permission-plan-card");
         await expect(plan).toContainText("FIRST_PLAN_MARKER", { timeout: 120_000 });
+        const addFeedback = plan.getByRole("button", { name: "Add feedback", exact: true });
         if (enablePlanReview) {
-          await expect(plan.getByTestId("plan-request-changes")).toHaveCount(0);
-          await expect(plan.getByTestId("plan-implement-with-notes")).toHaveCount(0);
+          await expect(addFeedback).toHaveCount(0);
+          await expect(plan.getByTestId("permission-request-deny")).toBeVisible();
           await expect(plan.getByRole("button", { name: "Implement", exact: true })).toBeVisible();
           enablePlanReview();
+          await page.reload();
         }
+        await expect(addFeedback).toBeVisible({ timeout: 30_000 });
+        await expect(plan.getByTestId("permission-request-deny")).toBeVisible();
+        await expect(plan.getByTestId("permission-request-accept")).toBeVisible();
+        await capturePlanReview(plan, testInfo, "plan-review-actions");
         const input = page.getByTestId("plan-review-input");
         const requestChanges = page.getByTestId("plan-review-submit-changes");
         const implementWithNotes = page.getByTestId("plan-review-submit-implementation");
 
-        await plan.getByTestId("plan-implement-with-notes").click();
+        await addFeedback.click();
         await expect(input).toBeFocused();
+        await expect(addFeedback).toHaveCount(0);
+        await expect(plan).toContainText("FIRST_PLAN_MARKER");
         await expect(input).toHaveAttribute("placeholder", "Give feedback on the plan");
         await expect(requestChanges).toBeDisabled();
         await expect(implementWithNotes).toBeDisabled();
+        if (scenario.provider === "claude") {
+          await capturePlanReview(plan, testInfo, "empty-plan-review-editor");
+        }
         await input.fill("   ");
         await expect(requestChanges).toBeDisabled();
         await expect(implementWithNotes).toBeDisabled();
@@ -188,12 +201,9 @@ test.describe("plan review actions", () => {
         await expect(input).toHaveCount(0);
         await expect(plan).toContainText("FIRST_PLAN_MARKER");
 
-        await plan.getByTestId("plan-implement-with-notes").click();
+        await addFeedback.click();
         await expect(input).toHaveValue(revision);
-        await testInfo.attach("shared plan review editor", {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
+        await capturePlanReview(plan, testInfo, "shared-plan-review-editor");
         await requestChanges.click();
         if (scenario.provider === "codex") {
           await expect(plan.getByTestId("plan-review-error")).toContainText("Try again");
@@ -204,7 +214,7 @@ test.describe("plan review actions", () => {
         await expect(page.getByTestId("timeline-plan-card")).toContainText("FIRST_PLAN_MARKER");
         expect(readFileSync(readme, "utf8")).toBe(original);
 
-        await plan.getByTestId("plan-request-changes").click();
+        await addFeedback.click();
         await expect(input).toHaveValue("");
         await input.fill(
           "Append FINAL_PLAN_MARKER instead of REVISED_PLAN_MARKER.\nKeep all existing lines.",

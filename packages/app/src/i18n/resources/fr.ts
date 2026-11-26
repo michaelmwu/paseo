@@ -212,6 +212,7 @@ export const fr: TranslationResources = {
       implement: "Mettre en œuvre",
       question: "Comment souhaitez-vous procéder?",
       proposedPlan: "Plan proposé",
+      addFeedback: "Ajouter des commentaires",
       requestChanges: "Demander des modifications",
       implementWithNotes: "Mettre en œuvre avec des notes",
       feedbackPlaceholder: "Donnez votre avis sur le plan",
