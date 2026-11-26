@@ -57,6 +57,13 @@ export function derivePendingPermissionKey(
   return `${agentId}:${fallbackId}`;
 }
 
+function projectAgentUsage(agent: Agent) {
+  return {
+    ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
+    ...(agent.sessionMetrics ? { sessionMetrics: agent.sessionMetrics } : {}),
+  };
+}
+
 export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
   return {
     id: agent.id,
@@ -70,9 +77,11 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt?.toISOString() ?? null,
+    ...(agent.latestTurnChanges ? { latestTurnChanges: agent.latestTurnChanges } : {}),
     status: agent.status,
     backgroundWork: agent.backgroundWork,
     ...projectActiveTurn(agent),
+    interruptRecoveryPending: agent.interruptRecoveryPending,
     capabilities: agent.capabilities,
     currentModeId: agent.currentModeId,
     availableModes: agent.availableModes,
@@ -80,8 +89,7 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
     persistence: agent.persistence,
     ...(agent.runtimeInfo ? { runtimeInfo: agent.runtimeInfo } : {}),
     ...(agent.usageScopeKey ? { usageScopeKey: agent.usageScopeKey } : {}),
-    ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
-    ...(agent.sessionMetrics ? { sessionMetrics: agent.sessionMetrics } : {}),
+    ...projectAgentUsage(agent),
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,
@@ -118,9 +126,11 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     status: snapshot.status,
     backgroundWork: snapshot.backgroundWork,
     turn,
+    interruptRecoveryPending: snapshot.interruptRecoveryPending,
     createdAt,
     updatedAt,
     lastUserMessageAt,
+    latestTurnChanges: snapshot.latestTurnChanges,
     lastActivityAt: updatedAt,
     capabilities: snapshot.capabilities,
     currentModeId: snapshot.currentModeId,

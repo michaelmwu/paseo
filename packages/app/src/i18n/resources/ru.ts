@@ -2,6 +2,25 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
+  browserRouting: {
+    sectionTitle: "Браузер",
+    permissionDenied:
+      "У этого подключения нет разрешения на использование сети хоста. Попросите владельца хоста разрешить доступ к сети.",
+    title: "Использовать сеть хоста для вкладок браузера",
+    description:
+      "Вкладки этого хоста используют его сеть и отдельный профиль с собственными файлами cookie.",
+    updateHost: "Обновите этот хост, чтобы использовать его сеть во вкладках браузера.",
+    settingFailed: "Не удалось сохранить или загрузить эту настройку. Повторите попытку.",
+    viaHost: "через {{host}}",
+    proxyUnavailable:
+      "Подключение браузера к сети хоста {{host}} недоступно. Подключитесь к хосту заново и обновите страницу.",
+    destinationFailed:
+      "Не удалось открыть этот адрес через сеть хоста {{host}}. Проверьте адрес и подключение к хосту.",
+    connectionClosed:
+      "Подключение через сеть хоста {{host}} закрыто. Подключитесь к хосту заново и обновите страницу.",
+    notReady:
+      "Браузеру не удалось подготовить сеть хоста {{host}}. Попробуйте открыть вкладку снова.",
+  },
   pluginCombobox: {
     searching: "Поиск…",
     empty: "Нет результатов",
@@ -31,6 +50,59 @@ export const ru: TranslationResources = {
     position: "{{current}} из {{total}}",
     total: "Совпадений: {{total}}",
   },
+  localFiles: {
+    updateHost: "Обновите этот хост для импорта локальных файлов.",
+    missingTitle: "Локальные файлы отсутствуют",
+    missingConfirm:
+      "В {{root}} отсутствуют {{files}}. Продолжить без этих файлов? Отмените, чтобы сначала импортировать их.",
+    continueWithout: "Продолжить без файлов",
+    unavailableForWorktree: "Проверьте эти локальные файлы перед созданием worktree: {{files}}",
+
+    title: "Локальные файлы",
+    info: "Импортируйте на этот хост файлы окружения и настройки, игнорируемые Git. Агенты и скрипты хоста смогут их читать.",
+    import: "Импортировать файлы…",
+    importTo: "Импорт на {{host}}",
+    thisDevice: "Это устройство",
+    fromDevice: "С этого устройства…",
+    fromHost: "С другого хоста…",
+    source: "Источник: {{source}}",
+    sourcePath: "Другой исходный файл (путь относительно проекта)",
+    inspect: "Проверить",
+    refresh: "Обновить",
+    total: "Выбрано: {{count}} · {{size}}",
+    include: "Включать в будущие рабочие деревья",
+    configPreview:
+      "Добавить эти пути в paseo.json. Появится незакоммиченное изменение настроек; файлы существующих рабочих деревьев не изменятся.",
+    complete: "Файлы импортированы. Существующие рабочие деревья не обновлялись.",
+    limits:
+      "Только отдельные файлы. До 10 MiB на файл, 25 MiB на импорт и 100 файлов. Обновление вручную.",
+    existing: "Уже существует · выберите для замены",
+    replace: "Заменить {{path}}",
+    status: {
+      ready: "Есть",
+      missing: "Отсутствует",
+      not_ignored: "Должен игнорироваться Git",
+      unsupported: "Неподдерживаемый файл или путь",
+      too_large: "Слишком большой",
+      unavailable: "Недоступен",
+      imported: "Импортирован",
+    },
+    errors: {
+      load_failed: "Не удалось проверить файлы. Проверьте подключение к хосту и повторите попытку.",
+      selection_invalid: "Выберите не более 100 файлов с разными именами.",
+      no_source_files: "Подходящих файлов нет. Введите путь к файлу, игнорируемому Git.",
+      changed:
+        "Файл изменился после предпросмотра. Выберите источник заново, чтобы проверить текущую копию.",
+      import_failed: "Ошибка импорта. Проверьте подключение и повторите попытку.",
+      partial_failure:
+        "Некоторые файлы не импортированы. Повторите выбранные ошибки или выберите источник заново.",
+      secure_connection_required:
+        "Используйте ретранслятор, TLS или локальное/SSH-подключение для передачи конфиденциальных файлов.",
+      config_failed:
+        "Файлы импортированы, но включение не сохранено. Обновите настройки, проверьте их и сохраните включение без повторной передачи файлов.",
+    },
+  },
+
   common: {
     bottomSheetBackdrop: "Фон нижней панели",
     back: "Назад",
@@ -132,6 +204,20 @@ export const ru: TranslationResources = {
     },
   },
   composer: {
+    outbox: {
+      pending: "Сохранено на устройстве. Ожидание готовности хоста или агента.",
+      sending: "Отправка…",
+      needsReview: "Доставка не подтверждена. Сначала проверьте статус.",
+      retry: "Повторить отправку",
+      discard: "Удалить сохранённое сообщение",
+      attachmentMessage: "Сообщение с вложениями",
+
+      failed: "Не доставлено. Повторите отправку сохранённого сообщения.",
+      inFlight: "Хост ещё обрабатывает сообщение. Автоматическая проверка…",
+      checking: "Проверка доставки…",
+      check: "Проверить доставку",
+    },
+    viewMessage: "Найти сообщение",
     placeholders: {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
@@ -194,6 +280,10 @@ export const ru: TranslationResources = {
       removeReview: "Удалить вложение проверки",
     },
     errors: {
+      messageLookupFailed:
+        "Не удалось обновить разговор. Доставка ещё не подтверждена. Подключитесь снова и повторите поиск сообщения.",
+      messageNotFound:
+        "Не удалось найти сообщение в доступной истории. Доставка ещё не подтверждена.",
       failedToSend: "Не удалось отправить сообщение",
       failedToCreateAgent: "Не удалось создать агента.",
       noHostSelected: "Хост не выбран",
@@ -267,9 +357,19 @@ export const ru: TranslationResources = {
       implement: "Реализовать",
       question: "Как бы вы хотели продолжить?",
       proposedPlan: "Предлагаемый план",
+      requestChanges: "Запросить изменения",
+      implementWithNotes: "Реализовать с примечаниями",
+      feedbackPlaceholder: "Оставьте отзыв о плане",
+      stalePlan: "Этот план больше не ожидает проверки.",
+      planReviewFailed: "Не удалось отправить комментарии к плану.",
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Обновите хост, чтобы просмотреть изменения за ход.",
+      viewChanges: "Изменения за этот ход",
+      backToConversation: "Вернуться к беседе",
+    },
     states: {
       notFound: "Агент не найден",
       failedToLoad: "Не удалось загрузить агента",
@@ -399,6 +499,8 @@ export const ru: TranslationResources = {
     },
     question: {
       responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
+      sendToChat: "Отправить в чат",
+      chatDeliveryWarning: "Ваш ответ появится в чате. Не вводите пароли или секретные данные.",
       submit: "Отправить",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",
@@ -481,6 +583,9 @@ export const ru: TranslationResources = {
     },
     row: {
       importing: "Импортируется...",
+      continuing: "Продолжение...",
+      continueHint:
+        "Здесь будет создан новый разговор. Исходные файлы и изменения останутся в исходном worktree.",
     },
   },
   workspace: {
@@ -816,7 +921,7 @@ export const ru: TranslationResources = {
         view: "Открыть терминал",
       },
       accessibility: {
-        trigger: "Скрипты рабочего пространства",
+        trigger: "Запустить команды рабочего пространства",
         openService: "Открыть сервис {{scriptName}}",
         viewTerminal: "Открыть терминал скрипта {{scriptName}}",
         runScript: "Запустить скрипт {{scriptName}}",
@@ -837,6 +942,34 @@ export const ru: TranslationResources = {
         stopFailed: "Не удалось остановить скрипт {{scriptName}}",
         running: "Запущен",
         runningCount: "Запущено: {{count}}",
+      },
+    },
+    launches: {
+      title: "Запуски",
+      actions: {
+        switch: "Переключить",
+        start: "Запустить",
+        stop: "Остановить",
+        view: "Вывод",
+        openService: "Открыть сервис",
+      },
+      accessibility: {
+        switchLaunch: "Остановить {{activeLaunchName}} и запустить {{launchName}}",
+        trigger: "Запуски рабочего пространства",
+        launch: "Запуск {{launchName}}",
+        startLaunch: "Запустить {{launchName}}",
+        stopLaunch: "Остановить {{launchName}}",
+        viewTerminal: "Открыть терминал {{launchName}}",
+        openService: "Открыть сервис {{hostname}}",
+      },
+      states: {
+        running: "Выполняется",
+        stopped: "Остановлено",
+        stopping: "Остановка…",
+        noListeners: "Прослушиваемые порты пока не обнаружены",
+        startFailed: "Не удалось запустить {{launchName}}",
+        stopFailed: "Не удалось остановить {{launchName}}",
+        portRange: "порты {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1058,6 +1191,22 @@ export const ru: TranslationResources = {
           addToChat: "Добавить в чат",
           addAllToChat: "Добавить всё в чат",
           addingToChat: "Добавление...",
+        },
+        watch: {
+          manage: "Остановить отслеживание можно в фоновых задачах.",
+          thisAgent: "Следить с этим агентом",
+          watching: "Отслеживается {{reference}}",
+          action: "Следить за {{abbreviation}}",
+          recipient: "Отправлять обновления агенту",
+          noAgents: "Откройте агента в этом рабочем пространстве, чтобы начать отслеживание.",
+          untitledAgent: "Агент без названия",
+          starting: "Запуск отслеживания…",
+          started: "Отслеживание запущено. Им можно управлять в фоновых задачах агента.",
+          failed: "Не удалось начать отслеживание. Попробуйте ещё раз.",
+          closed: "{{abbreviation}} уже закрыт.",
+          updateHost:
+            "Обновите хост, чтобы запускать отслеживание здесь. В Paseo 0.17.1 и новее можно попросить агента в чате следить за URL.",
+          disconnected: "Подключитесь к хосту снова и повторите попытку.",
         },
         checksOverview: {
           headline: {
@@ -1388,6 +1537,8 @@ export const ru: TranslationResources = {
         unpin: "Открепить",
         archive: "Архивировать",
         archiveWorkspace: "Архивировать рабочее пространство",
+        markAsRead: "Отметить как прочитанное",
+        markAsUnread: "Отметить как непрочитанное",
         hideFromSidebar: "Скрыть на боковой панели",
         archiving: "Архивирование...",
         hiding: "Скрытие...",
@@ -1414,6 +1565,8 @@ export const ru: TranslationResources = {
         archived: "Рабочее пространство архивировано",
         undoArchive: "Отменить",
         undoArchiveFailed: "Не удалось отменить архивацию",
+        markAsReadFailed: "Не удалось отметить рабочее пространство как прочитанное",
+        markAsUnreadFailed: "Не удалось отметить рабочее пространство как непрочитанное",
       },
     },
   },
@@ -2377,6 +2530,46 @@ export const ru: TranslationResources = {
       hostLoadFailed: "Не удалось загрузить проекты с хоста {{hostName}}: {{message}}",
       editProject: "Изменить {{projectName}}",
     },
+    projectLinks: {
+      entry: {
+        matches: "{{count}} подтверждённых совпадений для проверки",
+        matches_one: "{{count}} подтверждённое совпадение для проверки",
+        matches_other: "{{count}} подтверждённых совпадений для проверки",
+        savedLinks: "Связи сохранены на этом устройстве",
+        linkAction: "Связать проекты…",
+        manageAction: "Связи проектов…",
+        matches_few: "{{count}} подтверждённых совпадения для проверки",
+        matches_many: "{{count}} подтверждённых совпадений для проверки",
+        hint: "Просматривайте совпадения и управляйте связями на этом устройстве.",
+      },
+      sheet: {
+        title: "Связи проектов",
+        deviceOnly:
+          "Связи хранятся только на этом устройстве. Они не перемещают рабочие пространства, настройки или файлы.",
+        matchesTitle: "Подтверждённые совпадения",
+        matchesDescription:
+          "У этих записей один и тот же удалённый Git-репозиторий и подкаталог проекта, но они всё ещё разделены.",
+        linkedTitle: "Связанные проекты",
+        noMatchesTitle: "Нет связей проектов для проверки",
+        noMatchesDescription:
+          "Откройте рабочую область в одном и том же репозитории на двух хостах. Здесь появятся совпадающие проекты, которые пока отображаются отдельно.",
+        linkProjects: "Связать {{count}} проекта",
+        remote: "Удалённый Git-репозиторий",
+        subdirectory: "Подкаталог проекта",
+        path: "Путь",
+        needsReviewTitle: "Требуется проверка",
+        needsReviewDescription:
+          "Последние данные Git больше не подтверждают эту связь, поэтому Paseo сохраняет эти проекты раздельно.",
+        projectUnavailable: "Этот проект сейчас недоступен.",
+        saving: "Сохранение связи проекта…",
+        saveFailed: "Не удалось сохранить связь проекта. Повторите попытку.",
+        unlink: "Отвязать",
+      },
+      toasts: {
+        linked: "Проекты связаны на этом устройстве",
+        unlinked: "Связь проекта удалена",
+      },
+    },
     groupInfo: "О разделе «{{title}}»",
     sections: {
       general: "Основные",
@@ -2527,12 +2720,13 @@ export const ru: TranslationResources = {
       browserData: {
         title: "Данные браузера",
         siteData: "Файлы cookie и данные сайтов",
-        description: "Вкладки браузера в Paseo используют общие данные входа и данные сайтов.",
+        description:
+          "Вкладки браузера в Paseo используют общие данные входа и данные сайтов. Хосты с включённой опцией «Использовать сеть хоста для вкладок браузера» хранят отдельный профиль, и очистка удаляет оба.",
         clear: "Очистить данные браузера",
         clearing: "Очистка...",
         confirmTitle: "Очистить данные браузера?",
         confirmMessage:
-          "Вы выйдете из аккаунтов на сайтах, а открытые вкладки браузера перезагрузятся.",
+          "Вы выйдете из аккаунтов на сайтах во всех профилях, а открытые вкладки браузера перезагрузятся.",
         success: "Данные браузера очищены.",
         error: "Не удалось очистить данные браузера.",
       },
@@ -2779,6 +2973,8 @@ export const ru: TranslationResources = {
         closeCurrentTab: "Закрыть текущую вкладку",
         jumpToWorkspace: "Перейти к рабочему пространству",
         jumpToTab: "Перейти на вкладку",
+        goBack: "Назад",
+        goForward: "Вперёд",
         previousWorkspace: "Предыдущее рабочее пространство",
         nextWorkspace: "Следующее рабочее пространство",
         previousTab: "Предыдущая вкладка",
@@ -2899,6 +3095,7 @@ export const ru: TranslationResources = {
         removeErrorMessage: "Не удалось удалить подключение",
         timeout: "Время ожидания истекло",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         title: "Подключение устройств",
         rowTitle: "Подключить устройство",
@@ -3290,6 +3487,28 @@ export const ru: TranslationResources = {
           edit: "Редактировать",
           remove: "Удалить",
         },
+      },
+      launches: {
+        title: "Запуски",
+        info: "Конфигурации разработки, которые можно запустить из любого рабочего пространства этого проекта",
+        empty: "Запусков пока нет.",
+        untitled: "Запуск без названия",
+        menuAccessibility: "Открыть меню запуска",
+        removeTitle: "Удалить запуск?",
+        removeMessage: "Удалить {{name}}?",
+        removeFallbackName: "этот запуск",
+        name: "Имя",
+        command: "Команда",
+        nameAccessibility: "Имя запуска",
+        commandAccessibility: "Команда запуска",
+        nameRequired: "Укажите имя",
+        nameDuplicate: "У каждого запуска должно быть уникальное имя",
+        commandRequired: "Укажите команду",
+        newLaunch: "Новый запуск",
+        editLaunch: "Изменить {{name}}",
+        commandHint:
+          "Paseo запускает эту команду с блоком портов рабочего пространства и именем проекта Compose в окружении.",
+        actions: { add: "Добавить запуск", edit: "Изменить", remove: "Удалить" },
       },
       metadata: {
         title: "Генерация метаданных",
