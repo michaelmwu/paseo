@@ -3105,6 +3105,23 @@ export class DaemonClient {
     await this.sendAgentMessage(agentId, text, options);
   }
 
+  async reviewAgentPlan(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "agent.plan.review.request" }>,
+      "type" | "requestId"
+    >,
+  ): Promise<void> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.plan.review.response">(
+      {
+        message: { type: "agent.plan.review.request", ...input },
+        timeout: 60_000,
+      },
+    );
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+  }
+
   async rewindAgent(
     agentId: string,
     messageId: string,

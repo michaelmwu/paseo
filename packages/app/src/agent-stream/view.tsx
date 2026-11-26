@@ -40,6 +40,9 @@ import {
   type InlinePathTarget,
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
+import { Button } from "@/components/ui/button";
+import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
+import { PlanReviewForm, planReviewLabelKey } from "./plan-review-form";
 import type { StreamItem } from "@/types/stream";
 import type { PendingMessageSubmission } from "@/composer/submission/model";
 import type { TurnPresentation } from "@/timeline/turn-liveness";
@@ -133,22 +136,6 @@ function renderLiveAuxiliaryNode(input: {
 function BottomOverlayInset({ height }: { height: number }) {
   const style = useMemo(() => ({ height }), [height]);
   return <View style={style} />;
-}
-
-function renderPendingPermissionsNode(input: {
-  pendingPermissions: PendingPermission[];
-  client: DaemonClient | null;
-}): ReactNode {
-  if (input.pendingPermissions.length === 0) {
-    return null;
-  }
-  return (
-    <View style={stylesheet.permissionsContainer}>
-      {input.pendingPermissions.map((permission) => (
-        <PermissionRequestCard key={permission.key} permission={permission} client={input.client} />
-      ))}
-    </View>
-  );
 }
 
 function renderStreamItemWithTurnFooter(input: {
@@ -346,6 +333,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const resolvedServerId = serverId ?? context.serverId ?? "";
 
     const client = useSessionStore((state) => state.sessions[resolvedServerId]?.client ?? null);
+    const supportsPlanReview = useSessionStore(
+      (state) => state.sessions[resolvedServerId]?.serverInfo?.features?.planReview === true,
+    );
     const sessionStreamHead = useSessionStore((state) =>
       state.sessions[resolvedServerId]?.agentStreamHead?.get(agentId),
     );
@@ -891,12 +881,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     const pendingPermissionsNode = useMemo(
-      () =>
-        renderPendingPermissionsNode({
-          pendingPermissions: pendingPermissionItems,
-          client,
-        }),
-      [client, pendingPermissionItems],
+      () => (
+        <PendingPermissionCards
+          key={JSON.stringify([resolvedServerId, agentId])}
+          permissions={pendingPermissionItems}
+          client={client}
+          supportsPlanReview={supportsPlanReview}
+        />
+      ),
+      [agentId, client, pendingPermissionItems, resolvedServerId, supportsPlanReview],
     );
     const turnFooterNode = useMemo(
       () =>
@@ -993,7 +986,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const renderLiveAuxiliary = useCallback<StreamSegmentRenderers["renderLiveAuxiliary"]>(() => {
       const existingTailSpacing =
-        auxiliary.turnFooter && !auxiliary.pendingPermissions ? TURN_FOOTER_BOTTOM_SPACING : 0;
+        auxiliary.turnFooter && pendingPermissionItems.length === 0
+          ? TURN_FOOTER_BOTTOM_SPACING
+          : 0;
       const bottomOverlayInset = resolveBottomOverlayTailInset({
         requiredTailClearance: bottomOverlayTailClearance,
         existingTailSpacing,
@@ -1003,7 +998,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         turnFooter: auxiliary.turnFooter,
         bottomOverlayInset,
       });
-    }, [auxiliary.pendingPermissions, auxiliary.turnFooter, bottomOverlayTailClearance]);
+    }, [
+      auxiliary.pendingPermissions,
+      auxiliary.turnFooter,
+      bottomOverlayTailClearance,
+      pendingPermissionItems.length,
+    ]);
 
     const renderers = useMemo<StreamSegmentRenderers>(
       () => ({
@@ -1292,17 +1292,71 @@ function PermissionActionButton({
   );
 }
 
+interface PlanReviewSelection {
+  permission: PendingPermission;
+  action: AgentPlanReviewAction;
+}
+
+function PendingPermissionCards({
+  permissions,
+  client,
+  supportsPlanReview,
+}: {
+  permissions: PendingPermission[];
+  client: DaemonClient | null;
+  supportsPlanReview: boolean;
+}) {
+  const [review, setReview] = useState<PlanReviewSelection | null>(null);
+  const closeReview = useCallback(() => setReview(null), []);
+  const activeReview =
+    review && permissions.some((permission) => permission.key === review.permission.key);
+  // Keep the draft available if the host consumes or replaces the proposal before replying.
+  const visiblePermissions =
+    review && !activeReview ? [...permissions, review.permission] : permissions;
+  if (visiblePermissions.length === 0) return null;
+
+  return (
+    <View style={stylesheet.permissionsContainer}>
+      {visiblePermissions.map((permission) => (
+        <PermissionRequestCard
+          key={permission.key}
+          permission={permission}
+          client={client}
+          onOpenPlanReview={supportsPlanReview && !review ? setReview : undefined}
+          reviewAction={review?.permission.key === permission.key ? review.action : undefined}
+          canSubmitPlanReview={supportsPlanReview && Boolean(activeReview)}
+          onClosePlanReview={closeReview}
+        />
+      ))}
+    </View>
+  );
+}
+
 function PermissionRequestCard({
   permission,
   client,
+  onOpenPlanReview,
+  reviewAction,
+  canSubmitPlanReview,
+  onClosePlanReview,
 }: {
   permission: PendingPermission;
   client: DaemonClient | null;
+  onOpenPlanReview?: (selection: PlanReviewSelection) => void;
+  reviewAction?: AgentPlanReviewAction;
+  canSubmitPlanReview: boolean;
+  onClosePlanReview: () => void;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
 
   const { request } = permission;
+  const requestPlanChanges = useCallback(() => {
+    onOpenPlanReview?.({ permission, action: "request_changes" });
+  }, [onOpenPlanReview, permission]);
+  const implementPlanWithNotes = useCallback(() => {
+    onOpenPlanReview?.({ permission, action: "implement_with_notes" });
+  }, [onOpenPlanReview, permission]);
   const isPlanRequest = request.kind === "plan";
   const title = isPlanRequest
     ? t("agentStream.permission.plan")
@@ -1437,7 +1491,15 @@ function PermissionRequestCard({
     );
   }
 
-  const footer = (
+  const footer = reviewAction ? (
+    <PlanReviewForm
+      action={reviewAction}
+      permission={permission}
+      client={client}
+      isAwaitingReview={canSubmitPlanReview}
+      onClose={onClosePlanReview}
+    />
+  ) : (
     <>
       <Text testID="permission-request-question" style={permissionStyles.question}>
         {t("agentStream.permission.question")}
@@ -1467,6 +1529,29 @@ function PermissionRequestCard({
             />
           );
         })}
+        {onOpenPlanReview &&
+        isPlanRequest &&
+        planMarkdown?.trim() &&
+        (request.provider === "codex" || request.provider === "claude") ? (
+          <>
+            <Button
+              size="sm"
+              disabled={isResponding}
+              testID="plan-request-changes"
+              onPress={requestPlanChanges}
+            >
+              {t(planReviewLabelKey.request_changes)}
+            </Button>
+            <Button
+              size="sm"
+              disabled={isResponding}
+              testID="plan-implement-with-notes"
+              onPress={implementPlanWithNotes}
+            >
+              {t(planReviewLabelKey.implement_with_notes)}
+            </Button>
+          </>
+        ) : null}
       </View>
     </>
   );
@@ -1477,10 +1562,11 @@ function PermissionRequestCard({
         title={title}
         description={description}
         text={planMarkdown}
-        footer={footer}
         testID="permission-plan-card"
         disableOuterSpacing
-      />
+      >
+        {footer}
+      </PlanCard>
     );
   }
 

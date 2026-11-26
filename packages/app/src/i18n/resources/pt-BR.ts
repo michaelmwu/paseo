@@ -210,6 +210,13 @@ export const ptBR: TranslationResources = {
       implement: "Implementar",
       question: "Como você quer prosseguir?",
       proposedPlan: "Plano proposto",
+      requestChanges: "Solicitar alterações",
+      implementWithNotes: "Implementar com notas",
+      revisionPlaceholder: "O que deve mudar no plano?",
+      implementationNotesPlaceholder:
+        "O que o agente deve fazer de forma diferente durante a implementação?",
+      stalePlan: "Este plano não está mais aguardando revisão.",
+      planReviewFailed: "Não foi possível enviar o feedback sobre o plano.",
     },
   },
   agentPanel: {

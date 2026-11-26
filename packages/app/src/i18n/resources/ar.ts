@@ -210,6 +210,12 @@ export const ar: TranslationResources = {
       implement: "ينفذ",
       question: "كيف تريد المتابعة؟",
       proposedPlan: "الخطة المقترحة",
+      requestChanges: "طلب تغييرات",
+      implementWithNotes: "التنفيذ مع ملاحظات",
+      revisionPlaceholder: "ما الذي يجب تغييره في الخطة؟",
+      implementationNotesPlaceholder: "ما الذي يجب على الوكيل فعله بشكل مختلف أثناء التنفيذ؟",
+      stalePlan: "هذه الخطة لم تعد بانتظار المراجعة.",
+      planReviewFailed: "تعذر إرسال الملاحظات على الخطة.",
     },
   },
   agentPanel: {

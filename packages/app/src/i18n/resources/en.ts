@@ -207,6 +207,12 @@ export const en = {
       implement: "Implement",
       question: "How would you like to proceed?",
       proposedPlan: "Proposed plan",
+      requestChanges: "Request changes",
+      implementWithNotes: "Implement with notes",
+      revisionPlaceholder: "What should change in the plan?",
+      implementationNotesPlaceholder: "What should the agent do differently during implementation?",
+      stalePlan: "This plan is no longer awaiting review.",
+      planReviewFailed: "Couldn't send plan feedback.",
     },
   },
   agentPanel: {

@@ -212,6 +212,13 @@ export const fr: TranslationResources = {
       implement: "Mettre en œuvre",
       question: "Comment souhaitez-vous procéder?",
       proposedPlan: "Plan proposé",
+      requestChanges: "Demander des modifications",
+      implementWithNotes: "Mettre en œuvre avec des notes",
+      revisionPlaceholder: "Que faut-il changer dans le plan ?",
+      implementationNotesPlaceholder:
+        "Que doit faire l’agent différemment lors de la mise en œuvre ?",
+      stalePlan: "Ce plan n’est plus en attente de révision.",
+      planReviewFailed: "Impossible d’envoyer les commentaires sur le plan.",
     },
   },
   agentPanel: {

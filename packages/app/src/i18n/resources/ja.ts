@@ -210,6 +210,12 @@ export const ja: TranslationResources = {
       implement: "実装",
       question: "どのように続けますか？",
       proposedPlan: "提案されたプラン",
+      requestChanges: "変更を依頼",
+      implementWithNotes: "補足付きで実装",
+      revisionPlaceholder: "プランのどこを変更しますか？",
+      implementationNotesPlaceholder: "実装時に変更してほしい点はありますか？",
+      stalePlan: "このプランは確認待ちではなくなりました。",
+      planReviewFailed: "プランへのフィードバックを送信できませんでした。",
     },
   },
   agentPanel: {

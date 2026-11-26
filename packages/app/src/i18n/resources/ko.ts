@@ -210,6 +210,12 @@ export const ko: TranslationResources = {
       implement: "구현",
       question: "어떻게 진행할까요?",
       proposedPlan: "제안된 계획",
+      requestChanges: "변경 요청",
+      implementWithNotes: "메모와 함께 구현",
+      revisionPlaceholder: "계획에서 무엇을 바꿔야 하나요?",
+      implementationNotesPlaceholder: "구현할 때 에이전트가 무엇을 다르게 해야 하나요?",
+      stalePlan: "이 계획은 더 이상 검토 대기 중이 아닙니다.",
+      planReviewFailed: "계획에 대한 의견을 보내지 못했습니다.",
     },
   },
   agentPanel: {

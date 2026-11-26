@@ -210,6 +210,12 @@ export const ru: TranslationResources = {
       implement: "Реализовать",
       question: "Как бы вы хотели продолжить?",
       proposedPlan: "Предлагаемый план",
+      requestChanges: "Запросить изменения",
+      implementWithNotes: "Реализовать с примечаниями",
+      revisionPlaceholder: "Что нужно изменить в плане?",
+      implementationNotesPlaceholder: "Что агенту следует сделать иначе при реализации?",
+      stalePlan: "Этот план больше не ожидает проверки.",
+      planReviewFailed: "Не удалось отправить комментарии к плану.",
     },
   },
   agentPanel: {
