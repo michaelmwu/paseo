@@ -1,3 +1,9 @@
+import { deliveryFailureOutcome } from "../message-receipts/outcome.js";
+import { messageFingerprint } from "../message-receipts/fingerprint.js";
+import {
+  MessageAcceptanceStore,
+  type SubmittedMessageIdentity,
+} from "../message-receipts/acceptance.js";
 import type {
   AttachedAgentTool,
   PluginSessionsRuntime,
@@ -34,6 +40,7 @@ import {
 import type { Logger } from "pino";
 import type { ToolPolicy } from "@getpaseo/protocol/agent-types";
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
@@ -53,6 +60,7 @@ import {
   type AgentPermissionRequest,
   type AgentPermissionResponse,
   type AgentPermissionResult,
+  type AgentPermissionResolutionOptions,
   type AgentPersistenceHandle,
   type AgentProviderNotice,
   type AgentPromptInput,
@@ -75,6 +83,14 @@ import {
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import type { JsonValue, ProviderOptions } from "@getpaseo/protocol/agent-types";
 import { toStoredAgentRecord } from "./agent-projections.js";
+import type { AgentTurnChanges } from "@getpaseo/protocol/messages";
+import {
+  captureTurnTree,
+  releaseTurnBaseline,
+  releaseTurnComparison,
+  retainTurnBaseline,
+  retainTurnComparison,
+} from "./turn-changes.js";
 import { sanitizeAgentMetrics, withModelMetric } from "./agent-metrics.js";
 import {
   applyProviderOptionsPatch,
@@ -108,6 +124,7 @@ import {
   type ForegroundPromptStart,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
+  type TrackedAgentRun,
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { parseAgentMessage, projectAgentMessages } from "./agent-messages/index.js";
@@ -136,8 +153,10 @@ import { withTimeout } from "../../utils/promise-timeout.js";
 import { buildSessionConfig, extractAttention } from "../persistence-hooks.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
-const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
+const INTERRUPT_SESSION_TIMEOUT_MS = 10_000;
+const INTERRUPT_SETTLEMENT_TIMEOUT_MS = 2_000;
 const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
+const PLAN_REVIEW_SETTLE_TIMEOUT_MS = 15_000;
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
   supportsSessionPersistence: true,
@@ -172,11 +191,20 @@ export class AgentManagerShuttingDownError extends Error {
 type RunCancellationCause = "reload" | "replace" | "rewind" | "stop";
 
 export class AgentRunCancellationError extends Error {
+  readonly deliveryOutcome?: "not_submitted";
+
   constructor(agentId: string, action: RunCancellationCause) {
-    super(
-      `Cannot ${action} agent ${agentId} because its active run cancellation was not acknowledged`,
-    );
+    const reason = "Paseo could not confirm the agent stopped.";
+    const message = {
+      stop: `${reason} Try Stop again.`,
+      replace: `${reason} Your message was not sent. Try Stop, then retry your message.`,
+      reload: `Cannot reload agent ${agentId}. ${reason} Try Stop first.`,
+      rewind: `Cannot rewind agent ${agentId}. ${reason} Try Stop first.`,
+    }[action];
+    super(message);
     this.name = "AgentRunCancellationError";
+    // Replacement stops here, before reserving or submitting the new prompt.
+    if (action === "replace") this.deliveryOutcome = "not_submitted";
   }
 }
 
@@ -410,6 +438,8 @@ export interface CreateAgentOptions {
 }
 
 export interface AgentManagerOptions {
+  latestTurnChangesEnabled?: boolean;
+  messageAcceptanceStore?: MessageAcceptanceStore;
   pluginLifecycle?: PluginLifecycle;
   /** An internal workspace makes every agent created inside it internal. */
   clients?: ProviderClientMap;
@@ -542,6 +572,8 @@ interface ManagedAgentBase {
   lastUsage?: AgentUsage;
   /** Provider-owned session metrics, replaced whole on every provider update. */
   sessionMetrics?: AgentMetric[];
+  latestTurnChanges?: AgentTurnChanges | null;
+  pendingTurnChanges?: { turnId: string; before: string | null };
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
@@ -922,6 +954,7 @@ export interface RetiredInternalAgent {
 }
 
 export class AgentManager {
+  readonly latestTurnChangesEnabled: boolean;
   private readonly pluginLifecycle: PluginLifecycle | undefined;
   private readonly retiredInternalAgents = new Map<
     string,
@@ -944,6 +977,7 @@ export class AgentManager {
   private readonly stopListeners = new Set<(agentId: string) => void>();
   private readonly idFactory: () => string;
   private readonly registry?: AgentStorage;
+  private readonly messageAcceptanceStore?: MessageAcceptanceStore;
   private readonly durableTimelineStore?: AgentTimelineStore;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
   private readonly backgroundTasks = new Set<Promise<void>>();
@@ -978,11 +1012,13 @@ export class AgentManager {
   private acceptingAgentRegistrations = true;
 
   constructor(options: AgentManagerOptions) {
+    this.latestTurnChangesEnabled = options.latestTurnChangesEnabled === true;
     this.pluginLifecycle = options.pluginLifecycle;
     this.pluginSessions = options.pluginSessions;
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
+    this.messageAcceptanceStore = options.messageAcceptanceStore;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
@@ -1570,6 +1606,14 @@ export class AgentManager {
     return this.timelineStore.fetch(id, options);
   }
 
+  async hasAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<boolean> {
+    return (await this.messageAcceptanceStore?.has(input)) ?? false;
+  }
+
+  async forgetAcceptedSubmittedMessage(input: SubmittedMessageIdentity): Promise<void> {
+    await this.messageAcceptanceStore?.forget(input);
+  }
+
   listProviderSubagents(parentAgentId: string): ProviderSubagentDescriptor[] {
     this.requirePublicAgent(parentAgentId);
     return this.providerSubagents.list(parentAgentId);
@@ -1934,6 +1978,7 @@ export class AgentManager {
             attention: extractAttention(record),
             // Shown until the reopened session reports its own.
             sessionMetrics: record.sessionMetrics,
+            latestTurnChanges: record.latestTurnChanges,
           }
         : {}),
       workspaceId,
@@ -2187,6 +2232,7 @@ export class AgentManager {
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
         sessionMetrics: preservedSessionMetrics,
+        latestTurnChanges: existing.latestTurnChanges,
         lastError: preservedLastError,
         attention: preservedAttention,
         restoring: true,
@@ -2672,6 +2718,7 @@ export class AgentManager {
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
         lastUsage: undefined,
         sessionMetrics: record.sessionMetrics,
+        latestTurnChanges: record.latestTurnChanges,
         lastError: record.lastError ?? undefined,
         attention,
         internal: record.internal,
@@ -3341,6 +3388,8 @@ export class AgentManager {
     }
     onAccepted?.();
     this.touchUpdatedAt(agent);
+    if (this.messageAcceptanceStore)
+      await this.persistMessageAcceptances({ agentId, prompt, options });
     if (options?.clientMessageId) {
       this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "accepted");
       this.emitState(agent);
@@ -3442,21 +3491,30 @@ export class AgentManager {
     prompt: AgentPromptInput;
     options?: AgentRunOptions;
     promptStart?: ForegroundPromptStart;
+    prepare?: () => Promise<() => Promise<void>>;
   }): Promise<string | null> {
-    const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
+    const { agent, agentId, pendingRun, prompt, options, promptStart, prepare } = params;
     if (promptStart?.admit?.() === false) {
       this.runs.settleForegroundRun(agentId, pendingRun.token);
       return null;
     }
+    let restoreMode: (() => Promise<void>) | undefined;
     try {
-      const result = await agent.session.startTurn(prompt, options);
-      if (pendingRun.settled) {
-        throw new Error(`Agent ${agentId} run was canceled before its turn started`);
-      }
-      return result.turnId;
+      if (prepare) restoreMode = await prepare();
+      return await this.dispatchForegroundTurn(params);
     } catch (error) {
+      if (restoreMode) {
+        await restoreMode().catch((restoreError) => {
+          this.logger.warn({ err: restoreError, agentId }, "Failed to restore plan mode");
+        });
+      }
       if (error instanceof AgentTurnStartCanceledError) {
         if (!pendingRun.settled) {
+          this.runs.settleForegroundStart(pendingRun, {
+            status: "failed",
+            error: error.message,
+            cause: error,
+          });
           if (options?.clientMessageId) {
             this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
               messageId: options.clientMessageId,
@@ -3488,13 +3546,23 @@ export class AgentManager {
       }
       agent.pendingReplacement = false;
       const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
-      this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
+      this.runs.settleForegroundStart(pendingRun, {
+        status: "failed",
+        error: errorMsg,
+        ...(error instanceof Error ? { cause: error } : {}),
+      });
       try {
         // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
         if (options?.clientMessageId) {
-          this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
-            messageId: options.clientMessageId,
-          });
+          this.recordSubmittedPrompt(
+            agent,
+            prompt,
+            options.clientMessageId,
+            deliveryFailureOutcome(error) === "unknown" ? "unknown" : "rejected",
+            {
+              messageId: options.clientMessageId,
+            },
+          );
         }
         await this.handleStreamEvent(agent, {
           type: "turn_failed",
@@ -3507,6 +3575,87 @@ export class AgentManager {
         this.runs.settleForegroundRun(agentId, pendingRun.token);
       }
       throw error;
+    }
+  }
+
+  private async dispatchForegroundTurn({
+    agent,
+    pendingRun,
+    prompt,
+    options,
+  }: Pick<
+    Parameters<AgentManager["startPendingForegroundTurn"]>[0],
+    "agent" | "pendingRun" | "prompt" | "options"
+  >) {
+    const shouldCapture = this.latestTurnChangesEnabled && !agent.internal && !agent.background;
+    const before = shouldCapture ? await this.tryCaptureTurnBaseline(agent, pendingRun) : null;
+    let accepted = false;
+    try {
+      if (pendingRun.settled) return null;
+      if (pendingRun.cancelRequested) throw new AgentTurnStartCanceledError();
+      const result = await agent.session.startTurn(prompt, options);
+      if (this.messageAcceptanceStore) {
+        await this.persistMessageAcceptances({ agentId: agent.id, prompt, options });
+      }
+      if (pendingRun.settled) {
+        throw new Error(`Agent ${agent.id} run was canceled before its turn started`);
+      }
+      accepted = true;
+      if (shouldCapture) {
+        agent.pendingTurnChanges = { turnId: result.turnId, before };
+      }
+      return result.turnId;
+    } finally {
+      if (!accepted && before) await this.tryReleaseTurnBaseline(agent, before);
+    }
+  }
+
+  private async tryCaptureTurnBaseline(agent: ActiveManagedAgent, run: PendingForegroundRun) {
+    try {
+      const before = await captureTurnTree(agent.cwd);
+      if (!before || run.settled || run.cancelRequested) return null;
+      await retainTurnBaseline(agent.cwd, agent.id, before);
+      return before;
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Could not capture turn baseline");
+      return null;
+    }
+  }
+
+  private async tryReleaseTurnBaseline(agent: ManagedAgent, before: string) {
+    try {
+      await releaseTurnBaseline(agent.cwd, agent.id, before);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Could not release turn baseline");
+    }
+  }
+
+  private async captureSettledTurn(agent: ActiveManagedAgent, turnId: string) {
+    const pending = agent.pendingTurnChanges;
+    if (pending?.turnId !== turnId) return;
+    agent.pendingTurnChanges = undefined;
+    agent.latestTurnChanges = null;
+    try {
+      const after = pending.before ? await captureTurnTree(agent.cwd) : null;
+      if (pending.before && after) {
+        const comparison = { turnId, before: pending.before, after };
+        await retainTurnComparison(agent.cwd, agent.id, comparison);
+        agent.latestTurnChanges = comparison;
+      }
+    } catch (error) {
+      this.logger.warn({ err: error, agentId: agent.id }, "Could not capture settled turn");
+    }
+    if (!agent.latestTurnChanges) {
+      if (pending.before) await this.tryReleaseTurnBaseline(agent, pending.before);
+      await this.tryReleaseTurnComparison(agent.cwd, agent.id);
+    }
+  }
+
+  private async tryReleaseTurnComparison(cwd: string, agentId: string, includePending = false) {
+    try {
+      await releaseTurnComparison(cwd, agentId, includePending);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Could not release turn comparison");
     }
   }
 
@@ -3601,9 +3750,20 @@ export class AgentManager {
   ): AsyncGenerator<AgentStreamEvent> {
     if (this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && this.registry))
       return this.streamAfterRuntimeCollection(agentId, prompt, options, promptStart);
-    const existingAgent = this.requireSessionAgent(agentId);
-    if (this.historySessions.has(existingAgent.session))
+    const agent = this.requireSessionAgent(agentId);
+    if (this.historySessions.has(agent.session))
       return this.streamAfterHistoryLoad(agentId, prompt, options, promptStart);
+    return this.streamInteractiveAgent(agent, prompt, options, promptStart);
+  }
+
+  private streamInteractiveAgent(
+    existingAgent: ActiveManagedAgent,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
+    prepare?: () => Promise<() => Promise<void>>,
+  ): AsyncGenerator<AgentStreamEvent> {
+    const agentId = existingAgent.id;
     this.logger.trace(
       {
         agentId,
@@ -3641,15 +3801,14 @@ export class AgentManager {
     promptStart?.bind(pendingRun);
 
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
-      let turnId: string | null;
-      let turnStream: ReturnType<AgentRunState["createTurnStream"]> | null = null;
-      turnId = await this.startPendingForegroundTurn({
+      const turnId = await this.startPendingForegroundTurn({
         agent,
         agentId,
         pendingRun,
         prompt,
         options,
         promptStart,
+        prepare,
       });
       if (turnId === null) {
         const canceledEvent: AgentStreamEvent = {
@@ -3718,7 +3877,7 @@ export class AgentManager {
         "agent.manager.stream.start",
       );
 
-      turnStream = this.runs.createTurnStream(turnId);
+      const turnStream = this.runs.createTurnStream(turnId);
       this.runs.addWaiter(agent, turnStream.waiter);
 
       try {
@@ -3732,9 +3891,7 @@ export class AgentManager {
           yield event;
         }
       } finally {
-        if (turnStream) {
-          this.runs.deleteWaiter(agent, turnStream.waiter);
-        }
+        this.runs.deleteWaiter(agent, turnStream.waiter);
         this.runs.settleForegroundRun(agentId, pendingRun.token);
         if (!agent.activeForegroundTurnId) {
           await this.refreshRuntimeInfo(agent);
@@ -3836,6 +3993,8 @@ export class AgentManager {
         expectedTurnId,
       });
       if (admission.status === "accepted") {
+        if (this.messageAcceptanceStore)
+          await this.persistMessageAcceptances({ agentId, prompt, options });
         await this.recordAcceptedSteer(
           agent,
           prompt,
@@ -3876,6 +4035,8 @@ export class AgentManager {
             expectedTurnId,
           });
           if (admission.status === "accepted") {
+            if (this.messageAcceptanceStore)
+              await this.persistMessageAcceptances({ agentId, prompt, options });
             await this.recordAcceptedSteer(
               agent,
               prompt,
@@ -3922,24 +4083,32 @@ export class AgentManager {
     expectedTurnId: string,
     operation: () => Promise<T>,
   ): Promise<T> {
-    return this.runForegroundMutation(agent.id, async () => {
-      await this.drainSessionEvents(agent.id);
-      this.agentStreamCoalescer.flushFor(agent.id);
-      this.assertSteerAdmissionOwnsTurn(agent, expectedTurnId);
-      const barrier: SteerEventBarrier = { events: [] };
-      this.steerEventBarriers.set(agent.id, barrier);
-      try {
-        return await operation();
-      } finally {
-        if (this.steerEventBarriers.get(agent.id) === barrier) {
-          this.steerEventBarriers.delete(agent.id);
-        }
-        for (const event of barrier.events) {
-          this.enqueueSessionEvent(agent.id, event);
-        }
-        await this.drainSessionEvents(agent.id);
+    return this.runForegroundMutation(agent.id, () =>
+      this.deliverSteer(agent, expectedTurnId, operation),
+    );
+  }
+
+  private async deliverSteer<T>(
+    agent: ActiveManagedAgent,
+    expectedTurnId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    await this.drainSessionEvents(agent.id);
+    this.agentStreamCoalescer.flushFor(agent.id);
+    this.assertSteerAdmissionOwnsTurn(agent, expectedTurnId);
+    const barrier: SteerEventBarrier = { events: [] };
+    this.steerEventBarriers.set(agent.id, barrier);
+    try {
+      return await operation();
+    } finally {
+      if (this.steerEventBarriers.get(agent.id) === barrier) {
+        this.steerEventBarriers.delete(agent.id);
       }
-    });
+      for (const event of barrier.events) {
+        this.enqueueSessionEvent(agent.id, event);
+      }
+      await this.drainSessionEvents(agent.id);
+    }
   }
 
   private async runForegroundMutation<T>(agentId: string, operation: () => Promise<T>): Promise<T> {
@@ -4193,13 +4362,27 @@ export class AgentManager {
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void> {
     const agent = this.requireAgent(agentId);
+    if (agent.pendingPermissions.get(requestId)?.kind === "plan") {
+      return this.runForegroundMutation(agentId, () =>
+        this.respondToPermissionNow(agent, requestId, response),
+      );
+    }
+    return this.respondToPermissionNow(agent, requestId, response);
+  }
+
+  private async respondToPermissionNow(
+    agent: ActiveManagedAgent,
+    requestId: string,
+    response: AgentPermissionResponse,
+    options?: AgentPermissionResolutionOptions,
+  ): Promise<AgentPermissionResult | void> {
     if (agent.inFlightPermissionResponses.has(requestId)) {
       throw new Error("A response to this permission request is already being submitted");
     }
     agent.inFlightPermissionResponses.add(requestId);
 
     try {
-      const result = await agent.session.respondToPermission(requestId, response);
+      const result = await agent.session.respondToPermission(requestId, response, options);
       agent.pendingPermissions.delete(requestId);
 
       try {
@@ -4225,6 +4408,152 @@ export class AgentManager {
     }
   }
 
+  async reviewPlan(input: {
+    agentId: string;
+    permissionRequestId: string;
+    action: AgentPlanReviewAction;
+    text: string;
+  }): Promise<void> {
+    const { agentId, permissionRequestId, action } = input;
+    const notes = input.text.trim();
+    if (!notes) throw new Error("Enter feedback for this plan.");
+
+    await this.runForegroundMutation(agentId, async () => {
+      const agent = this.requireSessionAgent(agentId);
+      await this.drainSessionEvents(agentId);
+      const readPlan = () => {
+        const request = agent.session
+          .getPendingPermissions()
+          .find((pending) => pending.id === permissionRequestId && pending.kind === "plan");
+        if (!request) throw new Error("This plan is no longer awaiting review.");
+        const isClaude = agent.provider === "claude";
+        if (!isClaude && agent.provider !== "codex") {
+          throw new Error("This provider does not support plan feedback.");
+        }
+        const inPlanMode = isClaude
+          ? agent.currentModeId === "plan"
+          : agent.effectiveOptions?.plan_mode === true;
+        if (!inPlanMode) throw new Error("The agent has left Plan mode.");
+        const plan =
+          typeof request.metadata?.planText === "string"
+            ? request.metadata.planText
+            : request.input?.plan;
+        if (typeof plan !== "string" || !plan.trim()) {
+          throw new Error("This proposal has no plan text to review.");
+        }
+        return plan;
+      };
+      const plan = readPlan();
+      const clientMessageId = randomUUID();
+      const run = this.runs.getRun(agentId);
+      const expectedTurnId = agent.activeForegroundTurnId ?? agent.activeTurnId;
+
+      if (action === "request_changes") {
+        const prompt = [
+          "Revise the proposed plan using the feedback below. Stay in Plan mode and present the revised plan for approval before implementing.",
+          notes,
+        ].join("\n\n");
+        if (agent.provider === "claude") {
+          if (!expectedTurnId) throw new Error("The planning turn is no longer active.");
+          await this.deliverSteer(agent, expectedTurnId, async () => {
+            readPlan();
+            const admission = await agent.session.steerActiveTurn?.(prompt, {
+              expectedTurnId,
+              clientMessageId,
+              clearPendingPermissions: true,
+            });
+            if (admission?.status !== "accepted") {
+              throw new Error("The planning turn could not receive feedback. Try again.");
+            }
+            await this.recordAcceptedSteer(
+              agent,
+              prompt,
+              clientMessageId,
+              expectedTurnId,
+              admission.providerMessageId,
+            );
+          });
+          return;
+        }
+        if (run) {
+          await this.waitForPlanReviewTurn(run.settledPromise);
+          readPlan();
+        }
+        await this.startPlanReviewTurn(agentId, prompt, { clientMessageId });
+        return;
+      }
+
+      // Claude must never resume from ExitPlanMode with an unannotated approval.
+      // A denial with interrupt lets the SDK settle the parked turn in Plan mode.
+      if (agent.provider === "claude" && !run) {
+        throw new Error("The planning turn is no longer active.");
+      }
+      await this.respondToPermissionNow(
+        agent,
+        permissionRequestId,
+        {
+          behavior: "deny",
+          message: "The user approved implementation with notes in a separate turn.",
+          interrupt: agent.provider === "claude",
+        },
+        { planApproval: "implement_with_notes" },
+      );
+      if (run) {
+        await this.waitForPlanReviewTurn(run.settledPromise);
+      }
+      if (this.agents.get(agentId) !== agent || this.hasInFlightRun(agentId)) {
+        throw new Error("The agent changed before implementation could start.");
+      }
+
+      const prompt = [
+        "Implement the approved plan. Follow the user's notes where they change the plan.",
+        "Approved plan:\n" + plan,
+        "User's implementation notes:\n" + notes,
+      ].join("\n\n");
+      await this.startPlanReviewTurn(agentId, prompt, { clientMessageId }, async () => {
+        if (agent.provider === "claude") {
+          await this.setAgentMode(agentId, "acceptEdits");
+          return async () => {
+            await this.setAgentMode(agentId, "plan");
+          };
+        }
+        const previousPlanOption = agent.config.providerOptions?.plan_mode ?? null;
+        await this.setAgentOptions(agentId, { plan_mode: false });
+        return () => this.setAgentOptions(agentId, { plan_mode: previousPlanOption });
+      });
+    });
+  }
+
+  private async waitForPlanReviewTurn(settledPromise: Promise<void>): Promise<void> {
+    const status = await this.waitWithTimeout({
+      operation: settledPromise,
+      timeoutMs: PLAN_REVIEW_SETTLE_TIMEOUT_MS,
+    });
+    if (status !== "completed") {
+      throw new Error("The planning turn did not finish in time.");
+    }
+  }
+
+  private async startPlanReviewTurn(
+    agentId: string,
+    prompt: string,
+    options: AgentRunOptions,
+    prepare?: () => Promise<() => Promise<void>>,
+  ): Promise<void> {
+    const agent = this.requireSessionAgent(agentId);
+    const stream = this.streamInteractiveAgent(agent, prompt, options, undefined, prepare);
+    const start = await stream.next();
+    if (start.done || start.value.type !== "turn_started") {
+      await stream.return(undefined);
+      throw new Error("The plan review turn could not start.");
+    }
+    void (async () => {
+      for await (const _ of stream) {
+        // The manager broadcasts stream events to subscribers.
+      }
+    })().catch((err) => this.logger.error({ err, agentId }, "Plan review stream failed"));
+  }
+
   /** Stop the running turn. Nothing replaces it, so `onStop` listeners hear about it first. */
   cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
     return this.cancelRun(agentId, "stop");
@@ -4234,10 +4563,15 @@ export class AgentManager {
     agentId: string,
     cause: RunCancellationCause,
   ): Promise<AgentRunCancellationResult> {
-    const cancellation = this.runForegroundMutation(agentId, () => {
-      this.requireSessionAgent(agentId).pendingReplacement = false;
-      return this.cancelAgentRunNow(agentId, cause);
-    });
+    const cancellation = this.runForegroundMutation(
+      agentId,
+      async (): Promise<AgentRunCancellationResult> => {
+        const agent = this.requireAgent(agentId);
+        if (!agent.session) return { status: "not_running" };
+        agent.pendingReplacement = false;
+        return this.cancelAgentRunNow(agentId, cause);
+      },
+    );
     this.pendingCancellations.set(agentId, cancellation);
     try {
       return await cancellation;
@@ -4257,38 +4591,76 @@ export class AgentManager {
       this.runs.getRun(agentId) ??
       (agent.lifecycle === "running" ? this.runs.trackAutonomousRun(agentId, null) : null);
     if (!run) {
+      if (agent.session.hasPendingInterruptRecovery?.()) {
+        return this.retryInterruptRecovery(agent);
+      }
       return { status: "not_running" };
     }
+    if (run.kind === "foreground") run.cancelRequested = true;
     if (cause === "stop") {
       for (const listener of this.stopListeners) listener(agentId);
     }
 
+    const interruptedPermissions = new Map(agent.pendingPermissions);
     const interruptAcknowledged = await this.interruptSession(agent.session, agentId);
     const settlement = await this.waitWithTimeout({
       operation: run.settledPromise,
       timeoutMs: interruptAcknowledged
-        ? INTERRUPT_SESSION_TIMEOUT_MS
-        : this.rescueTimeouts.interruptSessionMs,
+        ? INTERRUPT_SETTLEMENT_TIMEOUT_MS
+        : Math.min(this.rescueTimeouts.interruptSessionMs, INTERRUPT_SETTLEMENT_TIMEOUT_MS),
     });
 
     if (!interruptAcknowledged) {
-      return { status: settlement === "completed" ? "settled" : "refused" };
+      return {
+        status:
+          settlement === "completed" && !agent.session.hasPendingInterruptRecovery?.()
+            ? "settled"
+            : "refused",
+      };
+    }
+
+    if (settlement === "timed_out") await this.settleAcknowledgedInterrupt(agent, run);
+
+    if (agent.pendingPermissions.size > 0) {
+      this.resolvePendingPermissionsForAgent(
+        agent,
+        agent.provider,
+        { requests: interruptedPermissions },
+        "Interrupted",
+      );
+      this.touchUpdatedAt(agent);
+      this.emitState(agent);
+    }
+    return { status: "settled" };
+  }
+
+  private async settleAcknowledgedInterrupt(
+    agent: ActiveManagedAgent,
+    run: TrackedAgentRun,
+  ): Promise<void> {
+    const agentId = agent.id;
+    // A terminal event can make room for a successor while Stop awaits provider acknowledgement.
+    if (this.runs.getRun(agentId) !== run) {
+      return;
     }
 
     const runTurnId = this.runs.getTurnId(agentId);
-    if (settlement === "timed_out" && runTurnId) {
+    if (runTurnId) {
       this.logger.warn(
         { agentId, turnId: runTurnId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
-        turnId: runTurnId,
+      await this.queueSessionOperation(agentId, async () => {
+        if (this.runs.getRun(agentId) !== run) return;
+        await this.dispatchSessionEvent(agent, {
+          type: "turn_canceled",
+          provider: agent.provider,
+          reason: "interrupted",
+          turnId: runTurnId,
+        });
       });
       await run.settledPromise;
-    } else if (settlement === "timed_out" && run.kind === "foreground") {
+    } else if (run.kind === "foreground") {
       this.logger.warn(
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged pending turn still active after timeout, clearing it",
@@ -4299,24 +4671,29 @@ export class AgentManager {
         this.touchUpdatedAt(agent);
         this.emitState(agent);
       }
-    } else if (settlement === "timed_out" && run.kind === "autonomous") {
+    } else if (run.kind === "autonomous") {
       this.logger.warn(
         { agentId, kind: run.kind },
         "cancelAgentRun: acknowledged turn still active after timeout, force-canceling",
       );
-      await this.dispatchSessionEvent(agent, {
-        type: "turn_canceled",
-        provider: agent.provider,
-        reason: "interrupted",
+      await this.queueSessionOperation(agentId, async () => {
+        if (this.runs.getRun(agentId) !== run) return;
+        await this.dispatchSessionEvent(agent, {
+          type: "turn_canceled",
+          provider: agent.provider,
+          reason: "interrupted",
+        });
       });
     }
+  }
 
-    if (agent.pendingPermissions.size > 0) {
-      this.resolvePendingPermissionsForAgent(agent, agent.provider, undefined, "Interrupted");
-      this.touchUpdatedAt(agent);
-      this.emitState(agent);
-    }
-    return { status: "settled" };
+  private async retryInterruptRecovery(
+    agent: ActiveManagedAgent,
+  ): Promise<AgentRunCancellationResult> {
+    const stopped = await this.interruptSession(agent.session, agent.id);
+    this.touchUpdatedAt(agent);
+    this.emitState(agent);
+    return { status: stopped ? "settled" : "refused" };
   }
 
   private async cancelAgentRunBefore(agentId: string, action: "reload" | "rewind"): Promise<void> {
@@ -4441,9 +4818,22 @@ export class AgentManager {
     }
   }
 
-  async deleteAgentState(agentId: string): Promise<void> {
+  async deleteAgentState(agentId: string, deletedCwd?: string): Promise<void> {
+    const agent = this.agents.get(agentId) ?? (await this.registry?.get(agentId));
+    const cwd = deletedCwd ?? agent?.cwd;
+    if (cwd && (this.latestTurnChangesEnabled || agent?.latestTurnChanges || deletedCwd)) {
+      await this.tryReleaseTurnComparison(cwd, agentId, true);
+    }
     this.discardRetainedAgentState(agentId);
     await this.deleteCommittedTimeline(agentId);
+    try {
+      await this.messageAcceptanceStore?.forgetAgent(agentId);
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId },
+        "Could not clean message acceptance records for the removed agent",
+      );
+    }
   }
 
   notifyAgentRemoved(agent: Pick<StoredAgentRecord, "id" | "workspaceId" | "internal">): void {
@@ -4706,6 +5096,7 @@ export class AgentManager {
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
       sessionMetrics?: AgentMetric[];
+      latestTurnChanges?: AgentTurnChanges | null;
       lastError?: string;
       attention?: AttentionState;
       /**
@@ -4919,6 +5310,7 @@ export class AgentManager {
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
           sessionMetrics?: AgentMetric[];
+          latestTurnChanges?: AgentTurnChanges | null;
           lastError?: string;
           attention?: AttentionState;
           persistence?: AgentPersistenceHandle;
@@ -4973,6 +5365,7 @@ export class AgentManager {
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastUsage: options?.lastUsage,
       sessionMetrics: options?.sessionMetrics,
+      latestTurnChanges: options?.latestTurnChanges,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
@@ -4998,6 +5391,9 @@ export class AgentManager {
     agent: LiveManagedAgent,
     cancelReason: string,
   ): ManagedAgentClosed {
+    const before = agent.pendingTurnChanges?.before;
+    agent.pendingTurnChanges = undefined;
+    if (before) this.trackBackgroundTask(this.tryReleaseTurnBaseline(agent, before));
     this.agentStreamCoalescer.flushAndDiscard(agent.id);
     this.agents.delete(agent.id);
     this.previousStatuses.delete(agent.id);
@@ -5063,6 +5459,17 @@ export class AgentManager {
     agent.unsubscribeSession = unsubscribe;
   }
 
+  // Child activity, runtime inventory, and updates to existing rows survive a failed start.
+  private isIndependentOfPendingStart(agentId: string, event: AgentStreamEvent): boolean {
+    if (event.type === "provider_subagent" || event.type === "background_work") return true;
+    const turnId = getAgentStreamEventTurnId(event);
+    return (
+      event.type === "timeline" &&
+      turnId != null &&
+      this.timelineStore.hasItemInTurn(agentId, event.item, turnId)
+    );
+  }
+
   private enqueueSessionEvent(agentId: string, event: AgentStreamEvent): void {
     this.logger.trace(
       {
@@ -5080,41 +5487,40 @@ export class AgentManager {
       return;
     }
     const pendingRun = this.runs.getPendingRun(agentId);
-    if (pendingRun?.start.status === "pending") {
+    if (
+      pendingRun?.start.status === "pending" &&
+      !this.isIndependentOfPendingStart(agentId, event)
+    ) {
       pendingRun.stagedEvents.push(event);
       return;
     }
-    const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
-    const next = previous
-      .catch(() => undefined)
-      .then(async () => {
-        const current = this.agents.get(agentId);
-        if (!current) {
-          return;
-        }
-        if (current.session == null) {
-          return;
-        }
-        this.logger.trace(
-          {
-            agentId,
-            provider: event.provider,
-            sessionId: current.persistence?.sessionId ?? undefined,
-            turnId: getAgentStreamEventTurnId(event),
-            event,
-          },
-          "agent.manager.dequeue",
-        );
-        await this.dispatchSessionEvent(current, event);
+    void this.queueSessionOperation(agentId, async () => {
+      const current = this.agents.get(agentId);
+      if (!current) {
         return;
-      })
-      .catch((err) => {
-        this.logger.error(
-          { err, agentId, eventType: event.type },
-          "Failed to process session event",
-        );
-      });
+      }
+      if (current.session == null) {
+        return;
+      }
+      this.logger.trace(
+        {
+          agentId,
+          provider: event.provider,
+          sessionId: current.persistence?.sessionId ?? undefined,
+          turnId: getAgentStreamEventTurnId(event),
+          event,
+        },
+        "agent.manager.dequeue",
+      );
+      await this.dispatchSessionEvent(current, event);
+    });
+  }
 
+  private queueSessionOperation(agentId: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
+    const next = previous.then(operation).catch((err) => {
+      this.logger.error({ err, agentId }, "Failed to process session event");
+    });
     this.sessionEventTails.set(agentId, next);
     this.trackBackgroundTask(next);
     void next.finally(() => {
@@ -5122,6 +5528,7 @@ export class AgentManager {
         this.sessionEventTails.delete(agentId);
       }
     });
+    return next;
   }
 
   /**
@@ -5558,13 +5965,12 @@ export class AgentManager {
 
     if (!options?.fromHistory) {
       if (isTurnTerminalEvent(event)) {
-        this.runs.settleTerminalRun(agent.id, eventTurnId);
-        if (isForegroundEvent) {
-          this.finalizeForegroundTurn(agent, eventTurnId);
-        } else if (terminalDisposition !== "stale" && !agent.activeForegroundTurnId) {
-          // Publish autonomous readiness only after the tracked run has settled.
-          this.emitState(agent);
-        }
+        await this.settleLiveTerminalTurn(
+          agent,
+          eventTurnId,
+          isForegroundEvent,
+          terminalDisposition,
+        );
       }
 
       if (flags.shouldDispatchEvent) {
@@ -5575,6 +5981,24 @@ export class AgentManager {
     this.traceHandleStreamEventEnd(agent, event, eventTurnId, flags);
 
     return flags.shouldNotifyWaiters;
+  }
+
+  private async settleLiveTerminalTurn(
+    agent: ActiveManagedAgent,
+    turnId: string | undefined,
+    isForegroundEvent: boolean,
+    disposition: ActiveTurnTerminalDisposition,
+  ) {
+    if (turnId && isForegroundEvent && disposition !== "stale" && agent.pendingTurnChanges) {
+      await this.captureSettledTurn(agent, turnId);
+    }
+    this.runs.settleTerminalRun(agent.id, turnId);
+    if (isForegroundEvent) {
+      this.finalizeForegroundTurn(agent, turnId);
+    } else if (disposition !== "stale" && !agent.activeForegroundTurnId) {
+      // Publish autonomous readiness only after the tracked run has settled.
+      this.emitState(agent);
+    }
   }
 
   private traceHandleStreamEventStart(
@@ -6028,10 +6452,13 @@ export class AgentManager {
   private resolvePendingPermissionsForAgent(
     agent: ActiveManagedAgent,
     provider: AgentProvider,
-    options: { fromHistory?: boolean } | undefined,
+    options:
+      | { fromHistory?: boolean; requests?: ReadonlyMap<string, AgentPermissionRequest> }
+      | undefined,
     message: string,
   ): void {
-    for (const [requestId] of agent.pendingPermissions) {
+    for (const [requestId, request] of agent.pendingPermissions) {
+      if (options?.requests && options.requests.get(requestId) !== request) continue;
       agent.pendingPermissions.delete(requestId);
       if (!options?.fromHistory) {
         this.dispatchStream(agent.id, {
@@ -6079,11 +6506,40 @@ export class AgentManager {
     return event;
   }
 
+  private async persistMessageAcceptances(input: {
+    agentId: string;
+    prompt: AgentPromptInput;
+    options?: AgentRunOptions;
+  }): Promise<void> {
+    if (!this.messageAcceptanceStore) return;
+    const submissions =
+      input.options?.submittedMessages ??
+      (input.options?.clientMessageId
+        ? [
+            {
+              clientMessageId: input.options.clientMessageId,
+              promptFingerprint: messageFingerprint(input.prompt),
+            },
+          ]
+        : []);
+    for (const submission of submissions) {
+      try {
+        await this.messageAcceptanceStore.record({ agentId: input.agentId, ...submission });
+      } catch (error) {
+        // A journal failure cannot undo provider acceptance or fail the running turn.
+        this.logger.error(
+          { err: error, agentId: input.agentId, clientMessageId: submission.clientMessageId },
+          "Could not persist message acceptance",
+        );
+      }
+    }
+  }
+
   private recordSubmittedPrompt(
     agent: ActiveManagedAgent,
     prompt: AgentPromptInput,
     clientMessageId: string,
-    outcome: "accepted" | "rejected",
+    outcome: "accepted" | "rejected" | "unknown",
     options?: { messageId?: string; providerMessageId?: string; turnId?: string },
   ): void {
     const items = projectAgentMessages({
@@ -6094,7 +6550,7 @@ export class AgentManager {
     });
     for (const item of items) {
       // Human attempts stay in history on rejection; delivery notifications require acceptance.
-      if (outcome === "rejected" && item.type !== "user_message") continue;
+      if (outcome !== "accepted" && item.type !== "user_message") continue;
       this.recordSubmittedPromptItem(agent, item, options);
     }
   }
@@ -6451,6 +6907,7 @@ export class AgentManager {
         this.pluginLifecycle,
         describeHookAgent({ ...agent, title: agent.config.title }),
         event,
+        this.latestTurnChangesEnabled ? "core" : undefined,
       );
     }
   }

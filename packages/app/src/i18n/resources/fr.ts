@@ -135,6 +135,20 @@ export const fr: TranslationResources = {
     },
   },
   composer: {
+    outbox: {
+      pending: "Enregistré sur cet appareil. En attente de l’hôte ou de l’agent.",
+      sending: "Envoi en cours…",
+      needsReview: "Livraison non confirmée. Vérifiez son état avant toute autre action.",
+      retry: "Réessayer l’envoi",
+      discard: "Supprimer le message enregistré",
+      attachmentMessage: "Message avec pièces jointes",
+
+      failed: "Non livré. Réessayez ce message enregistré.",
+      inFlight: "L’hôte traite encore ce message. Vérification automatique…",
+      checking: "Vérification de la livraison…",
+      check: "Vérifier la livraison",
+    },
+    viewMessage: "Rechercher le message",
     placeholders: {
       desktop: "Écrivez à l’agent, mentionnez des @fichiers ou utilisez les /commandes et /skills",
       mobile: "Message, @fichiers, /commandes",
@@ -197,8 +211,14 @@ export const fr: TranslationResources = {
       removeReview: "Retirer la revue jointe",
     },
     errors: {
+      messageLookupFailed:
+        "Impossible d’actualiser la conversation. La livraison reste incertaine. Reconnectez-vous et recherchez le message à nouveau.",
+      messageNotFound:
+        "Ce message est introuvable dans l’historique disponible. Sa livraison reste incertaine.",
       failedToSend: "Impossible d’envoyer le message",
       failedToCreateAgent: "Impossible de créer l’agent",
+      creationOutcomeUnknown:
+        "Le démarrage précédent est peut-être encore en cours. Vérifiez vos espaces de travail et vos agents avant de relancer.",
       noHostSelected: "Aucun hôte sélectionné",
       initialPromptRequired: "Un prompt initial est requis",
       alreadyLoading: "Chargement déjà en cours",
@@ -270,6 +290,12 @@ export const fr: TranslationResources = {
       implement: "Implémenter",
       question: "Comment souhaitez-vous procéder ?",
       proposedPlan: "Plan proposé",
+      addFeedback: "Ajouter des commentaires",
+      requestChanges: "Demander des modifications",
+      implementWithNotes: "Mettre en œuvre avec des notes",
+      feedbackPlaceholder: "Donnez votre avis sur le plan",
+      stalePlan: "Ce plan n’est plus en attente de révision.",
+      planReviewFailed: "Impossible d’envoyer les commentaires sur le plan.",
     },
   },
   agentPanel: {
@@ -405,6 +431,9 @@ export const fr: TranslationResources = {
     question: {
       responseFailed: "Impossible d’envoyer votre réponse. Réessayez.",
       submit: "Envoyer",
+      sendToChat: "Envoyer dans le chat",
+      chatDeliveryWarning:
+        "Votre réponse apparaîtra dans le chat. Ne saisissez pas de mot de passe ni d'information secrète.",
       next: "Suivant",
       answerPlaceholder: "Saisissez votre réponse…",
       otherPlaceholder: "Autre…",
@@ -838,7 +867,7 @@ export const fr: TranslationResources = {
         view: "Voir le terminal",
       },
       accessibility: {
-        trigger: "Scripts de l’espace de travail",
+        trigger: "Exécuter les commandes de l’espace de travail",
         openService: "Voir le service {{scriptName}}",
         viewTerminal: "Voir le terminal de {{scriptName}}",
         runScript: "Lancer le script {{scriptName}}",
@@ -859,6 +888,38 @@ export const fr: TranslationResources = {
         stopFailed: "Impossible d’arrêter {{scriptName}}",
         running: "En cours",
         runningCount: "{{count}} en cours",
+      },
+    },
+    launches: {
+      title: "Lancements",
+      actions: {
+        switch: "Basculer",
+        start: "Démarrer",
+        stop: "Arrêter",
+        view: "Sortie",
+        openService: "Voir le service",
+        forwardLocally: "Rediriger en local",
+        stopForwarding: "Arrêter la redirection",
+        openForward: "Ouvrir {{address}} dans le navigateur",
+        copyForward: "Copier {{address}}",
+      },
+      accessibility: {
+        switchLaunch: "Arrêter {{activeLaunchName}} et démarrer {{launchName}}",
+        trigger: "Lancements de l’espace de travail",
+        launch: "Lancement {{launchName}}",
+        startLaunch: "Démarrer {{launchName}}",
+        stopLaunch: "Arrêter {{launchName}}",
+        viewTerminal: "Voir le terminal de {{launchName}}",
+        openService: "Voir le service {{hostname}}",
+      },
+      states: {
+        running: "En cours",
+        stopped: "Arrêté",
+        stopping: "Arrêt en cours…",
+        noListeners: "Aucun port en écoute détecté pour le moment",
+        startFailed: "Échec du démarrage de {{launchName}}",
+        stopFailed: "Échec de l’arrêt de {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -891,6 +952,7 @@ export const fr: TranslationResources = {
         },
         viewPr: "Voir la PR",
         createPr: {
+          ...en.workspace.git.actions.createPr,
           label: "Créer une PR",
           pending: "Création de la PR…",
           success: "PR créée",
@@ -1056,6 +1118,13 @@ export const fr: TranslationResources = {
         checkingRepository: "Vérification du dépôt…",
         notRepository: "Ce n’est pas un dépôt git",
         diffMode: "Mode de diff",
+        latestTurn: "Dernier tour",
+        latestTurnOpen: "Voir les modifications du dernier tour",
+        latestTurnDescription:
+          "Modifications de l’arbre de travail pendant le dernier tour de l’agent",
+        latestTurnChooseAgent: "Choisir un agent",
+        latestTurnRunning: "Les modifications apparaîtront à la fin de ce tour.",
+        latestTurnUnavailable: "Aucune capture du dernier tour.",
         all: "Toutes les modifications",
         uncommitted: "Non commité",
         committed: "Commité",
@@ -1089,6 +1158,22 @@ export const fr: TranslationResources = {
           addToChat: "Ajouter à la conversation",
           addAllToChat: "Tout ajouter à la conversation",
           addingToChat: "Ajout…",
+        },
+        watch: {
+          manage: "Arrêtez le suivi dans les tâches en arrière-plan.",
+          thisAgent: "Suivre avec cet agent",
+          watching: "Suivi de {{reference}}",
+          action: "Suivre la {{abbreviation}}",
+          recipient: "Envoyer les mises à jour à",
+          noAgents: "Ouvrez un agent dans cet espace de travail pour lancer le suivi.",
+          untitledAgent: "Agent sans titre",
+          starting: "Lancement du suivi…",
+          started: "Suivi lancé. Gérez-le dans les tâches en arrière-plan de l’agent.",
+          failed: "Impossible de lancer le suivi. Réessayez.",
+          closed: "Cette {{abbreviation}} est déjà fermée.",
+          updateHost:
+            "Mettez l’hôte à jour pour lancer le suivi ici. Avec Paseo 0.17.1 ou une version ultérieure, vous pouvez demander à l’agent de suivre l’URL dans la conversation.",
+          disconnected: "Reconnectez-vous à l’hôte et réessayez.",
         },
         checksOverview: {
           headline: {
@@ -1423,6 +1508,8 @@ export const fr: TranslationResources = {
         select: "Sélectionner",
         archive: "Archiver",
         archiveWorkspace: "Archiver l’espace de travail",
+        markAsRead: "Marquer comme lu",
+        markAsUnread: "Marquer comme non lu",
         hideFromSidebar: "Masquer de la barre latérale",
         archiving: "Archivage…",
         hiding: "Masquage…",
@@ -1455,6 +1542,8 @@ export const fr: TranslationResources = {
         archivedCount: "{{count}} espaces de travail archivés",
         undoArchive: "Annuler",
         undoArchiveFailed: "Impossible d’annuler l’archivage",
+        markAsReadFailed: "Impossible de marquer l’espace de travail comme lu",
+        markAsUnreadFailed: "Impossible de marquer l’espace de travail comme non lu",
       },
     },
   },
@@ -2468,6 +2557,46 @@ export const fr: TranslationResources = {
       hostLoadFailed: "Impossible de charger les projets depuis l’hôte {{hostName}} : {{message}}",
       editProject: "Modifier {{projectName}}",
     },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Projets sur plusieurs hôtes",
+        linkProjects: "Associer des projets",
+        matches: "{{count}} correspondances vérifiées à examiner",
+        matches_one: "{{count}} correspondance vérifiée à examiner",
+        matches_other: "{{count}} correspondances vérifiées à examiner",
+        savedLinks: "Liens enregistrés sur cet appareil",
+        linkAction: "Associer des projets…",
+        manageAction: "Liens entre projets…",
+        hint: "Regroupez les copies du même dépôt Git dans la barre latérale.",
+      },
+      sheet: {
+        title: "Associer des projets entre hôtes",
+        deviceOnly:
+          "L’association regroupe les projets dans la barre latérale sur cet appareil. Les espaces de travail, les paramètres et les fichiers restent sur leurs hôtes.",
+        matchesTitle: "Correspondances vérifiées",
+        matchesDescription:
+          "Ces entrées ont le même dépôt distant Git et le même sous-répertoire de projet, mais restent séparées.",
+        linkedTitle: "Projets liés",
+        noMatchesTitle: "Aucun lien de projet à examiner",
+        noMatchesDescription:
+          "Ouvrez un espace de travail dans le même dépôt sur deux hôtes. Les projets correspondants qui sont encore séparés apparaissent ici.",
+        linkProjects: "Lier {{count}} projets",
+        remote: "Dépôt distant Git",
+        subdirectory: "Sous-répertoire du projet",
+        path: "Chemin",
+        needsReviewTitle: "À examiner",
+        needsReviewDescription:
+          "Les dernières informations Git ne confirment plus ce lien ; Paseo garde donc ces projets séparés.",
+        projectUnavailable: "Ce projet n'est pas disponible actuellement.",
+        saving: "Enregistrement du lien du projet…",
+        saveFailed: "Impossible d’enregistrer le lien du projet. Réessayez.",
+        unlink: "Délier",
+      },
+      toasts: {
+        linked: "Projets liés sur cet appareil",
+        unlinked: "Lien de projet supprimé",
+      },
+    },
     groupInfo: "À propos de {{title}}",
     sections: {
       general: "Général",
@@ -2947,6 +3076,8 @@ export const fr: TranslationResources = {
         closeCurrentTab: "Fermer l’onglet actuel",
         jumpToWorkspace: "Aller à l’espace de travail",
         jumpToTab: "Aller à l’onglet",
+        goBack: "Revenir en arrière",
+        goForward: "Avancer",
         previousWorkspace: "Espace de travail précédent",
         nextWorkspace: "Espace de travail suivant",
         previousTab: "Onglet précédent",
@@ -3093,6 +3224,7 @@ export const fr: TranslationResources = {
         removeErrorMessage: "Impossible de supprimer la connexion",
         timeout: "Délai dépassé",
       },
+      instructions: en.settings.host.instructions,
       pairDevices: {
         rowTitle: "Associer un appareil",
       },
@@ -3456,6 +3588,13 @@ export const fr: TranslationResources = {
       },
     },
     project: {
+      details: {
+        title: "Détails du projet",
+        sourceDirectory: "Dossier source",
+        copySourceDirectory: "Copier le dossier source",
+        repository: "Dépôt",
+        openRepositoryFailed: "Impossible d’ouvrir le dépôt.",
+      },
       noEditableTarget: "Ce projet n’est pas modifiable sur cet hôte.",
       backToProjects: "Retour aux projets",
       edit: {
@@ -3518,6 +3657,28 @@ export const fr: TranslationResources = {
           edit: "Modifier",
           remove: "Supprimer",
         },
+      },
+      launches: {
+        title: "Lancements",
+        info: "Configurations de développement que vous pouvez démarrer depuis n’importe quel espace de travail de ce projet",
+        empty: "Aucun lancement pour le moment.",
+        untitled: "Lancement sans titre",
+        menuAccessibility: "Ouvrir le menu de lancement",
+        removeTitle: "Supprimer le lancement ?",
+        removeMessage: "Supprimer {{name}} ?",
+        removeFallbackName: "ce lancement",
+        name: "Nom",
+        command: "Commande",
+        nameAccessibility: "Nom du lancement",
+        commandAccessibility: "Commande du lancement",
+        nameRequired: "Le nom est requis",
+        nameDuplicate: "Chaque lancement doit avoir un nom unique",
+        commandRequired: "La commande est requise",
+        newLaunch: "Nouveau lancement",
+        editLaunch: "Modifier {{name}}",
+        commandHint:
+          "Paseo exécute cette commande avec le bloc de ports de l’espace de travail et le nom du projet Compose dans son environnement.",
+        actions: { add: "Ajouter un lancement", edit: "Modifier", remove: "Supprimer" },
       },
       metadata: {
         title: "Génération des métadonnées",

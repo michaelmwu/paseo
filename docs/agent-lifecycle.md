@@ -33,6 +33,10 @@ This is best-effort continuation. A crash between saving intent and dispatching 
 or repeat a continuation. Provider resume owns conversation restoration; there is no recovery retry
 loop or exactly-once turn guarantee.
 
+## Latest-turn worktree changes
+
+Set `agents.latestTurnChanges` to `true` in the daemon config and restart the daemon to enable this preview. Paseo compares the Git worktree at foreground dispatch and settlement. Changes made by people, terminals, and other agents during that window can appear in the comparison. Ignored untracked files stay out of the snapshots. The latest pair is kept in private Git refs in the checkout and may therefore retain file contents until Git prunes them. The capture adds Git work at both turn boundaries.
+
 ## Runtime residency
 
 An unarchived agent may be `closed` without being deleted or archived. Closing releases its provider
@@ -116,6 +120,20 @@ arrives or the run was still waiting for its provider turn id. The captured run 
 older cancellation from settling a newer turn. If interruption is rejected or times out, the agent
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
+
+The manager gives provider interruption ten seconds. This outer budget includes the provider's
+own interrupt RPC and any bounded cleanup before acknowledging cancellation. Post-acknowledgement
+settlement still waits two seconds. Waiting for a starting run before replacement uses the same
+outer budget; it cannot hold later interruption requests indefinitely.
+
+Codex retires its app-server when an interrupt or startup acknowledgement is lost, and when Stop
+cancels an in-flight startup. It confirms process exit before allowing another prompt; a failed
+termination retains ownership so Stop can retry. The snapshot reports pending interrupt recovery
+separately from turn activity so Stop stays available even after a failed startup has settled. Stopping the runtime proves it cannot continue,
+but does not prove a prompt was never delivered: a turn may have executed before its reply was
+lost. Startup acknowledgement loss therefore stays explicitly unknown and is never replayed
+automatically. Retirement settles tool rows and questions before publishing cancellation so
+reopening cannot restore activity from the retired runtime.
 
 ## Relationships
 

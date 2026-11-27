@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
-import { waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
+import { startAgentRun, waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
 import { ForegroundPromptStart } from "./agent-run-state.js";
 import type {
   AgentClient,
@@ -29,10 +29,9 @@ test("isSystemInjectedEnvelope matches the envelope formatSystemNotificationProm
 });
 
 // Independent of the production constant so shortening the budget breaks this test.
-const EXPECTED_RUN_START_BUDGET_MS = 60_000;
-// The slowest provider startup budget the run-start wait has to sit outside of today
-// (OpenCode's OPENCODE_SERVER_STARTUP_TIMEOUT_MS).
-const SLOWEST_PROVIDER_STARTUP_BUDGET_MS = 30_000;
+const EXPECTED_RUN_START_BUDGET_MS = 120_000;
+// Codex turn/start has a 90-second provider request budget.
+const SLOWEST_PROVIDER_STARTUP_BUDGET_MS = 90_000;
 
 const RUN_START_TEST_CAPABILITIES = {
   supportsStreaming: false,
@@ -53,6 +52,7 @@ class SlowStartAgentSession implements AgentSession {
   readonly provider = "codex" as const;
   readonly capabilities = RUN_START_TEST_CAPABILITIES;
   readonly id = randomUUID();
+  cancelTurn = false;
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
   private releaseStartTurn!: () => void;
   private readonly released = new Promise<void>((resolve) => {
@@ -80,7 +80,16 @@ class SlowStartAgentSession implements AgentSession {
     const turnId = "turn-1";
     setTimeout(() => {
       this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
-      this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+      if (this.cancelTurn) {
+        this.pushEvent({
+          type: "turn_canceled",
+          provider: this.provider,
+          turnId,
+          reason: "interrupted",
+        });
+      } else {
+        this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+      }
     }, 0);
     return { turnId };
   }
@@ -204,6 +213,27 @@ async function createRunStartScenario(startDelayMs: number | null): Promise<{
   };
 }
 
+test("a dispatched prompt reports its canceled turn even after the agent goes idle", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-prompt-canceled-"));
+  const client = new SlowStartAgentClient(0);
+  const logger = createTestLogger();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  try {
+    client.sessions[0]!.cancelTurn = true;
+    const result = await startAgentRun(manager, agent.id, "run and cancel", logger);
+    if (result.disposition !== "turn_started") throw new Error("Expected a started turn");
+    await result.started;
+    await expect(result.finished).resolves.toBe("cancelled");
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    await manager.closeAgent(agent.id);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("waiting for a run start outlasts the slowest provider startup budget", async () => {
   // A provider is still allowed to be starting here, so the outer wait must not abort it.
   const scenario = await createRunStartScenario(SLOWEST_PROVIDER_STARTUP_BUDGET_MS + 5_000);
@@ -239,7 +269,7 @@ test("waiting for a run start still gives up at the run start budget", async () 
     const { started } = await scenario.startRun();
     const wait = waitForAgentRunStartWithTimeout(scenario.agentManager, scenario.agentId, started);
     const rejection = expect(wait).rejects.toThrow(
-      "codex run did not start within 60 seconds (phase: run start)",
+      "codex run did not start within 120 seconds (phase: run start)",
     );
     let settled = false;
     const markSettled = () => {

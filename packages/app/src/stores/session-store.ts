@@ -7,6 +7,7 @@ import type { ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { AgentDirectoryEntry } from "@/types/agent-directory";
 import {
   appendSubmittedUserMessage,
+  isUnreconciledLocalUserMessage,
   handoffCreatedAgentUserMessageToStream,
   removeSubmittedUserMessage,
   type StreamItem,
@@ -83,6 +84,8 @@ export interface Agent {
   status: AgentLifecycleStatus;
   backgroundWork?: AgentBackgroundWorkSummary;
   turn: TurnLiveness;
+  interruptRecoveryPending?: boolean;
+  latestTurnChanges?: import("@getpaseo/protocol/messages").AgentTurnChanges | null;
   createdAt: Date;
   updatedAt: Date;
   lastUserMessageAt: Date | null;
@@ -142,6 +145,7 @@ export interface WorkspaceDescriptor {
   archivingAt: string | null;
   diffStat: { additions: number; deletions: number } | null;
   scripts: WorkspaceDescriptorPayload["scripts"];
+  launches?: NonNullable<WorkspaceDescriptorPayload["launches"]>;
   gitRuntime?: WorkspaceDescriptorPayload["gitRuntime"];
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
@@ -188,6 +192,12 @@ export function normalizeWorkspaceDescriptor(
     archivingAt: payload.archivingAt ?? null,
     diffStat: payload.diffStat ?? null,
     scripts: (payload.scripts ?? []).map((s) => Object.assign({}, s)),
+    // COMPAT(workspaceLaunchManagement): old daemons omit launches. Preserve that absence so
+    // feature consumers can distinguish an old descriptor from a supported daemon with no
+    // configured launches.
+    ...(payload.launches !== undefined
+      ? { launches: payload.launches.map((launch) => Object.assign({}, launch)) }
+      : {}),
     gitRuntime: payload.gitRuntime,
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
@@ -481,6 +491,7 @@ export interface SessionState {
   // Hydration status
   hasHydratedAgents: boolean;
   hasHydratedWorkspaces: boolean;
+  hasLiveWorkspaceDirectory: boolean;
   hasWorkspaceDirectorySnapshot: boolean;
 
   // Audio state
@@ -589,6 +600,11 @@ interface SessionStoreActions {
     message: UserMessageItem,
   ) => void;
   acceptAgentMessageSubmission: (
+    serverId: string,
+    agentId: string,
+    clientMessageId: string,
+  ) => void;
+  releaseAgentMessageSubmission: (
     serverId: string,
     agentId: string,
     clientMessageId: string,
@@ -720,6 +736,7 @@ interface SessionStoreActions {
   // Hydration
   setHasHydratedAgents: (serverId: string, hydrated: boolean) => void;
   setHasHydratedWorkspaces: (serverId: string, hydrated: boolean) => void;
+  setHasLiveWorkspaceDirectory: (serverId: string, ready: boolean) => void;
   setHasWorkspaceDirectorySnapshot: (serverId: string, available: boolean) => void;
 
   // Agent directory (derived from agents)
@@ -744,6 +761,7 @@ function createInitialSessionState(
     serverInfo: null,
     hasHydratedAgents: false,
     hasHydratedWorkspaces: false,
+    hasLiveWorkspaceDirectory: false,
     hasWorkspaceDirectorySnapshot: false,
     isPlayingAudio: false,
     focusedAgentId: null,
@@ -1186,9 +1204,18 @@ export const useSessionStore = create<SessionStore>()(
             head: currentHead,
             message,
           });
+          const existing = [...currentTail, ...currentHead].find(
+            (item) =>
+              item.kind === "user_message" && item.clientMessageId === message.clientMessageId,
+          );
+          const existingTimelineRow =
+            existing?.kind === "user_message" && !isUnreconciledLocalUserMessage(existing);
           const submissions = beginMessageSubmission(
             session.messageSubmissions.get(agentId) ?? [],
-            { clientMessageId: message.clientMessageId },
+            {
+              clientMessageId: message.clientMessageId,
+              ...(existingTimelineRow ? { existingTimelineRow: true as const } : {}),
+            },
           );
           const messageSubmissions = new Map(session.messageSubmissions);
           messageSubmissions.set(agentId, submissions);
@@ -1236,6 +1263,24 @@ export const useSessionStore = create<SessionStore>()(
         });
       },
 
+      // Uncertainty ends the local request spinner, but keeps the stable timeline row.
+      releaseAgentMessageSubmission: (serverId, agentId, clientMessageId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) return prev;
+          const messageSubmissions = new Map(session.messageSubmissions);
+          const remaining = (messageSubmissions.get(agentId) ?? []).filter(
+            (item) => item.clientMessageId !== clientMessageId,
+          );
+          if (remaining.length) messageSubmissions.set(agentId, remaining);
+          else messageSubmissions.delete(agentId);
+          return {
+            ...prev,
+            sessions: { ...prev.sessions, [serverId]: { ...session, messageSubmissions } },
+          };
+        });
+      },
+
       rejectAgentMessageSubmission: (serverId, agentId, clientMessageId) => {
         let outcome: MessageSubmissionRejectionOutcome = "unknown";
         set((prev) => {
@@ -1246,9 +1291,12 @@ export const useSessionStore = create<SessionStore>()(
           const currentSubmissions = session.messageSubmissions.get(agentId) ?? [];
           const result = rejectMessageSubmission(currentSubmissions, clientMessageId);
           outcome = result.outcome;
-          if (outcome === "unknown") return prev;
+          if (outcome === "unknown" && result.submissions === currentSubmissions) return prev;
           const stream =
-            outcome === "rejected"
+            outcome === "rejected" &&
+            !currentSubmissions.some(
+              (item) => item.clientMessageId === clientMessageId && item.existingTimelineRow,
+            )
               ? removeSubmittedUserMessage({
                   tail: currentTail,
                   head: currentHead,
@@ -2005,6 +2053,19 @@ export const useSessionStore = create<SessionStore>()(
             sessions: {
               ...prev.sessions,
               [serverId]: { ...session, hasHydratedWorkspaces: hydrated },
+            },
+          };
+        });
+      },
+
+      setHasLiveWorkspaceDirectory: (serverId, ready) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session || session.hasLiveWorkspaceDirectory === ready) return prev;
+          return {
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, hasLiveWorkspaceDirectory: ready },
             },
           };
         });

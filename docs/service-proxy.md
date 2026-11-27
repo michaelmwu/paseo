@@ -38,6 +38,12 @@ paseo script stop <name> [--cwd <path> | --workspace <workspace-id>]
 
 The commands return the same script metadata shown by the workspace: lifecycle, service port, proxy URLs, health, exit code, and supervised terminal ID. `stop` terminates the managed terminal rather than only removing the proxy route, so normal script lifecycle cleanup remains authoritative. MCP exposes matching `list_workspace_scripts`, `start_workspace_script`, and `stop_workspace_script` tools; those require an explicit workspace ID.
 
+`paseo script forward <name> --workspace <id> --host <connection>` opens a
+running service on this computer through the host's authenticated network
+tunnel. It binds to IPv4 loopback and prints the URL. Use `--local-port` to
+require a particular port; otherwise it tries the service's port first and
+selects a free one if needed. Ctrl+C stops the forward, not the remote service.
+
 ## Configuration
 
 Add a `serviceProxy` block under `daemon` in `~/.paseo/config.json`:

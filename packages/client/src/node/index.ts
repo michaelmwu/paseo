@@ -16,12 +16,16 @@ import type {
 } from "../daemon-client-transport-types.js";
 import { DaemonClient, type DaemonClientConfig } from "../daemon-client.js";
 
+export { openHostNetworkTunnel } from "./network-tunnel.js";
+export { TunnelMuxClient } from "./tunnel-mux.js";
+
 export { parseHostTarget };
 export type { SshTunnel } from "./ssh-tunnel.js";
 export { createSshTunnel, resolveSshFailureDetail } from "./ssh-tunnel.js";
 
 export interface HostTransportOptions {
   webSocketAgent?: (url: string) => Agent | undefined;
+  minimumRelaySecurityMode?: "protected";
 }
 
 /** A factory owns one attempt, including a fresh SSH process and its teardown. */
@@ -34,7 +38,8 @@ export function createHostTransportFactory(
   // Rises to "protected" once the daemon negotiates it, so a later attempt
   // cannot be downgraded to legacy endpoint security.
   let securityFloor: SecurityMode | undefined =
-    target.kind === "socket" ? target.offer?.minimumSecurityMode : undefined;
+    options.minimumRelaySecurityMode ??
+    (target.kind === "socket" ? target.offer?.minimumSecurityMode : undefined);
   return (attemptOptions) => {
     const opens = new Set<() => void>();
     const closes = new Set<(event?: unknown) => void>();

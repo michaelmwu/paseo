@@ -103,6 +103,7 @@ export function toStoredAgentRecord(
     runtimeInfo,
     controls: normalizeControls(agent.controls),
     persistence,
+    latestTurnChanges: agent.latestTurnChanges ?? undefined,
     ...projectSessionMetrics(agent.sessionMetrics),
     lastError: agent.lastError ?? undefined,
     requiresAttention: agent.attention.requiresAttention,
@@ -120,6 +121,13 @@ export function toStoredAgentRecord(
 function projectUsageScopeKey(agent: ManagedAgent): string | undefined {
   const usageSession = agent.session?.usageSession?.();
   return usageSession ? `${usageSession.sessionKey}:${usageSession.model ?? ""}` : undefined;
+}
+
+function projectInterruptRecovery(
+  agent: ManagedAgent,
+): Pick<AgentSnapshotPayload, "interruptRecoveryPending"> {
+  const interruptRecoveryPending = agent.session?.hasPendingInterruptRecovery?.();
+  return interruptRecoveryPending === undefined ? {} : { interruptRecoveryPending };
 }
 
 export function toAgentPayload(
@@ -146,6 +154,10 @@ export function toAgentPayload(
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     status: agent.lifecycle,
+    ...projectInterruptRecovery(agent),
+    ...(agent.latestTurnChanges !== undefined
+      ? { latestTurnChanges: agent.latestTurnChanges }
+      : {}),
     activeTurn: agent.activeTurnId
       ? {
           turnId: agent.activeTurnId,

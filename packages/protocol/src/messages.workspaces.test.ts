@@ -6,6 +6,7 @@ import {
   SessionOutboundMessageSchema,
   WorkspaceCreateRequestSchema,
   WorkspaceDescriptorPayloadSchema,
+  WorkspaceLaunchEndpointPayloadSchema,
   WorkspaceScriptPayloadSchema,
 } from "./messages.js";
 
@@ -90,6 +91,31 @@ describe("workspace message schemas", () => {
         },
       }),
     ).toMatchObject({ type: "workspace.setup.run.response", payload: { started: true } });
+  });
+
+  test("parses legacy HTTP and current TCP launch listeners", () => {
+    const legacyHttp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p0",
+      port: 4100,
+      hostname: "launch-dev-p0--project.localhost",
+      localProxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      publicProxyUrl: null,
+      proxyUrl: "http://launch-dev-p0--project.localhost:6767",
+      health: null,
+    });
+    const tcp = WorkspaceLaunchEndpointPayloadSchema.parse({
+      id: "dev:p1",
+      port: 4101,
+      hostname: "127.0.0.1",
+      protocol: "tcp",
+      localProxyUrl: null,
+      publicProxyUrl: null,
+      proxyUrl: null,
+      health: null,
+    });
+
+    expect(legacyHttp.protocol).toBeUndefined();
+    expect(tcp.protocol).toBe("tcp");
   });
 
   test("parses fetch_workspaces_request", () => {
@@ -480,6 +506,18 @@ describe("workspace message schemas", () => {
       throw new Error("expected project.github.clone.response");
     }
     expect(response.payload.project?.projectId).toBe("project-b");
+  });
+
+  test("preserves an optional custom clone folder name", () => {
+    const request = {
+      type: "project.github.clone.request",
+      repo: "acme/api",
+      cloneProtocol: "https",
+      targetDirectory: "~/code",
+      folderName: "acme-api",
+      requestId: "custom-folder",
+    };
+    expect(SessionInboundMessageSchema.parse(request)).toEqual(request);
   });
 
   test("rejects invalid project GitHub clone protocols", () => {
