@@ -33,6 +33,7 @@ not a combined upstream proposal.
 | [#8202](https://github.com/getpaseo/paseo/pull/8202)                                          | `17ca4f893b901c824c629f48320c053fa306435a` |
 | [#9522](https://github.com/getpaseo/paseo/pull/9522)                                          | `e4a3c0075790a9e608526ab0ba390a7e1e12c9d0` |
 | [#10346](https://github.com/getpaseo/paseo/pull/10346)                                        | `9fc7c3a58390c94eb6d40dc43c61920f2f52cdf5` |
+| [#11106](https://github.com/getpaseo/paseo/pull/11106)                                        | `43bea3252537dc3790d87f08719f49581c0d986c` |
 | [Sticky Workspaces header](https://github.com/michaelmwu/paseo/tree/sticky-workspaces-header) | `8e9daba8ecc857361764eaa791a3df9755a6dca1` |
 
 - Use the release's network tunnel (#10944), Tailscale setup and Refresh
