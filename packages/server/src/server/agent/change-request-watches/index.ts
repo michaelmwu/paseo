@@ -244,9 +244,10 @@ export function createChangeRequestWatches(deps: Dependencies) {
         ...backgroundWorkKey(watcher.agentId, url),
         kind: "monitor",
         changeRequestUrl: url,
+        // A watch waits on the forge, like a heartbeat waits on its cron: listed, not Running.
+        countsAsRunning: false,
         description: describeWatch(forge, url),
         startedAt: watcher.startedAt ?? new Date().toISOString(),
-        countsAsRunning: false,
         stop: async () => {
           await unsubscribe(watcher.agentId, url, watcher);
         },

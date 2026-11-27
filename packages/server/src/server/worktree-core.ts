@@ -30,6 +30,7 @@ import type { ChangeRequestCheckoutSource, FirstAgentContext } from "@getpaseo/p
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import { runWithRepositoryRoot } from "../utils/git-repository-discovery.js";
 import { runGitCommand, runWithGitCommandPriority } from "../utils/run-git-command.js";
+import { setPaseoWorktreeUntrustedSource } from "../utils/worktree-metadata.js";
 
 import type { UntrustedWorkspaceSource } from "./workspace-automation-gate.js";
 
@@ -187,26 +188,22 @@ async function createWorktreeAtRepositoryRoot(
     input,
     deps,
   });
-  if (managedWorktree) {
-    return {
-      worktree: managedWorktree,
-      intent,
-      untrustedSource,
-      repoRoot,
-      created: true,
-    };
+  const createdWorktree: CreatedWorktree & { worktreeIncludeSummary?: WorktreeIncludeSummary } =
+    managedWorktree ??
+    (await createWorktree({
+      cwd: repoRoot,
+      includeSourceRoot: sourceCheckout,
+      worktreeSlug: normalizedSlug,
+      worktreePath: transformed.path,
+      source: intent,
+      preparedBranchOff,
+      paseoHome: input.paseoHome,
+      worktreesRoot: input.worktreesRoot,
+    }));
+  if (untrustedSource) {
+    await setPaseoWorktreeUntrustedSource(createdWorktree.worktreePath, untrustedSource);
   }
-
-  const { worktreeIncludeSummary, ...worktree } = await createWorktree({
-    cwd: repoRoot,
-    includeSourceRoot: sourceCheckout,
-    worktreeSlug: normalizedSlug,
-    worktreePath: transformed.path,
-    source: intent,
-    preparedBranchOff,
-    paseoHome: input.paseoHome,
-    worktreesRoot: input.worktreesRoot,
-  });
+  const { worktreeIncludeSummary, ...worktree } = createdWorktree;
   return {
     worktree,
     worktreeIncludeSummary,

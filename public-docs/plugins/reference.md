@@ -15,15 +15,18 @@ Migrating an existing plugin? Follow the standalone [runtime-entry migration gui
 Local plugins are directory sources installed into one Paseo daemon. A plugin can contribute:
 
 - React Native screens and sidebar header and footer items to Paseo clients;
+- a [sidebar view](/docs/plugins/sidebar-views) that replaces the sidebar list, and [badges](#workspace-row-badge-items) on workspace rows;
 - workspace and agent panels opened as workspace tabs;
 - [file panels](#file-panels) for viewing or editing matching files;
 - global, workspace, and agent actions in the Command Center;
-- slash commands in the message composer;
+- slash commands, [controls](#composer-items), pills, and searchable external resources in the message composer;
+- [buttons](#header-buttons) in the workspace header and [fields](#new-workspace-items) on the New workspace screen;
+- [settings screens](#settings-screens) and light and dark themes in Settings → Appearance;
 - transformed and daemon-pushed agent timeline rows;
-- light and dark themes in Settings → Appearance;
-- schema-validated RPC handlers running beside the daemon;
-- normal Paseo operations through the TypeScript SDK;
-- searchable external resources in the message composer.
+- schema-validated RPC handlers and event streams running beside the daemon;
+- [hooks](/docs/plugins/hooks) that change or observe workspace, worktree, and agent operations;
+- [agent providers](/docs/plugins/providers), [usage sources](#usage-sources), and [worktree managers](#worktree-managers);
+- normal Paseo operations through the TypeScript SDK.
 
 Plugin code is trusted and unsandboxed. Client surfaces run in the Paseo app. Backend contributions run in a subprocess with access to the daemon machine, including its files, processes, credentials, and network.
 
@@ -401,7 +404,7 @@ Use `openSettings`, `openScreen`, and `openPanel` for your own registered contri
 ### Server runtime
 
 Paseo provides `@getpaseo/plugin`, `@getpaseo/plugin/server`,
-`@getpaseo/plugin/server/provider`, `@getpaseo/plugin/server/acp`, and `zod` to server code. Backend
+`@getpaseo/plugin/server/provider`, `@getpaseo/plugin/server/acp`, `@getpaseo/plugin/server/usage`, and `zod` to server code. Backend
 contributions run in a daemon subprocess with Node access to the host machine. Keep filesystem,
 process, credential, and other machine-local work under `server/`. A plugin without
 `index.server.ts` starts no subprocess.
@@ -1895,6 +1898,7 @@ Workspace snapshot fields:
 | `statusEnteredAt`    | ISO timestamp or `null`                                           |
 | `archivingAt`        | ISO timestamp or `null`                                           |
 | `diffStat`           | `{ additions: number; deletions: number } \| null`                |
+| `parentWorkspace`    | `WorkspaceRef \| null`                                            |
 
 Agent snapshot fields:
 
@@ -1967,13 +1971,13 @@ export default function contribute(client: PluginClientContext) {
 `addFilePanel` takes a `PluginFilePanelContribution` and returns an idempotent cleanup function.
 Paseo also removes the registration when the client entry is unloaded.
 
-| Field       | Required | Meaning                                                                  |
-| ----------- | -------- | ------------------------------------------------------------------------ |
-| `id`        | Yes      | Plugin-local ID matching `^[a-z][a-z0-9-]*$`.                            |
-| `title`     | Yes      | Non-empty label in the picker, the Open with menu, and Settings > Files. |
-| `icon`      | Yes      | Lucide name, `{ svg }`, or component. See [Icons](#icons).               |
-| `files`     | Yes      | `{ extensions: readonly string[]; filenames?: readonly string[] }`.      |
-| `Component` | Yes      | Component receiving `PluginFilePanelProps`.                              |
+| Field       | Required | Meaning                                                                                 |
+| ----------- | -------- | --------------------------------------------------------------------------------------- |
+| `id`        | Yes      | Plugin-local ID matching `^[a-z][a-z0-9-]*$`.                                           |
+| `title`     | Yes      | Non-empty label in the picker, the Open with menu, and Settings → Chat & panes → Files. |
+| `icon`      | Yes      | Lucide name, `{ svg }`, or component. See [Icons](#icons).                              |
+| `files`     | Yes      | `{ extensions: readonly string[]; filenames?: readonly string[] }`.                     |
+| `Component` | Yes      | Component receiving `PluginFilePanelProps`.                                             |
 
 Extensions have no leading dot and match without case sensitivity. Filenames match the exact
 basename, including case. Selectors contain no paths, globs, or wildcards. Use `extensions: []`
@@ -2092,7 +2096,7 @@ matches an exact filename, the choice applies to that basename instead. An unava
 is ignored on that host and retained for hosts where its panel is installed.
 
 Users choose a panel three ways: the picker on first open, **Open with…** in the tab menu, and
-**Settings > Files**. Open with switches the current tab and wins over the remembered association
+**Settings → Chat & panes → Files** (shown when a plugin registers a file panel). Open with switches the current tab and wins over the remembered association
 for this tab until it is retargeted; its **Always use** remembers the shown panel. Opening a file
 at a line, from a link or a search result, switches the tab to its built-in panel, which shows the
 line in its Source view. Files with no candidate show **Binary preview unavailable**; binary files

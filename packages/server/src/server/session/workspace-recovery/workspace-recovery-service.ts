@@ -6,6 +6,7 @@ import { resolveRepositoryDefaultBranch } from "../../../utils/checkout-git.js";
 import { runWithRepositoryRoot } from "../../../utils/git-repository-discovery.js";
 import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
 import { runGitCommand } from "../../../utils/run-git-command.js";
+import { setPaseoWorktreeUntrustedSource } from "../../../utils/worktree-metadata.js";
 import {
   createWorktree,
   isPaseoOwnedWorktreeCwd,
@@ -78,6 +79,7 @@ export function createWorkspaceRecoveryService(deps: {
   getProject: (projectId: string) => Promise<PersistedProjectRecord | null>;
   isDirectory: (path: string) => Promise<boolean>;
   unarchiveWorkspace: (workspace: PersistedWorkspaceRecord) => Promise<void>;
+  waitForDeferredPublication?: (workspaceId: string) => Promise<boolean>;
   isCheckoutUntrusted?: (checkoutPath: string) => Promise<boolean>;
   syncCheckoutWorktreeManager?: (input: {
     worktreeRoot: string;
@@ -144,6 +146,7 @@ export function createWorkspaceRecoveryService(deps: {
   }
 
   async function inspect(workspaceId: string): Promise<WorkspaceRecoveryState> {
+    await deps.waitForDeferredPublication?.(workspaceId);
     const resolved = await resolveRecovery(workspaceId);
     return resolved.kind === "unavailable" ? resolved : resolved.state;
   }
@@ -151,6 +154,13 @@ export function createWorkspaceRecoveryService(deps: {
   async function restore(
     workspaceId: string,
   ): Promise<{ workspaceId: string; action: WorkspaceRecoveryAction }> {
+    const waited = (await deps.waitForDeferredPublication?.(workspaceId)) ?? false;
+    if (waited) {
+      const settled = await deps.getWorkspace(workspaceId);
+      if (settled && !settled.archivedAt) {
+        return { workspaceId, action: "unarchive" };
+      }
+    }
     const resolved = await resolveRecovery(workspaceId);
     if (resolved.kind === "unavailable") {
       throw new Error(resolved.message);
@@ -281,6 +291,9 @@ export function createWorkspaceRecoveryService(deps: {
         },
         error,
       );
+    }
+    if (workspace.untrustedSource) {
+      await setPaseoWorktreeUntrustedSource(recreatedWorktreePath, workspace.untrustedSource);
     }
     return { worktreePath: recreatedWorktreePath, pluginId: restoredByPluginId };
   }

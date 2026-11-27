@@ -56,7 +56,18 @@ export type TerminalWorkspaceContributionChangedListener = (
   event: TerminalWorkspaceContributionChangedEvent,
 ) => void;
 
+/**
+ * Who asked for a terminal: an agent's Paseo tool, a `paseo.json` script or service, or a
+ * `paseo.json` worktree terminal; anything else is a client. `input` is the command Paseo types
+ * into the shell once it starts.
+ */
+export interface TerminalOrigin {
+  source: "client" | "agent" | "script" | "worktree";
+  input?: string;
+}
+
 export interface TerminalManagerCreateOptions {
+  origin?: TerminalOrigin;
   id?: string;
   cwd: string;
   workspaceId: string;

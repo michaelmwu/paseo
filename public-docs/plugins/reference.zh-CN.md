@@ -13,15 +13,18 @@ nav: 参考
 本地插件是安装到某个 Paseo daemon 中的目录来源。插件可以贡献：
 
 - 为 Paseo 客户端添加 React Native 界面，以及侧边栏顶部和底部项；
+- 替换侧边栏列表的[侧边栏视图](/docs/plugins/sidebar-views)，以及工作区行上的[徽标](#workspace-row-badge-items)；
 - 作为工作区标签页打开的工作区面板和 Agent 面板；
 - 用于查看或编辑匹配文件的[文件面板](#file-panels)；
 - Command Center 中的全局、工作区和 Agent 操作；
-- 消息 Composer 中的斜杠命令；
+- 消息 Composer 中的斜杠命令、[控件](#composer-items)、胶囊和可搜索的外部资源；
+- 工作区标题栏中的[按钮](#header-buttons)，以及新建工作区界面上的[字段](#new-workspace-items)；
+- [设置界面](#settings-screens)，以及 **设置 → 外观** 中的浅色和深色主题；
 - 经过转换的、以及由 daemon 推送的 Agent 时间线行；
-- **设置 → 外观** 中的浅色和深色主题；
-- 在 daemon 旁运行、经过 schema 校验的 RPC 处理函数；
-- 通过 TypeScript SDK 执行的普通 Paseo 操作；
-- 消息 Composer 中可搜索的外部资源。
+- 在 daemon 旁运行、经过 schema 校验的 RPC 处理函数和事件流；
+- 修改或观察工作区、worktree 和 Agent 操作的[钩子](/docs/plugins/hooks)；
+- [Agent Provider](/docs/plugins/providers)、[用量来源](#usage-sources)和 [worktree 管理器](#worktree-managers)；
+- 通过 TypeScript SDK 执行的普通 Paseo 操作。
 
 插件代码是受信任的，没有沙盒。客户端界面在 Paseo 应用中运行。后端贡献在一个子进程中运行，可以访问 daemon 所在的机器，包括它的文件、进程、凭据和网络。
 
@@ -349,7 +352,7 @@ openBrowser({ url, workspaceId: remoteWorkspaceId, serverId: remoteServerId });
 
 ### 服务端运行时 {#server-runtime}
 
-Paseo 为服务端代码提供 `@getpaseo/plugin`、`@getpaseo/plugin/server`、`@getpaseo/plugin/server/provider`、`@getpaseo/plugin/server/acp` 和 `zod`。后端贡献在 daemon 子进程中运行，可以通过 Node 访问宿主机器。请把文件系统、进程、凭据以及其他本机工作放在 `server/` 下。没有 `index.server.ts` 的插件不会启动子进程。
+Paseo 为服务端代码提供 `@getpaseo/plugin`、`@getpaseo/plugin/server`、`@getpaseo/plugin/server/provider`、`@getpaseo/plugin/server/acp`、`@getpaseo/plugin/server/usage` 和 `zod`。后端贡献在 daemon 子进程中运行，可以通过 Node 访问宿主机器。请把文件系统、进程、凭据以及其他本机工作放在 `server/` 下。没有 `index.server.ts` 的插件不会启动子进程。
 
 ### Provider {#providers}
 
@@ -1552,6 +1555,7 @@ const [state, setState] = useTabState(tab, schema, { view: "preview" });
 | `statusEnteredAt`    | ISO 时间戳或 `null`                                               |
 | `archivingAt`        | ISO 时间戳或 `null`                                               |
 | `diffStat`           | `{ additions: number; deletions: number } \| null`                |
+| `parentWorkspace`    | `WorkspaceRef \| null`                                            |
 
 Agent 快照字段：
 
@@ -1613,13 +1617,13 @@ export default function contribute(client: PluginClientContext) {
 
 `addFilePanel` 接收一个 `PluginFilePanelContribution`，并返回一个幂等的清理函数。客户端入口被卸载时，Paseo 也会移除该注册。
 
-| 字段        | 必填 | 含义                                                                 |
-| ----------- | ---- | -------------------------------------------------------------------- |
-| `id`        | 是   | 插件内唯一的 ID，匹配 `^[a-z][a-z0-9-]*$`。                          |
-| `title`     | 是   | 显示在选择器、**打开方式…** 菜单和 **设置 > 文件** 中的非空标签。    |
-| `icon`      | 是   | Lucide 名称、`{ svg }` 或组件。参见[图标](#icons)。                  |
-| `files`     | 是   | `{ extensions: readonly string[]; filenames?: readonly string[] }`。 |
-| `Component` | 是   | 接收 `PluginFilePanelProps` 的组件。                                 |
+| 字段        | 必填 | 含义                                                                           |
+| ----------- | ---- | ------------------------------------------------------------------------------ |
+| `id`        | 是   | 插件内唯一的 ID，匹配 `^[a-z][a-z0-9-]*$`。                                    |
+| `title`     | 是   | 显示在选择器、**打开方式…** 菜单和 **设置 → 聊天与面板 → 文件** 中的非空标签。 |
+| `icon`      | 是   | Lucide 名称、`{ svg }` 或组件。参见[图标](#icons)。                            |
+| `files`     | 是   | `{ extensions: readonly string[]; filenames?: readonly string[] }`。           |
+| `Component` | 是   | 接收 `PluginFilePanelProps` 的组件。                                           |
 
 扩展名不带前导点，匹配时不区分大小写。文件名按完整的 basename 匹配，区分大小写。选择器不包含路径、glob 或通配符。只按文件名选择时，请使用 `extensions: []`。至少需要一个扩展名或文件名。
 
@@ -1700,7 +1704,7 @@ hook 的重新读取会采用磁盘上的版本，因此下一次写入会覆盖
 
 **不再询问** 会在此设备上为该扩展名记住这个选择。当某个候选面板匹配了确切的文件名时，该选择改为应用于那个 basename。不可用的关联在该主机上会被忽略，并为安装了其面板的主机保留。
 
-用户有三种方式选择面板：第一次打开时的选择器、标签页菜单中的 **打开方式…**，以及 **设置 > 文件**。打开方式会切换当前标签页，并且对于这个标签页优先于记住的关联，直到标签页被重新定向；其中的 **始终用于** 会记住当前显示的面板。从链接或搜索结果在某一行打开文件时，标签页会切换到它的内置面板，并在源代码视图中显示该行。没有候选面板的文件显示 **二进制预览不可用**；二进制文件没有源代码面板。
+用户有三种方式选择面板：第一次打开时的选择器、标签页菜单中的 **打开方式…**，以及 **设置 → 聊天与面板 → 文件**（有插件注册文件面板时显示）。打开方式会切换当前标签页，并且对于这个标签页优先于记住的关联，直到标签页被重新定向；其中的 **始终用于** 会记住当前显示的面板。从链接或搜索结果在某一行打开文件时，标签页会切换到它的内置面板，并在源代码视图中显示该行。没有候选面板的文件显示 **二进制预览不可用**；二进制文件没有源代码面板。
 
 ### DocumentFrame {#documentframe}
 

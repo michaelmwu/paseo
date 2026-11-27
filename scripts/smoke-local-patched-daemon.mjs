@@ -50,7 +50,7 @@ try {
   observer = new DaemonClient({ url, clientId: "compiled-daemon-smoke-observer" });
   await observer.connect();
   const info = observer.getLastServerInfoMessage();
-  assert.equal(info.version, "0.17.4");
+  assert.equal(info.version, inputs.release.tag.replace(/^v/, ""));
   assert.equal(info.features.idleRuntimeCleanupSetting, true);
   assert.equal(info.features.hostInstructions, true);
   assert.equal(info.features.hostInstructionWorkspacePolicies, true);

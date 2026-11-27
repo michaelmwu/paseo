@@ -26,7 +26,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useMutation } from "@tanstack/react-query";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { Check, ChevronDown, MessageSquare, PencilLine, X } from "lucide-react-native";
+import { Check, ChevronDown, MessageSquare, X } from "lucide-react-native";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { openExplorerSidebarView } from "@/workspace-tabs/explorer-sidebar";
 import {
@@ -42,8 +42,7 @@ import {
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
 import { findSubmittedUserMessage, getStreamItemMessageId, type StreamItem } from "@/types/stream";
-import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
-import { PlanReviewForm, planReviewLabelKey } from "./plan-review-form";
+import { PlanReviewForm } from "./plan-review-form";
 import type { PendingMessageSubmission } from "@/composer/submission/model";
 import type { TurnPresentation } from "@/timeline/turn-liveness";
 import type { PendingPermission } from "@/types/shared";
@@ -1529,7 +1528,6 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const ThemedCheckIcon = withUnistyles(Check);
 const ThemedXIcon = withUnistyles(X);
 const ThemedMessageSquareIcon = withUnistyles(MessageSquare);
-const ThemedPencilLineIcon = withUnistyles(PencilLine);
 
 const primaryColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
@@ -1591,11 +1589,6 @@ function PermissionActionButton<Action extends { label: string }>({
   );
 }
 
-interface PlanReviewSelection {
-  permission: PendingPermission;
-  action: AgentPlanReviewAction;
-}
-
 function usePendingPermissionsNode({
   agentId,
   resolvedServerId,
@@ -1619,16 +1612,16 @@ function usePendingPermissionsNode({
   const permissionScope = JSON.stringify([resolvedServerId, agentId]);
   const [selectedPlanReview, setSelectedPlanReview] = useState<{
     scope: string;
-    selection: PlanReviewSelection;
+    permission: PendingPermission;
   } | null>(null);
   const planReview =
-    selectedPlanReview?.scope === permissionScope ? selectedPlanReview.selection : null;
+    selectedPlanReview?.scope === permissionScope ? selectedPlanReview.permission : null;
   useEffect(() => {
     setSelectedPlanReview((current) => (current?.scope === permissionScope ? current : null));
   }, [permissionScope]);
   const openPlanReview = useCallback(
-    (selection: PlanReviewSelection) =>
-      setSelectedPlanReview({ scope: permissionScope, selection }),
+    (permission: PendingPermission) =>
+      setSelectedPlanReview({ scope: permissionScope, permission }),
     [permissionScope],
   );
   const closePlanReview = useCallback(() => {
@@ -1672,15 +1665,13 @@ function PendingPermissionCards({
   permissions: PendingPermission[];
   client: DaemonClient | null;
   supportsPlanReview: boolean;
-  review: PlanReviewSelection | null;
-  onOpenReview: (selection: PlanReviewSelection) => void;
+  review: PendingPermission | null;
+  onOpenReview: (permission: PendingPermission) => void;
   onCloseReview: () => void;
 }) {
-  const activeReview =
-    review && permissions.some((permission) => permission.key === review.permission.key);
+  const activeReview = review && permissions.some((permission) => permission.key === review.key);
   // Keep the draft available if the host consumes or replaces the proposal before replying.
-  const visiblePermissions =
-    review && !activeReview ? [...permissions, review.permission] : permissions;
+  const visiblePermissions = review && !activeReview ? [...permissions, review] : permissions;
   return (
     <View style={stylesheet.permissionsContainer}>
       {visiblePermissions.map((permission) => (
@@ -1689,7 +1680,7 @@ function PendingPermissionCards({
           permission={permission}
           client={client}
           onOpenPlanReview={supportsPlanReview && !review ? onOpenReview : undefined}
-          reviewAction={review?.permission.key === permission.key ? review.action : undefined}
+          isPlanReviewOpen={review?.key === permission.key}
           canSubmitPlanReview={supportsPlanReview && Boolean(activeReview)}
           onClosePlanReview={onCloseReview}
         />
@@ -1702,14 +1693,14 @@ function PermissionRequestCard({
   permission,
   client,
   onOpenPlanReview,
-  reviewAction,
+  isPlanReviewOpen,
   canSubmitPlanReview,
   onClosePlanReview,
 }: {
   permission: PendingPermission;
   client: DaemonClient | null;
-  onOpenPlanReview?: (selection: PlanReviewSelection) => void;
-  reviewAction?: AgentPlanReviewAction;
+  onOpenPlanReview?: (permission: PendingPermission) => void;
+  isPlanReviewOpen: boolean;
   canSubmitPlanReview: boolean;
   onClosePlanReview: () => void;
 }) {
@@ -1722,27 +1713,11 @@ function PermissionRequestCard({
   }, [onClosePlanReview]);
 
   const { request } = permission;
-  const handlePlanReviewAction = useCallback(
-    ({ id }: { id: AgentPlanReviewAction }) => onOpenPlanReview?.({ permission, action: id }),
+  const openFeedback = useCallback(
+    () => onOpenPlanReview?.(permission),
     [onOpenPlanReview, permission],
   );
-  const planReviewActions = useMemo(
-    () => [
-      {
-        id: "request_changes" as const,
-        label: t(planReviewLabelKey.request_changes),
-        Icon: ThemedMessageSquareIcon,
-        testID: "plan-request-changes",
-      },
-      {
-        id: "implement_with_notes" as const,
-        label: t(planReviewLabelKey.implement_with_notes),
-        Icon: ThemedPencilLineIcon,
-        testID: "plan-implement-with-notes",
-      },
-    ],
-    [t],
-  );
+  const feedbackAction = useMemo(() => ({ label: t("agentStream.permission.addFeedback") }), [t]);
   const isPlanRequest = request.kind === "plan";
   const title = isPlanRequest
     ? t("agentStream.permission.plan")
@@ -1869,9 +1844,8 @@ function PermissionRequestCard({
 
   const footer = useMemo(
     () =>
-      reviewAction ? (
+      isPlanReviewOpen ? (
         <PlanReviewForm
-          primaryAction={reviewAction}
           permission={permission}
           client={client}
           isAwaitingReview={canSubmitPlanReview}
@@ -1914,23 +1888,20 @@ function PermissionRequestCard({
             {onOpenPlanReview &&
             isPlanRequest &&
             planMarkdown?.trim() &&
-            (request.provider === "codex" || request.provider === "claude")
-              ? planReviewActions.map((action) => (
-                  <PermissionActionButton
-                    key={action.id}
-                    action={action}
-                    isResponding={isResponding}
-                    Icon={action.Icon}
-                    testID={action.testID}
-                    onPress={handlePlanReviewAction}
-                  />
-                ))
-              : null}
+            (request.provider === "codex" || request.provider === "claude") ? (
+              <PermissionActionButton
+                action={feedbackAction}
+                isResponding={isResponding}
+                Icon={ThemedMessageSquareIcon}
+                testID="plan-add-feedback"
+                onPress={openFeedback}
+              />
+            ) : null}
           </View>
         </>
       ),
     [
-      reviewAction,
+      isPlanReviewOpen,
       permission,
       client,
       canSubmitPlanReview,
@@ -1948,8 +1919,8 @@ function PermissionRequestCard({
       isPlanRequest,
       planMarkdown,
       request.provider,
-      planReviewActions,
-      handlePlanReviewAction,
+      feedbackAction,
+      openFeedback,
     ],
   );
 

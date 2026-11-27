@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 import { within } from "@testing-library/dom";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { AgentPlanReviewAction } from "@getpaseo/protocol/messages";
 import { i18n } from "@/i18n/i18next";
 import { PlanReviewForm } from "./plan-review-form";
 
@@ -43,15 +42,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function mount({ compact = false, awaiting = true, initialDraft = "" } = {}) {
+function mount({ compact = false, awaiting = true, initialDraft = "", initiallyOpen = true } = {}) {
   const closed = vi.fn();
   const success = vi.fn();
   function Harness() {
     const [draft, setDraft] = useState(initialDraft);
-    const [visible, setVisible] = useState(true);
-    const [action, setAction] = useState<AgentPlanReviewAction>("request_changes");
+    const [visible, setVisible] = useState(initiallyOpen);
     const reopen = useCallback(() => {
-      setAction("implement_with_notes");
       setVisible(true);
     }, []);
     const close = useCallback(() => {
@@ -61,7 +58,7 @@ function mount({ compact = false, awaiting = true, initialDraft = "" } = {}) {
     return (
       <>
         <button type="button" onClick={reopen}>
-          Reopen with implementation notes
+          Add feedback
         </button>
         {visible ? (
           <PlanReviewForm
@@ -69,7 +66,6 @@ function mount({ compact = false, awaiting = true, initialDraft = "" } = {}) {
             client={client}
             isAwaitingReview={awaiting}
             isCompact={compact}
-            primaryAction={action}
             draft={draft}
             onChangeDraft={setDraft}
             onClose={close}
@@ -84,21 +80,29 @@ function mount({ compact = false, awaiting = true, initialDraft = "" } = {}) {
 }
 
 test.each([false, true])(
-  "preserves a shared draft across failure, cancel and action choice (compact=%s)",
+  "focuses the shared editor and keeps its draft after failure and cancel (compact=%s)",
   async (compact) => {
     const review = vi
       .spyOn(client, "reviewAgentPlan")
       .mockRejectedValueOnce(new Error("Try again with your notes."))
       .mockResolvedValueOnce(undefined);
-    const { closed, success } = mount({ compact });
+    const { closed, success } = mount({ compact, initiallyOpen: false });
+    const addFeedback = page.getByRole("button", { name: "Add feedback", exact: true });
+    await addFeedback.click();
     const input = page.getByTestId("plan-review-input");
     const changes = page.getByTestId("plan-review-submit-changes");
     const implementation = page.getByTestId("plan-review-submit-implementation");
+    await expect.element(input).toHaveFocus();
     await expect.element(changes).toBeDisabled();
     await expect.element(implementation).toBeDisabled();
     await input.fill("   ");
     await expect.element(changes).toBeDisabled();
     await input.fill("Keep all existing lines.");
+    const emphasis = (button: Element) => {
+      const { backgroundColor, borderColor, borderWidth } = getComputedStyle(button);
+      return { backgroundColor, borderColor, borderWidth };
+    };
+    expect(emphasis(changes.element())).toEqual(emphasis(implementation.element()));
     await changes.click();
     await expect
       .element(page.getByTestId("plan-review-error"))
@@ -108,7 +112,7 @@ test.each([false, true])(
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(closed).toHaveBeenCalledOnce();
     expect(within(container).queryByTestId("plan-review-input")).toBeNull();
-    await page.getByRole("button", { name: "Reopen with implementation notes" }).click();
+    await addFeedback.click();
     await expect.element(input).toHaveValue("Keep all existing lines.");
     await implementation.click();
     await expect.poll(() => success.mock.calls.length).toBe(1);

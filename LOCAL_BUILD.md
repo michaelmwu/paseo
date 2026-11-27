@@ -1,16 +1,16 @@
 # Local patched Linux daemon
 
-Deployment bundle based on official `v0.17.4`
-(`2b3559b107243306986176b80beb0e779f9fe53e`), retaining the verified
-`b48bf99ea80e23cc61bb62c2d0cf341408e6d7fe` bundle. Build in
-`/home/michaelmwu/dev/paseo-daemon-patches-v0.17.4`; preserve the shared
+Deployment bundle based on official `v0.17.6`
+(`afb8634dc3157e443e608382a7ef10ddf13db2a9`), retaining the v0.17.4
+patch bundle at `2d64edcb5`. Build in
+`/home/michaelmwu/dev/paseo-daemon-patches-v0.17.6`; preserve the shared
 checkout, previous artifacts, production service and live plugin settings.
 This is a fork deployment record, not an aggregate upstream proposal.
 
 ## Inputs and subsumption
 
 [local-build-inputs.json](local-build-inputs.json) owns full input revisions.
-[Release audit](local-build-release-audit.json) records November 25 GitHub states.
+[Earlier release audit](local-build-release-audit.json) records November 25 GitHub states.
 
 | Feature                                              | Revision    |
 | ---------------------------------------------------- | ----------- |
@@ -32,13 +32,11 @@ This is a fork deployment record, not an aggregate upstream proposal.
 | Sticky Workspaces header/Display menu #10325         | `0c80a810a` |
 | Native PR-watch composer/setup entry points #10736   | `9dc9ae0da` |
 | Shared workspace header management #10446            | `9d915bec3` |
-| Passive native PR/MR-watch running status #10845     | `b686ed6c1` |
-| Plan feedback actions, fork michaelmwu/paseo#16      | `4798c079c` |
+| Plan feedback actions, fork michaelmwu/paseo#16      | `5b5ed81e5` |
 
-No selected feature PR is newly merged into v0.17.4, so none is removed.
-This release-only rebuild retains the verified feature revisions above, including
-historical linked branches. Several live PR heads are newer; the audit records
-them without silently refreshing this feature stack. #10325 is closed but unmerged.
+This rebuild carries forward the recorded feature revisions, including historical
+linked branches. It refreshes fork #16 and uses release #10740 instead of
+the #10845 passive-watch implementation. #10325 remains closed but unmerged.
 
 The subsequent #10736 addition starts from verified build `1f989bf43` and applies
 only its two feature commits after `cf1a5a9e7`. Other feature and companion pins
@@ -49,19 +47,15 @@ feature commits after `311728a78`. Its archive prerequisite #10507 is already
 an ancestor of v0.17.4 at `884adbcc2`; do not apply it again. Other feature and
 companion revisions stay pinned.
 
-#10845 adds the passive native PR/MR-watch registration from `f666920d5` for
-review. The release already supports passive Background work and its state buckets;
-no waiting-heartbeat backport is needed. Keep all other feature and plugin pins.
-
 Fork [michaelmwu/paseo#16](https://github.com/michaelmwu/paseo/pull/16) adds plan
-feedback from `8bd4a5102`. Apply only its four feature commits after `7db6dcefe`;
-its historical `daemon-patches-a7f3bf7` base is not an integration input. This is
-not upstream getpaseo/paseo#16. Keep release-era collapsible plan outcomes, turn
-capture, cancellation and message receipts. Codex Plan mode uses provider options,
-not the source branch's retired feature setter. Other feature and plugin pins stay fixed.
+feedback without importing its historical patch-branch base. The first four
+feature commits are already in `2d64edcb5`; refresh with only `5b5ed81e5`,
+the single-button UI also proposed in [upstream #10971](https://github.com/getpaseo/paseo/pull/10971).
+Do not apply both PRs. Retain collapsible plan outcomes, turn capture, cancellation,
+message receipts and current Codex provider options.
 
 #7782, #9580, #9757 and #9931 are already in the release; their merge commits
-are verified ancestors of v0.17.4. #6534 and #9549/#5633 remain included once
+are verified ancestors of v0.17.6. #6534 and #9549/#5633 remain included once
 through their selected parents. Superseded #5259 and #2419 stay excluded.
 The older [recent-PR audit](local-build-pr-audit.json) is a November 20 snapshot.
 
@@ -83,6 +77,11 @@ release queue/Stop ownership, native continuation, per-turn capture, launch leas
 provider installation/metrics, plugin worktree-manager hooks and checkout trust.
 Plugin-managed worktree restores retain the plugin's ownership.
 
+Keep v0.17.6's checkout trust marker and plugin launch lifecycle for forked
+sessions. The import listing keys include both the host and the source/target
+scope. Keep the release settings layout and queued desktop settings writes
+alongside host instructions and browser routing.
+
 #4524 keeps its sidebar/settings entry points and current Git identity checks.
 Its sheet survives sidebar regrouping. Preserve release project-settings Back
 ownership, localized plural categories and #10325 sticky-header content slots.
@@ -99,10 +98,8 @@ picker, read-state rules and archive owner, including warnings, Undo and active
 workspace handling. Keep existing terminal/setup/script placement and #10736's
 workspace-aware Git actions; do not add Rename or Pin behavior from other PRs.
 
-#10845 marks armed and restored native PR/MR watches passive (`countsAsRunning: false`).
-They stay listed and stoppable, but do not hold an idle agent in Running.
-Queued watch updates still supply Running through the ordinary active-turn
-lifecycle. Preserve #10736's change-request URL on Background work rows.
+Upstream #10740 owns passive watch registration in v0.17.6. Keep #10736's
+change-request URL on Background work rows and the regression tests from #10845.
 
 ## Client features and limits
 
@@ -116,9 +113,10 @@ companion PR watcher plugin, migrate that plugin or start watches automatically.
 Shared workspace header management likewise needs a matching patched client;
 rebuilding or replacing only the daemon cannot add these menu rows to an official app.
 
-Plan feedback also needs a matching patched client. A host advertises `planReview`
-before the client offers Request changes or Implement with notes. Older hosts retain
-ordinary permission actions. This daemon rebuild does not distribute a client app.
+Plan feedback needs the matching patched client. A host advertises `planReview`
+before the client shows Add feedback. The editor gives Request changes and
+Implement with notes equal weight. Older hosts retain ordinary permission actions.
+The local browser export is in `packages/app/dist`; it is not deployed.
 
 #10320 retains sender-wide Ask each time/Allow unattended defaults and workspace
 inherit/ask/unattended/blocked policies for existing conversations. Both hosts
@@ -129,10 +127,10 @@ Host lifetime, newer agent intents and embedded-browser forwarding.
 ## Companion plugins
 
 All eight sources use `508-dev/paseo-plugins` at
-`b36f18a358de9a1e0ef0c099e399d8b5a426a6c4`.
-Feature code stays pinned. Relative to the previous bundle, only PR watcher
-manifest/catalog compatibility and its regression change: admit exactly stable
-0.17.4 as well as previously verified versions; keep 0.17.5 and later gated.
+`d18039b9e1cc9ff80524942306be28fe3a464bdb`.
+Feature code stays pinned. This rebuild only extends the PR-watcher
+manifest/catalog compatibility to 0.17.6. It does not admit 0.17.5 or later
+unverified stable version numbers. See [companion PR #30](https://github.com/508-dev/paseo-plugins/pull/30).
 [Compatibility PR](https://github.com/508-dev/paseo-plugins/pull/23) is stacked on
 [#14](https://github.com/508-dev/paseo-plugins/pull/14).
 
@@ -149,7 +147,7 @@ manifest/catalog compatibility and its regression change: admit exactly stable
 
 Each plugin has independently installed, locked dependencies. Plugins are trusted,
 unsandboxed code. No live source is installed, reloaded or migrated by this build.
-An older watcher manifest may reject 0.17.4. The install helper refuses a different
+An older watcher manifest may reject 0.17.6. The install helper refuses a different
 existing source; use a settings-preserving migration rather than remove/reinstall.
 
 ## Verification
@@ -159,7 +157,26 @@ release lock and `npm ci --ignore-scripts`; reviewed repository patches run thro
 `npm run postinstall` afterward. npm 10 lacks dependency-age cooldown support.
 Fresh validation logs remain in ignored `.dev/`.
 
-### Fork #16 plan-feedback build
+### v0.17.6 and fork #16 single-button refresh
+
+- Locked release dependencies and reviewed postinstall patches are installed in
+  this worktree. The daemon stack and CLI build successfully and report 0.17.6.
+- Focused tests pass: 177 server cases across worktree/launch/trust/watch paths,
+  10 manager cases including plan feedback and continuation, 129 app cases
+  across import and locales, four Chromium editor cases, and 17 watcher cases.
+- Full typecheck and lint pass, along with 31 desktop cases and four Chromium
+  browser-routing badge cases. The final worktree-core rerun passes 43 cases.
+- The isolated compiled daemon loads all eight plugins, the PR watcher answers
+  its list RPC, and plan-review capability, browser streaming, PTY output,
+  launch recovery and retained output checks pass.
+- The browser export succeeds with one Metro worker and a bounded Node heap.
+  Run `CI=1 NODE_OPTIONS=--max-old-space-size=5376 npm exec --workspace=@getpaseo/app -- expo export --platform web --max-workers 1`
+  after building app dependencies if the default export exhausts a worker's heap.
+
+The previous v0.17.4 empty-conversation browser gate below was not rerun.
+No new real-provider, native-device or packaged Electron QA is claimed.
+
+### Fork #16 initial plan-feedback build (v0.17.4)
 
 - Extract only `22ff84351` through `4798c079c` from the fork PR. Preserve current
   plan disclosure/outcome rendering, foreground admission, cancellation, turn
@@ -277,11 +294,11 @@ gate; prior repeated restored-OMP-history failures are not chased in this rebuil
 From independent SSH or a console, never a Paseo-managed terminal:
 
 ```bash
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.17.4/scripts/replace-local-patched-daemon.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.17.6/scripts/replace-local-patched-daemon.sh
 ```
 
 This restarts production and stops Paseo agents. The helper checks version
-0.17.4, rejects shells inside the service cgroup, backs up its override/CLI link,
+0.17.6, rejects shells inside the service cgroup, backs up its override/CLI link,
 and points systemd at this artifact's compiled CLI with Node 22.20.0 and
 `daemon run`. Keep `/home/michaelmwu/.paseo`, `127.0.0.1:6767` and the
 disabled production web UI. Neither deployment helper is run during the build.
@@ -289,7 +306,7 @@ disabled production web UI. Neither deployment helper is run during the build.
 For new plugin installations, or sources already pointing to this bundle:
 
 ```bash
-bash /home/michaelmwu/dev/paseo-daemon-patches-v0.17.4/scripts/install-local-companion-plugins.sh
+bash /home/michaelmwu/dev/paseo-daemon-patches-v0.17.6/scripts/install-local-companion-plugins.sh
 ```
 
 The helper requires the new daemon and explicitly enabled plugins. If it refuses
