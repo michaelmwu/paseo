@@ -178,14 +178,14 @@ export function PlanCard({
   title,
   description,
   text,
-  footer,
+  children,
   disableOuterSpacing = false,
   testID,
 }: {
   title?: string;
   description?: string;
   text: string;
-  footer?: ReactNode;
+  children?: ReactNode;
   disableOuterSpacing?: boolean;
   testID?: string;
 }) {
@@ -222,7 +222,7 @@ export function PlanCard({
       <Markdown style={markdownStyles} rules={markdownRules}>
         {text}
       </Markdown>
-      {footer ? <View style={styles.footer}>{footer}</View> : null}
+      {children ? <View style={styles.footer}>{children}</View> : null}
     </View>
   );
 }

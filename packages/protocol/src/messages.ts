@@ -1920,6 +1920,27 @@ export const AgentRewindResponseMessageSchema = z.object({
   }),
 });
 
+export const AgentPlanReviewActionSchema = z.enum(["request_changes", "implement_with_notes"]);
+export type AgentPlanReviewAction = z.infer<typeof AgentPlanReviewActionSchema>;
+
+export const AgentPlanReviewRequestMessageSchema = z.object({
+  type: z.literal("agent.plan.review.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  permissionRequestId: z.string(),
+  action: AgentPlanReviewActionSchema,
+  text: z.string(),
+});
+
+export const AgentPlanReviewResponseMessageSchema = z.object({
+  type: z.literal("agent.plan.review.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const UpdateAgentResponseMessageSchema = z.object({
   type: z.literal("update_agent_response"),
   payload: AgentActionResponsePayloadSchema,
@@ -3083,6 +3104,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentConfigApplyRequestMessageSchema,
   AgentDetachRequestMessageSchema,
   AgentRewindRequestMessageSchema,
+  AgentPlanReviewRequestMessageSchema,
   AgentPermissionResponseMessageSchema,
   CheckoutStatusRequestSchema,
   SubscribeCheckoutDiffRequestSchema,
@@ -3475,6 +3497,7 @@ export const ServerInfoStatusPayloadSchema = z
         agentProfiles: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: z.boolean().optional(),
+        planReview: z.boolean().optional(),
       })
       .optional(),
   })
@@ -6319,6 +6342,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentConfigApplyResponseMessageSchema,
   AgentDetachResponseMessageSchema,
   AgentRewindResponseMessageSchema,
+  AgentPlanReviewResponseMessageSchema,
   UpdateAgentResponseMessageSchema,
   ProjectRenameResponseSchema,
   ProjectIconSetResponseSchema,
