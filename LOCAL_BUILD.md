@@ -303,6 +303,13 @@ and points systemd at this artifact's compiled CLI with Node 22.20.0 and
 `daemon run`. Keep `/home/michaelmwu/.paseo`, `127.0.0.1:6767` and the
 disabled production web UI. Neither deployment helper is run during the build.
 
+Add `--check` to run only the preflight. By default the service pins
+`PASEO_LISTEN`, so the Tailscale listener toggle in Settings is locked.
+To let Paseo manage listeners, run the replacement helper with
+`--config-listen`. It requires the saved `daemon.listen` to be exactly
+`127.0.0.1:6767` before removing the launch override. The daemon still starts
+on loopback; adding a Tailscale listener is a separate explicit action.
+
 For new plugin installations, or sources already pointing to this bundle:
 
 ```bash

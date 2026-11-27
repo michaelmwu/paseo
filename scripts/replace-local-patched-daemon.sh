@@ -7,6 +7,26 @@ PASEO_BUILD_CLI="$PASEO_BUILD_ROOT/packages/cli/dist/index.js"
 PASEO_BUILD_HOME=/home/michaelmwu/.paseo
 PASEO_BUILD_DROPIN=/etc/systemd/system/paseo.service.d/zz-local-patched-build.conf
 PASEO_BUILD_LINK=/home/michaelmwu/.local/bin/paseo
+PASEO_BUILD_CONFIG_LISTEN=false
+PASEO_BUILD_CHECK_ONLY=false
+
+for PASEO_BUILD_ARG in "$@"; do
+  case "$PASEO_BUILD_ARG" in
+    --config-listen) PASEO_BUILD_CONFIG_LISTEN=true ;;
+    --check) PASEO_BUILD_CHECK_ONLY=true ;;
+    -h|--help)
+      echo 'Usage: replace-local-patched-daemon.sh [--config-listen] [--check]'
+      echo 'By default the deployment pins the listener to 127.0.0.1:6767.'
+      echo '--config-listen lets Paseo manage listeners; the saved address must be loopback-only.'
+      echo '--check verifies the artifacts and selected mode without changing the service.'
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$PASEO_BUILD_ARG" >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [[ "$(id -un)" != michaelmwu ]]; then
   echo 'Run this as michaelmwu from an independent SSH login or console.' >&2
@@ -14,7 +34,8 @@ if [[ "$(id -un)" != michaelmwu ]]; then
 fi
 
 PASEO_BUILD_CGROUP="$(systemctl show paseo.service -p ControlGroup --value)"
-if [[ -n "$PASEO_BUILD_CGROUP" ]] && grep -Fq ":$PASEO_BUILD_CGROUP" /proc/$$/cgroup; then
+if [[ "$PASEO_BUILD_CHECK_ONLY" = false && -n "$PASEO_BUILD_CGROUP" ]] &&
+  grep -Fq ":$PASEO_BUILD_CGROUP" /proc/$$/cgroup; then
   echo 'This shell belongs to paseo.service. Open an independent SSH login first.' >&2
   exit 1
 fi
@@ -27,6 +48,26 @@ test "$("$PASEO_BUILD_NODE" "$PASEO_BUILD_CLI" --version)" = '0.17.6'
 if [[ -d "$PASEO_BUILD_LINK" && ! -L "$PASEO_BUILD_LINK" ]]; then
   echo "$PASEO_BUILD_LINK is a directory; refusing to replace it." >&2
   exit 1
+fi
+
+PASEO_BUILD_LISTEN_DIRECTIVE='Environment="PASEO_LISTEN=127.0.0.1:6767"'
+PASEO_BUILD_LISTEN_MODE='deployment-pinned loopback'
+if [[ "$PASEO_BUILD_CONFIG_LISTEN" = true ]]; then
+  if ! "$PASEO_BUILD_NODE" "$PASEO_BUILD_CLI" daemon config get daemon.listen --json --home "$PASEO_BUILD_HOME" |
+    "$PASEO_BUILD_NODE" -e '
+      const { value } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+      process.exitCode = value === "127.0.0.1:6767" ? 0 : 1;
+    '; then
+    echo 'Refusing config-managed mode: saved daemon.listen must be exactly 127.0.0.1:6767.' >&2
+    exit 1
+  fi
+  # Remove inherited overrides too, including definitions from earlier drop-ins.
+  PASEO_BUILD_LISTEN_DIRECTIVE='UnsetEnvironment=PASEO_LISTEN'
+  PASEO_BUILD_LISTEN_MODE='config-managed loopback'
+fi
+if [[ "$PASEO_BUILD_CHECK_ONLY" = true ]]; then
+  printf 'Paseo 0.17.6 preflight passed (%s). No service changes made.\n' "$PASEO_BUILD_LISTEN_MODE"
+  exit 0
 fi
 
 sudo -v
@@ -44,7 +85,7 @@ printf '%s\n' \
   '[Service]' \
   'Environment="HOME=/home/michaelmwu"' \
   "Environment=\"PASEO_HOME=$PASEO_BUILD_HOME\"" \
-  'Environment="PASEO_LISTEN=127.0.0.1:6767"' \
+  "$PASEO_BUILD_LISTEN_DIRECTIVE" \
   'Environment="PASEO_WEB_UI_ENABLED=false"' \
   'ExecStart=' \
   "ExecStart=$PASEO_BUILD_NODE $PASEO_BUILD_CLI daemon run --home $PASEO_BUILD_HOME" \
