@@ -869,6 +869,10 @@ export const ru: TranslationResources = {
         stop: "Остановить",
         view: "Вывод",
         openService: "Открыть сервис",
+        forwardLocally: "Пробросить на локальный порт",
+        stopForwarding: "Остановить проброс порта",
+        openForward: "Открыть {{address}} в браузере",
+        copyForward: "Скопировать {{address}}",
       },
       accessibility: {
         switchLaunch: "Остановить {{activeLaunchName}} и запустить {{launchName}}",

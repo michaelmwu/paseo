@@ -868,6 +868,10 @@ export const es: TranslationResources = {
         stop: "Detener",
         view: "Salida",
         openService: "Ver servicio",
+        forwardLocally: "Reenviar localmente",
+        stopForwarding: "Detener el reenvío",
+        openForward: "Abrir {{address}} en el navegador",
+        copyForward: "Copiar {{address}}",
       },
       accessibility: {
         switchLaunch: "Detener {{activeLaunchName}} e iniciar {{launchName}}",

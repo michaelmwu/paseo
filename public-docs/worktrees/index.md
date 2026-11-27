@@ -329,6 +329,14 @@ To try switching in a scratch project with Node.js, set `launches` in `paseo.jso
 Start `dev` from **Run** and open its discovered HTTP link. Switch to `full` and open its link.
 The response changes from `dev` to `full` while the port block stays the same.
 
+For an HTTP preview in the Paseo desktop browser, open the endpoint from **Run**. To use
+an external browser or another local tool, choose **Forward to this computer**. This opens a
+listener on your computer's `127.0.0.1` that accepts connections from your OS user.
+HTTP addresses open in your regular browser. For raw TCP, copy the address into your local tool.
+If the service port is already in use locally, Paseo picks a free port. Stop the forward from
+the Run menu. Paseo also closes it when you leave the workspace, the endpoint disappears, or
+the host tunnel disconnects.
+
 ### Reverse proxy
 
 Every service is reachable through the daemon at a deterministic hostname:

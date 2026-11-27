@@ -864,6 +864,10 @@ export const ptBR: TranslationResources = {
         stop: "Parar",
         view: "Saída",
         openService: "Ver serviço",
+        forwardLocally: "Encaminhar localmente",
+        stopForwarding: "Parar o encaminhamento",
+        openForward: "Abrir {{address}} no navegador",
+        copyForward: "Copiar {{address}}",
       },
       accessibility: {
         switchLaunch: "Parar {{activeLaunchName}} e iniciar {{launchName}}",

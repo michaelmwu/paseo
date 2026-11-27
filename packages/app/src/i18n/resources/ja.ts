@@ -864,6 +864,10 @@ export const ja: TranslationResources = {
         stop: "停止",
         view: "出力",
         openService: "サービスを表示",
+        forwardLocally: "ローカルに転送",
+        stopForwarding: "転送を停止",
+        openForward: "ブラウザーで {{address}} を開く",
+        copyForward: "{{address}} をコピー",
       },
       accessibility: {
         switchLaunch: "{{activeLaunchName}} を停止して {{launchName}} を起動",

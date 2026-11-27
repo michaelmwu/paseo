@@ -860,6 +860,10 @@ export const ko: TranslationResources = {
         stop: "중지",
         view: "출력",
         openService: "서비스 보기",
+        forwardLocally: "로컬로 포워딩",
+        stopForwarding: "포워딩 중지",
+        openForward: "브라우저에서 {{address}} 열기",
+        copyForward: "{{address}} 복사",
       },
       accessibility: {
         switchLaunch: "{{activeLaunchName}} 중지 후 {{launchName}} 시작",

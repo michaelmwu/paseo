@@ -220,6 +220,17 @@ describe("resolveWorkspaceScriptLink", () => {
 });
 
 describe("resolveWorkspaceLaunchEndpointLink", () => {
+  it("opens a remote HTTP preview in Paseo without a locally forwarded port", () => {
+    const preview = { kind: "direct", label: "localhost:4100", url: "http://localhost:4100" };
+    expect(
+      resolveWorkspaceLaunchEndpointLink({
+        endpoint: runningLaunchEndpoint,
+        activeConnection: { type: "relay", endpoint: "relay.paseo.sh:443", display: "relay" },
+        inAppRemotePreview: true,
+      }),
+    ).toEqual({ primary: preview, targets: [preview] });
+  });
+
   it("uses the remote daemon host instead of a .localhost proxy", () => {
     expect(
       resolveWorkspaceLaunchEndpointLink({
@@ -273,6 +284,7 @@ describe("resolveWorkspaceLaunchEndpointLink", () => {
     expect(
       resolveWorkspaceLaunchEndpointLink({
         endpoint: { ...runningLaunchEndpoint, protocol: "tcp" },
+        inAppRemotePreview: true,
         activeConnection: {
           type: "directTcp",
           endpoint: "mac-mini.tail123.ts.net:6767",

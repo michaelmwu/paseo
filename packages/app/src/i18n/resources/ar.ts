@@ -860,6 +860,10 @@ export const ar: TranslationResources = {
         stop: "إيقاف",
         view: "المخرجات",
         openService: "عرض الخدمة",
+        forwardLocally: "إعادة توجيه محليًا",
+        stopForwarding: "إيقاف إعادة التوجيه",
+        openForward: "فتح {{address}} في المتصفح",
+        copyForward: "نسخ {{address}}",
       },
       accessibility: {
         switchLaunch: "إيقاف {{activeLaunchName}} وتشغيل {{launchName}}",
