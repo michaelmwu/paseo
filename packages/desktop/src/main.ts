@@ -80,7 +80,6 @@ import {
 import {
   clearPaseoBrowserProfile,
   getLegacyPaseoBrowserProfileSession,
-  PASEO_BROWSER_PROFILE_PARTITION,
   getPaseoBrowserProfileSession,
   getPaseoBrowserProfileSessions,
   listPaseoBrowserProfileGuests,
@@ -112,7 +111,21 @@ import {
   parseAgentDeepLink,
   type AgentDeepLinkTarget,
 } from "@getpaseo/protocol/agent-deep-link";
+import {
+  parseWorkspaceDeepLink,
+  type WorkspaceDeepLinkTarget,
+} from "@getpaseo/protocol/workspace-deep-link";
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
+import { createBrowserRoutingCommandHandlers } from "./features/browser-routing/ipc.js";
+import { BROWSER_PROXY_WARMUP_HOST } from "./features/browser-routing/local-proxy.js";
+import {
+  BrowserRoutingManager,
+  type RoutedBrowserSession,
+} from "./features/browser-routing/manager.js";
+import {
+  parseWorkspaceDeepLinkFromArgv,
+  WorkspaceNavigationInbox,
+} from "./workspace-navigation.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
@@ -125,8 +138,14 @@ const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   isPackaged: app.isPackaged,
 });
 const UPDATE_QUIT_DEADLINE_MS = 5_000;
+const BROWSER_PROXY_WARMUP_TIMEOUT_MS = 10_000;
 const pendingBrowserWindowOpenRequests = new PendingBrowserWindowOpenRequests();
+// webContents ids of the app windows. Only they may register tunnel providers or
+// change routing; guest webviews and popup windows never appear here.
+const trustedRendererIds = new Set<number>();
 const agentNavigationInbox = new AgentNavigationInbox();
+const workspaceNavigationInbox = new WorkspaceNavigationInbox();
+const workspaceWindows = new Set<BrowserWindow>();
 
 // A second-instance launch can arrive before the packaged protocol handler,
 // IPC handlers, and first window exist. Wait for full bootstrap, not just
@@ -193,6 +212,116 @@ function readActiveBrowserInput(
 const browserKeyboard = new BrowserKeyboard(getPaseoBrowserWebviewRegistry());
 browserKeyboard.registerIpc();
 
+function warmUpBrowserProxyCredential(input: {
+  session: RoutedBrowserSession;
+  credential: { username: string; password: string };
+}): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const request = net.request({
+      url: `http://${BROWSER_PROXY_WARMUP_HOST}/`,
+      // The manager only hands back sessions it obtained from session.fromPartition.
+      session: input.session as Electron.Session,
+    });
+    const timer = setTimeout(() => {
+      request.abort();
+      reject(new Error("browser proxy warm-up timed out"));
+    }, BROWSER_PROXY_WARMUP_TIMEOUT_MS);
+    let answered = false;
+    request.on("login", (_authInfo, callback) => {
+      // A second challenge means the proxy refused the credential: stop retrying.
+      if (answered) {
+        callback();
+        return;
+      }
+      answered = true;
+      callback(input.credential.username, input.credential.password);
+    });
+    request.on("response", (response) => {
+      response.on("data", () => {});
+      response.on("error", (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+      response.on("end", () => {
+        clearTimeout(timer);
+        if (response.statusCode === 204) {
+          resolve();
+        } else {
+          reject(new Error(`browser proxy warm-up answered ${response.statusCode}`));
+        }
+      });
+    });
+    request.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    request.end();
+  });
+}
+
+const browserRouting = new BrowserRoutingManager({
+  // Resolved lazily: the settings store binds userData on first use, and dev
+  // worktrees redirect userData after this module evaluates.
+  settings: {
+    getBrowserRouting: () => getDesktopSettingsStore().getBrowserRouting(),
+    setBrowserRoutingHost: (serverId, host) =>
+      getDesktopSettingsStore().setBrowserRoutingHost(serverId, host),
+  },
+  sessions: { fromPartition: (partition) => session.fromPartition(partition) },
+  warmUp: warmUpBrowserProxyCredential,
+  emit: (senderId, event, payload) => {
+    const contents = webContents.fromId(senderId);
+    if (!contents || contents.isDestroyed()) {
+      return false;
+    }
+    contents.send(`paseo:event:${event}`, payload);
+    return true;
+  },
+  // Only app windows own a DaemonClient; guests and popups never see routing state.
+  broadcast: (event, payload) => {
+    for (const rendererId of trustedRendererIds) {
+      const contents = webContents.fromId(rendererId);
+      if (!contents || contents.isDestroyed()) {
+        continue;
+      }
+      contents.send(`paseo:event:${event}`, payload);
+    }
+  },
+  log: (level, event, details) => log[level](`[browser-routing] ${event}`, details),
+});
+
+// This fires before a guest or popup loads; attachment/window-created events
+// are too late to constrain the page's first WebRTC connection.
+app.on("web-contents-created", (_event, contents) => {
+  browserRouting.configureWebRTC(contents);
+});
+
+function isPaseoBrowserProfileSession(candidate: object): boolean {
+  return (
+    candidate === getPaseoBrowserProfileSession(session) ||
+    browserRouting.isReadyRoutedSession(candidate)
+  );
+}
+
+// Only our proxies get a credential, matched by port and realm. A repeated
+// challenge for the same request is cancelled: answering again would send
+// Chromium into its 32-attempt retry loop.
+app.on("login", (event, contents, details, authInfo, callback) => {
+  const decision = browserRouting.decideProxyLogin({
+    authInfo,
+    requestKey: `${contents?.id ?? "main"}|${details.url}`,
+  });
+  if (decision.kind === "ignore") {
+    return;
+  }
+  event.preventDefault();
+  if (decision.kind === "answer") {
+    callback(decision.credential.username, decision.credential.password);
+  } else {
+    callback();
+  }
+});
+
 function showBrowserWebviewContextMenu(
   win: BrowserWindow,
   contents: Electron.WebContents,
@@ -229,13 +358,15 @@ function showBrowserWebviewContextMenu(
 
 function getBrowserPopupWindowOptions(
   mainWindow: BrowserWindow,
+  sourceSession: Electron.Session,
 ): Electron.BrowserWindowConstructorOptions {
   return {
     parent: mainWindow,
     show: true,
     autoHideMenuBar: true,
     webPreferences: {
-      partition: PASEO_BROWSER_PROFILE_PARTITION,
+      // Popups stay in the opener's profile, routed or shared.
+      session: sourceSession,
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       nodeIntegrationInWorker: false,
@@ -270,7 +401,10 @@ function installBrowserWindowOpenHandler(input: {
     if (decision.kind === "popup") {
       return {
         action: "allow",
-        overrideBrowserWindowOptions: getBrowserPopupWindowOptions(mainWindow),
+        overrideBrowserWindowOptions: getBrowserPopupWindowOptions(
+          mainWindow,
+          sourceContents.session,
+        ),
       };
     }
 
@@ -364,6 +498,7 @@ let pendingOpenProjectPath = parseOpenProjectPathFromArgv({
   isDefaultApp: process.defaultApp,
 });
 let pendingAgentNavigation = parseAgentDeepLinkFromArgv(process.argv);
+let pendingWorkspaceNavigation = parseWorkspaceDeepLinkFromArgv(process.argv);
 
 // Each window pulls its own pending open-project path on mount, keyed by
 // webContents id, so deep-linked windows (second-instance launches, the
@@ -372,7 +507,6 @@ let pendingAgentNavigation = parseAgentDeepLinkFromArgv(process.argv);
 let desktopWindowOwner: DesktopWindowOwner<AgentDeepLinkTarget>;
 
 if (PASEO_DEBUG) {
-  log.info("[open-project] argv:", process.argv);
   log.info("[open-project] isDefaultApp:", process.defaultApp);
   log.info("[open-project] pendingOpenProjectPath:", pendingOpenProjectPath);
 }
@@ -393,6 +527,10 @@ ipcMain.handle("paseo:agent-navigation:ready", (event) => {
   return agentNavigationInbox.windowReady(event.sender.id);
 });
 
+ipcMain.handle("paseo:workspace-navigation:ready", (event) => {
+  return workspaceNavigationInbox.windowReady(event.sender.id);
+});
+
 ipcMain.handle("paseo:browser:register-attached", (event, rawInput: unknown) => {
   const input = readAttachedBrowserInput(rawInput);
   if (!input) {
@@ -401,7 +539,7 @@ ipcMain.handle("paseo:browser:register-attached", (event, rawInput: unknown) => 
   const registered = registerAttachedPaseoBrowser({
     ...input,
     sender: event.sender,
-    profileSession: getPaseoBrowserProfileSession(session),
+    isProfileSession: isPaseoBrowserProfileSession,
     findWebContents: (webContentsId) => webContents.fromId(webContentsId) ?? null,
   });
   if (!registered) {
@@ -518,15 +656,18 @@ ipcMain.handle("paseo:browser:clear-profile", async (_event, rawLegacyBrowserIds
   const profileSessions = getPaseoBrowserProfileSessions(
     session,
     readLegacyPaseoBrowserIds(rawLegacyBrowserIds),
+    await browserRouting.listPersistedSessions(),
   );
-  const profileSession = profileSessions[0];
   await clearPaseoBrowserProfile({
     profileSessions,
     listGuests: () =>
       listPaseoBrowserProfileGuests({
-        profileSession,
+        profileSessions,
         webContents: webContents.getAllWebContents(),
       }),
+    // clearAuthCache drops the proxy credential; a reloaded guest whose first
+    // connection is a WebSocket would fail without this.
+    beforeReload: () => browserRouting.rewarmCredentials(),
     logReloadError: (webContentsId, error) => {
       log.warn("[browser-profile] failed to reload guest", { webContentsId, error });
     },
@@ -727,16 +868,28 @@ async function createWindow(
   });
   applyDesktopWindowChromeMode({ win: mainWindow, mode: DESKTOP_WINDOW_CHROME_MODE });
 
+  workspaceWindows.add(mainWindow);
   const webContentsId = mainWindow.webContents.id;
+  trustedRendererIds.add(webContentsId);
   options.onCreated?.(webContentsId);
   mainWindow.webContents.on("did-start-navigation", (_event, _url, isSameDocument, isMainFrame) => {
     if (isMainFrame && !isSameDocument) {
       agentNavigationInbox.windowLoading(webContentsId);
+      // A reload or navigation drops the renderer's DaemonClient with it.
+      browserRouting.handleRendererGone(webContentsId);
+      workspaceNavigationInbox.windowLoading(webContentsId);
     }
   });
+  mainWindow.webContents.on("render-process-gone", () => {
+    browserRouting.handleRendererGone(webContentsId);
+  });
   mainWindow.on("closed", () => {
+    trustedRendererIds.delete(webContentsId);
+    browserRouting.handleRendererGone(webContentsId);
     options.onClosed?.(webContentsId);
     agentNavigationInbox.removeWindow(webContentsId);
+    workspaceWindows.delete(mainWindow);
+    workspaceNavigationInbox.removeWindow(webContentsId);
     unregisterPaseoBrowserHost(webContentsId);
     browserKeyboard.detachHost(webContentsId);
   });
@@ -758,7 +911,11 @@ async function createWindow(
   setupDefaultContextMenu(mainWindow);
   setupDragDropPrevention(mainWindow);
   mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-    if (!isPaseoBrowserWebviewAttach(params)) {
+    if (
+      !isPaseoBrowserWebviewAttach(params, {
+        isRoutedPartitionReady: (partition) => browserRouting.isReadyRoutedPartition(partition),
+      })
+    ) {
       event.preventDefault();
       return;
     }
@@ -846,6 +1003,35 @@ desktopWindowOwner = createDesktopWindowOwner<AgentDeepLinkTarget>({
     agentNavigationInbox.deliverOrQueue(webContentsId, target),
 });
 
+let workspaceWindowCreation: Promise<void> | null = null;
+let workspaceNavigationSequence = 0;
+
+function workspaceWindow(): BrowserWindow | undefined {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && workspaceWindows.has(focused) && !focused.isDestroyed()) return focused;
+  const windows = [...workspaceWindows].filter((win) => !win.isDestroyed());
+  return windows.find((win) => win.isVisible()) ?? windows[0];
+}
+
+async function openOrFocusWorkspace(target: WorkspaceDeepLinkTarget): Promise<void> {
+  const sequence = ++workspaceNavigationSequence;
+  let win = workspaceWindow();
+  if (!win) {
+    workspaceWindowCreation ??= desktopWindowOwner.openPrimary().finally(() => {
+      workspaceWindowCreation = null;
+    });
+    await workspaceWindowCreation;
+    if (sequence !== workspaceNavigationSequence) return;
+    win = workspaceWindow();
+    if (!win) return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  const deliverable = workspaceNavigationInbox.deliverOrQueue(win.webContents.id, target);
+  if (deliverable) win.webContents.send("paseo:event:open-workspace", deliverable);
+}
+
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
@@ -876,9 +1062,31 @@ function receiveAgentDeepLink(input: string): void {
   });
 }
 
+function receiveWorkspaceDeepLink(target: WorkspaceDeepLinkTarget | null): void {
+  if (!target) return;
+
+  if (bootstrapIsComplete) {
+    void openOrFocusWorkspace(target).catch((error) =>
+      log.error("[window] failed to route workspace link", error),
+    );
+    return;
+  }
+
+  pendingWorkspaceNavigation = target;
+  void bootstrapComplete.then(() => {
+    if (pendingWorkspaceNavigation !== target) return undefined;
+    pendingWorkspaceNavigation = null;
+    void openOrFocusWorkspace(target).catch((error) =>
+      log.error("[window] failed to route queued workspace link", error),
+    );
+    return undefined;
+  });
+}
+
 app.on("open-url", (event, url) => {
   event.preventDefault();
   receiveAgentDeepLink(url);
+  receiveWorkspaceDeepLink(parseWorkspaceDeepLink(url));
 });
 
 function setupSingleInstanceLock(): boolean {
@@ -902,7 +1110,12 @@ function setupSingleInstanceLock(): boolean {
       return;
     }
 
-    log.info("[open-project] second-instance commandLine:", commandLine);
+    const workspaceTarget = parseWorkspaceDeepLinkFromArgv(commandLine);
+    if (workspaceTarget) {
+      receiveWorkspaceDeepLink(workspaceTarget);
+      return;
+    }
+
     const openProjectPath = parseOpenProjectPathFromArgv({
       argv: commandLine,
       isDefaultApp: false,
@@ -983,7 +1196,17 @@ async function bootstrap(): Promise<void> {
     },
   });
   ensureNotificationCenterRegistration();
-  registerDaemonManager();
+  registerDaemonManager({
+    additionalHandlers: createBrowserRoutingCommandHandlers({
+      manager: browserRouting,
+      isTrustedRenderer: (senderId) => trustedRendererIds.has(senderId),
+    }),
+  });
+  // Routed hosts come up in the background; attaches and resolve_partition keep
+  // waiting on readiness, so the first window does not wait on warm-ups.
+  void browserRouting.initialize().catch((error) => {
+    log.error("[browser-routing] initialize failed", error);
+  });
   registerWindowManager({ mode: DESKTOP_WINDOW_CHROME_MODE });
   registerDialogHandlers();
   registerNotificationHandlers();
@@ -1024,6 +1247,12 @@ async function bootstrap(): Promise<void> {
     await desktopWindowOwner.openOrFocusAgent(target);
   }
 
+  if (pendingWorkspaceNavigation) {
+    const target = pendingWorkspaceNavigation;
+    pendingWorkspaceNavigation = null;
+    await openOrFocusWorkspace(target);
+  }
+
   app.on("activate", () => {
     void desktopWindowOwner.restoreWhenActivated().catch((error) => {
       console.error("Failed to restore a desktop window after activation", error);
@@ -1032,7 +1261,9 @@ async function bootstrap(): Promise<void> {
 }
 
 void runDesktopStartup({
-  hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
+  hasPendingGuiLaunchRequest: Boolean(
+    pendingOpenProjectPath || pendingAgentNavigation || pendingWorkspaceNavigation,
+  ),
   runCliPassthroughIfRequested,
   inheritLoginShellEnv,
   bootstrapGui: bootstrap,
@@ -1051,6 +1282,11 @@ function showDaemonShutdownDialog(): void {
 const quitLifecycle = createQuitLifecycle({
   app,
   closeTransportSessions: closeAllTransportSessions,
+  shutdownBrowserRouting: () => {
+    void browserRouting.shutdown().catch((error) => {
+      log.error("[browser-routing] shutdown failed", error);
+    });
+  },
   stopDesktopManagedDaemonIfNeeded: () =>
     stopDesktopManagedDaemonOnQuitIfNeeded({
       settingsStore: getDesktopSettingsStore(),

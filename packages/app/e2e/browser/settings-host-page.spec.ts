@@ -67,6 +67,17 @@ test.describe("Settings host page", () => {
       await expectSettingsHeader(page, "Tools & prompts");
       await expectHostInjectMcpCard(page);
     });
+    await test.step("devices section shows the instruction policy controls", async () => {
+      await openHostSection(page, serverId, "devices");
+      const instructions = page.getByTestId("host-instructions-section");
+      await expect(instructions).toBeVisible();
+      await expect(instructions.getByText("Ask each time")).toBeVisible();
+      const save = instructions.getByRole("button", { name: "Save instruction policy" });
+      await expect(save).toBeDisabled();
+      const button = await save.boundingBox();
+      const policy = await instructions.getByText("Ask each time").boundingBox();
+      expect(button?.y).toBeGreaterThan((policy?.y ?? 0) + (policy?.height ?? 0));
+    });
     await test.step("providers section shows the providers card", async () => {
       await expectHostProvidersCard(page, serverId);
       await expectSettingsHeader(page, "Providers");

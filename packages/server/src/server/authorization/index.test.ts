@@ -74,6 +74,30 @@ describe("SessionAuthorization", () => {
     ).toBe(false);
   });
 
+  test("plan review requires workspace write authority in both directions", () => {
+    for (const permissions of [["workspace.read"], ["workspace.write"]] as const) {
+      const authorization = new SessionAuthorization(permissions);
+      const allowed = permissions[0] === "workspace.write";
+      expect(authorization.allowsInbound(inboundMessage("agent.plan.review.request"))).toBe(
+        allowed,
+      );
+      expect(authorization.allowsOutbound(outboundMessage("agent.plan.review.response"))).toBe(
+        allowed,
+      );
+    }
+  });
+
+  test("classifies native session continuation as workspace write authority", () => {
+    const authorization = new SessionAuthorization(["workspace.write"]);
+
+    expect(authorization.allowsInbound(inboundMessage("provider.session.continue.request"))).toBe(
+      true,
+    );
+    expect(
+      authorization.allowsOutbound(outboundMessage("provider.session.continue.response")),
+    ).toBe(true);
+  });
+
   test("Hub can operate ordinary agents and recover workspaces without daemon administration", () => {
     const authorization = new SessionAuthorization(["hub.execute"]);
     for (const type of [
@@ -124,6 +148,27 @@ describe("SessionAuthorization", () => {
     authorization.replacePermissions([]);
     expect(authorization.allowsInbound(inboundMessage("send_agent_message_request"))).toBe(false);
     expect(authorization.allowsOutbound(outboundMessage("agent_update"))).toBe(false);
+  });
+
+  test("uses workspace permissions for launch operations", () => {
+    const readAuthorization = new SessionAuthorization(["workspace.read"]);
+    const writeAuthorization = new SessionAuthorization(["workspace.write"]);
+
+    expect(readAuthorization.allowsInbound(inboundMessage("workspace.launch.list.request"))).toBe(
+      true,
+    );
+    expect(
+      readAuthorization.allowsOutbound(outboundMessage("workspace.launch.list.response")),
+    ).toBe(true);
+    expect(readAuthorization.allowsInbound(inboundMessage("workspace.launch.start.request"))).toBe(
+      false,
+    );
+    expect(writeAuthorization.allowsInbound(inboundMessage("workspace.launch.start.request"))).toBe(
+      true,
+    );
+    expect(
+      writeAuthorization.allowsOutbound(outboundMessage("workspace.launch.stop.response")),
+    ).toBe(true);
   });
 
   test("correlated authorization errors can always be emitted", () => {

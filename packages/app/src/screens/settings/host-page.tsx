@@ -50,6 +50,7 @@ import {
 import { ProviderList } from "@/provider-settings";
 import { openProviderSettings } from "@/navigation/settings-navigation";
 import { HostUsageSection } from "@/usage";
+import { HostInstructionsSection } from "./host-instructions-section";
 import { MetadataGenerationPage } from "@/screens/settings/metadata-generation-page";
 import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
@@ -61,6 +62,7 @@ import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons
 import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
 import { useProviderIcon } from "@/components/provider-icons";
+import { BrowserRoutingCard } from "./browser-routing-card";
 import { BrowserToolsRow } from "./browser-tools-card";
 import { HostPaseoToolsRow } from "./paseo-tools-card";
 import { RestartRecoveryRow } from "./restart-recovery-card";
@@ -238,7 +240,12 @@ export function HostDevicesPage({ serverId }: { serverId: string }) {
     return <HostNotFound />;
   }
 
-  return <WaysToConnect serverId={serverId} />;
+  return (
+    <View>
+      <WaysToConnect serverId={serverId} />
+      <HostInstructionsSection host={host} />
+    </View>
+  );
 }
 
 export function HostToolsPage({ serverId }: { serverId: string }) {
@@ -403,6 +410,8 @@ export function HostDaemonPage({ serverId }: { serverId: string }) {
     <View>
       <HostStatusBadges serverId={serverId} />
       <HostConnectionError serverId={serverId} />
+
+      <BrowserRoutingCard serverId={serverId} />
 
       {isLocalDaemon ? <LocalDaemonSection /> : null}
 

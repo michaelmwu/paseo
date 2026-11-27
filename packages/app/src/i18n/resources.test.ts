@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createInstance } from "i18next";
 import { ar } from "./resources/ar";
 import { en } from "./resources/en";
 import { es } from "./resources/es";
@@ -10,6 +11,26 @@ import { ko } from "./resources/ko";
 import { ptBR } from "./resources/pt-BR";
 import { ru } from "./resources/ru";
 import { zhCN } from "./resources/zh-CN";
+
+it.each([
+  { locale: "ar", resource: ar, count: 2, form: "matches_two" as const },
+  { locale: "ar", resource: ar, count: 5, form: "matches_few" as const },
+  { locale: "ru", resource: ru, count: 2, form: "matches_few" as const },
+  { locale: "ru", resource: ru, count: 5, form: "matches_many" as const },
+])(
+  "uses the localized project-link match plural for $locale/$count",
+  async ({ locale, resource, count, form }) => {
+    const translator = createInstance();
+    await translator.init({
+      lng: locale,
+      fallbackLng: "en",
+      resources: { [locale]: { translation: resource }, en: { translation: en } },
+    });
+    expect(translator.t("settings.projectLinks.entry.matches", { count })).toBe(
+      resource.settings.projectLinks.entry[form]?.replace("{{count}}", String(count)),
+    );
+  },
+);
 
 function flattenKeys(value: unknown, prefix = ""): string[] {
   if (typeof value !== "object" || value === null) {
@@ -841,4 +862,17 @@ describe("translation resources", () => {
     expect(en.startup.logs.unavailable).toBe("No daemon logs available.");
     expect(en.startup.logs.loadFailed).toBe("Unable to load daemon logs: {{message}}");
   });
+});
+
+it("keeps the host name in every translated browser network failure", () => {
+  for (const resource of [en, ar, es, fr, ja, ko, ptBR, ru, zhCN]) {
+    for (const key of [
+      "proxyUnavailable",
+      "destinationFailed",
+      "connectionClosed",
+      "notReady",
+    ] as const) {
+      expect(resource.browserRouting[key]).toContain("{{host}}");
+    }
+  }
 });

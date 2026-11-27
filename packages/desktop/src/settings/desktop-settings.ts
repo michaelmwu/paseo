@@ -29,10 +29,21 @@ interface DesktopSettingsPatch {
   daemon?: Partial<DesktopSettings["daemon"]>;
 }
 
+export type BrowserRoutingHostSettings = z.infer<typeof BrowserRoutingHostSchema>;
+
+// Keyed by daemon serverId. Entries are never deleted: a disabled host keeps its
+// partition so "Clear browser data" can still wipe the profile it created.
+export type BrowserRoutingSettings = Record<string, BrowserRoutingHostSettings>;
+
 export interface DesktopSettingsStore {
   get(): Promise<DesktopSettings>;
   patch(patch: unknown): Promise<DesktopSettings>;
   migrateLegacyRendererSettings(legacySettings: unknown): Promise<DesktopSettings>;
+  getBrowserRouting(): Promise<BrowserRoutingSettings>;
+  setBrowserRoutingHost(
+    serverId: string,
+    host: BrowserRoutingHostSettings,
+  ): Promise<BrowserRoutingSettings>;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -92,11 +103,36 @@ const MigrationsSchema = z
     daemonStopOnQuitDefaultApplied: false,
   }));
 
+const BROWSER_ROUTING_PARTITION_PATTERN = /^persist:paseo-browser-via-[0-9a-f]{16}$/;
+
+const BrowserRoutingHostSchema = z.looseObject({
+  enabled: z.boolean().catch(false),
+  partition: z.string().regex(BROWSER_ROUTING_PARTITION_PATTERN),
+});
+
+// Browser routing lives beside `settings`, not inside it: the renderer reads
+// `settings` as a whole through get_desktop_settings, and routing state is
+// only reachable through the browser_routing_* commands.
+const BrowserRoutingSchema = z
+  .record(z.string(), z.unknown())
+  .catch(() => ({}))
+  .transform((hosts): BrowserRoutingSettings => {
+    const parsed: BrowserRoutingSettings = {};
+    for (const [serverId, host] of Object.entries(hosts)) {
+      const result = BrowserRoutingHostSchema.safeParse(host);
+      if (serverId.trim().length > 0 && result.success) {
+        parsed[serverId] = { enabled: result.data.enabled, partition: result.data.partition };
+      }
+    }
+    return parsed;
+  });
+
 const PersistedDocumentSchema = z
   .looseObject({
     version: z.literal(1).catch(1),
     settings: DesktopSettingsSchema,
     migrations: MigrationsSchema,
+    browserRouting: BrowserRoutingSchema,
   })
   .catch(() => buildDefaultDocument());
 
@@ -142,7 +178,12 @@ function buildDefaultDocument(): PersistedDesktopSettingsDocument {
       legacyRendererSettingsImported: false,
       daemonStopOnQuitDefaultApplied: true,
     },
+    browserRouting: {},
   };
+}
+
+export function isBrowserRoutingPartition(partition: string): boolean {
+  return BROWSER_ROUTING_PARTITION_PATTERN.test(partition);
 }
 
 function toDesktopSettings(stored: StoredDesktopSettings): DesktopSettings {
@@ -341,6 +382,29 @@ export function createDesktopSettingsStore({
           },
         });
         return toDesktopSettings(next);
+      });
+    },
+
+    async getBrowserRouting(): Promise<BrowserRoutingSettings> {
+      const document = await enqueueOperation(loadDocumentUnlocked);
+      return { ...document.browserRouting };
+    },
+
+    setBrowserRoutingHost(
+      serverId: string,
+      host: BrowserRoutingHostSettings,
+    ): Promise<BrowserRoutingSettings> {
+      if (!isBrowserRoutingPartition(host.partition)) {
+        return Promise.reject(new Error(`Invalid browser routing partition: ${host.partition}`));
+      }
+      return enqueueOperation(async () => {
+        const current = await loadDocumentUnlocked();
+        const browserRouting: BrowserRoutingSettings = {
+          ...current.browserRouting,
+          [serverId]: { enabled: host.enabled, partition: host.partition },
+        };
+        await writeDocument({ ...current, browserRouting });
+        return { ...browserRouting };
       });
     },
 

@@ -60,6 +60,20 @@ Paseo 中的 Agent 可以操作真实的浏览器标签页，也就是你在 Pas
 
 对于无障碍树无法捕获的内容，Agent 会退回到 `browser_screenshot`，`browser_logs` 则提供控制台消息和网络耗时。
 
+## 通过主机网络浏览 {#browse-through-a-hosts-network}
+
+标签页默认使用运行桌面应用的计算机加载页面。对于远程主机，可以改为通过该主机发送流量；域名在主机上解析，`localhost` 指向主机的 loopback，因此可以访问主机开发服务和内网站点。
+
+在桌面应用中打开 **设置 → 你的主机 → 概览**，找到 Browser 并启用 **Use host network for browser tabs**。默认关闭，每台主机独立设置。
+
+- 仅桌面端的远程主机显示此选项，daemon 也必须支持该功能，否则需要更新主机。
+- 每台路由主机使用独立浏览器配置，Cookie 和登录状态不会与共享配置互通。
+- 开关变化会在当前 URL 重新创建该主机已有的标签页。
+- 支持通过中继使用，无需额外端口或 VPN。
+- 连接必须具有 `network.proxy` 权限。主机所有者具有权限，其他连接需要所有者授权。
+
+路由标签页可以访问主机可达的 loopback、私有地址和内部站点；云元数据地址被阻止。仅对可信主机和连接启用，并注意打开的页面也能访问该网络。实现与设计原因见[开发文档](https://github.com/getpaseo/paseo/blob/main/docs/browser-host-network.md)。
+
 ## 架构 {#architecture}
 
 ```

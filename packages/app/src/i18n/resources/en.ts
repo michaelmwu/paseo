@@ -1,6 +1,24 @@
 import { pluginGallery } from "./plugin-gallery";
 
 export const en = {
+  browserRouting: {
+    sectionTitle: "Browser",
+    permissionDenied:
+      "This connection does not have permission to use the host network. Ask the host owner to allow network access.",
+    title: "Use host network for browser tabs",
+    description: "Tabs on this host use its network and a separate profile with their own cookies.",
+    updateHost: "Update this host to use its network for browser tabs.",
+    settingFailed: "Could not save or load this setting. Try again.",
+    viaHost: "via {{host}}",
+    proxyUnavailable:
+      "The browser connection to the network of host {{host}} is unavailable. Reconnect the host and reload.",
+    destinationFailed:
+      "Could not reach this address through the network of host {{host}}. Check the address and the host connection.",
+    connectionClosed:
+      "The connection through the network of host {{host}} closed. Reconnect the host and reload.",
+    notReady:
+      "The browser could not prepare the network of host {{host}}. Try opening the tab again.",
+  },
   pluginCombobox: {
     searching: "Searching…",
     empty: "No results",
@@ -28,6 +46,58 @@ export const en = {
     position: "{{current}} of {{total}}",
     total: "{{total}} matches",
   },
+  localFiles: {
+    updateHost: "Update this host to import local files.",
+    missingTitle: "Missing local files",
+    missingConfirm:
+      "{{files}} are missing in {{root}}. Continue without these files? Cancel to import them first.",
+    continueWithout: "Continue without files",
+    unavailableForWorktree: "Resolve these local files before creating a worktree: {{files}}",
+
+    title: "Local files",
+    info: "Import ignored environment and configuration files to this host. Its agents and scripts can read them.",
+    import: "Import files…",
+    importTo: "Import to {{host}}",
+    thisDevice: "This device",
+    fromDevice: "From this device…",
+    fromHost: "From another host…",
+    source: "Source: {{source}}",
+    sourcePath: "Other source file (project-relative path)",
+    inspect: "Inspect",
+    refresh: "Refresh",
+    total: "Selected: {{count}} · {{size}}",
+    include: "Include in future worktrees",
+    configPreview:
+      "Merge these paths into paseo.json. This creates an uncommitted configuration change; existing worktree files stay as they are.",
+    complete: "Files imported. Existing worktrees were not updated.",
+    limits:
+      "Individual files only. Maximum 10 MiB per file, 25 MiB per import, and 100 files. Updates are manual.",
+    existing: "Already exists · replacement requires selection",
+    replace: "Replace {{path}}",
+    status: {
+      ready: "Present",
+      missing: "Missing",
+      not_ignored: "Must be Git-ignored",
+      unsupported: "Unsupported file or path",
+      too_large: "Too large",
+      unavailable: "Unavailable",
+      imported: "Imported",
+    },
+    errors: {
+      load_failed: "Could not inspect files. Check the host connection and try again.",
+      selection_invalid: "Choose at most 100 files with distinct names.",
+      no_source_files: "No eligible files found. Enter an ignored file path to inspect it.",
+      changed: "File changed since preview. Choose the source again to review the latest copy.",
+      import_failed: "Import failed. Check the connection and try again.",
+      partial_failure:
+        "Some files failed. Retry selected failures or choose the source again to refresh.",
+      secure_connection_required:
+        "Use a relay, TLS, or a local/SSH connection to transfer sensitive files.",
+      config_failed:
+        "Files imported, but inclusion was not saved. Refresh to review the latest configuration, then save inclusion without retransferring files.",
+    },
+  },
+
   common: {
     bottomSheetBackdrop: "Bottom sheet backdrop",
     back: "Back",
@@ -131,6 +201,20 @@ export const en = {
     },
   },
   composer: {
+    outbox: {
+      pending: "Saved on this device. Waiting for the host or agent to be ready.",
+      sending: "Sending…",
+      needsReview: "Delivery is unconfirmed. Check status before taking another action.",
+      retry: "Retry delivery",
+      discard: "Discard saved message",
+      attachmentMessage: "Message with attachments",
+
+      failed: "Not delivered. Retry this saved message.",
+      inFlight: "The host is still processing this message. Checking automatically…",
+      checking: "Checking delivery…",
+      check: "Check delivery status",
+    },
+    viewMessage: "Find message",
     placeholders: {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",
@@ -193,6 +277,10 @@ export const en = {
       removeReview: "Remove review attachment",
     },
     errors: {
+      messageLookupFailed:
+        "Could not refresh the conversation. Delivery is still unconfirmed. Reconnect and try finding the message again.",
+      messageNotFound:
+        "Could not find this message in the available history. Delivery is still unconfirmed.",
       failedToSend: "Failed to send message",
       failedToCreateAgent: "Failed to create agent",
       noHostSelected: "No host selected",
@@ -265,9 +353,20 @@ export const en = {
       implement: "Implement",
       question: "How would you like to proceed?",
       proposedPlan: "Proposed plan",
+      addFeedback: "Add feedback",
+      requestChanges: "Request changes",
+      implementWithNotes: "Implement with notes",
+      feedbackPlaceholder: "Give feedback on the plan",
+      stalePlan: "This plan is no longer awaiting review.",
+      planReviewFailed: "Couldn't send plan feedback.",
     },
   },
   agentPanel: {
+    turnChanges: {
+      updateHost: "Update the host to review changes during a turn.",
+      viewChanges: "Changes during this turn",
+      backToConversation: "Back to conversation",
+    },
     states: {
       notFound: "Agent not found",
       failedToLoad: "Failed to load agent",
@@ -399,6 +498,8 @@ export const en = {
     question: {
       responseFailed: "Could not send your response. Try again.",
       submit: "Submit",
+      sendToChat: "Send to chat",
+      chatDeliveryWarning: "Your answer will appear in chat. Do not enter passwords or secrets.",
       next: "Next",
       answerPlaceholder: "Type your answer...",
       otherPlaceholder: "Other...",
@@ -480,6 +581,9 @@ export const en = {
     },
     row: {
       importing: "Importing...",
+      continuing: "Continuing...",
+      continueHint:
+        "Creates a new conversation here. Source files and changes stay in the source worktree.",
     },
   },
   workspace: {
@@ -808,7 +912,7 @@ export const en = {
         view: "View terminal",
       },
       accessibility: {
-        trigger: "Workspace scripts",
+        trigger: "Run workspace commands",
         openService: "View {{scriptName}} service",
         viewTerminal: "View {{scriptName}} terminal",
         runScript: "Run {{scriptName}} script",
@@ -829,6 +933,34 @@ export const en = {
         stopFailed: "Failed to stop {{scriptName}}",
         running: "Running",
         runningCount: "{{count}} running",
+      },
+    },
+    launches: {
+      title: "Launches",
+      actions: {
+        switch: "Switch",
+        start: "Start",
+        stop: "Stop",
+        view: "Output",
+        openService: "View service",
+      },
+      accessibility: {
+        switchLaunch: "Stop {{activeLaunchName}} and start {{launchName}}",
+        trigger: "Workspace launches",
+        launch: "{{launchName}} launch",
+        startLaunch: "Start {{launchName}}",
+        stopLaunch: "Stop {{launchName}}",
+        viewTerminal: "View {{launchName}} terminal",
+        openService: "View {{hostname}} service",
+      },
+      states: {
+        running: "Running",
+        stopped: "Stopped",
+        stopping: "Stopping…",
+        noListeners: "No listening ports detected yet",
+        startFailed: "Failed to start {{launchName}}",
+        stopFailed: "Failed to stop {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -1056,6 +1188,22 @@ export const en = {
           addToChat: "Add to chat",
           addAllToChat: "Add all to chat",
           addingToChat: "Adding...",
+        },
+        watch: {
+          manage: "Stop this watch in Background work.",
+          thisAgent: "Watch with this agent",
+          watching: "Watching {{reference}}",
+          action: "Watch {{abbreviation}}",
+          recipient: "Send updates to",
+          noAgents: "Open an agent in this workspace to start a watch.",
+          untitledAgent: "Untitled agent",
+          starting: "Starting watch…",
+          started: "Watch started. Manage it in the agent’s Background work.",
+          failed: "Could not start the watch. Try again.",
+          closed: "This {{abbreviation}} has already closed.",
+          updateHost:
+            "Update the host to start watches here. On Paseo 0.17.1 or later, you can ask the agent to watch the URL in chat.",
+          disconnected: "Reconnect to the host and try again.",
         },
         checksOverview: {
           headline: {
@@ -1386,6 +1534,8 @@ export const en = {
         select: "Select",
         archive: "Archive",
         archiveWorkspace: "Archive workspace",
+        markAsRead: "Mark as read",
+        markAsUnread: "Mark as unread",
         hideFromSidebar: "Hide from sidebar",
         archiving: "Archiving...",
         hiding: "Hiding...",
@@ -1418,6 +1568,8 @@ export const en = {
         archivedCount: "{{count}} workspaces archived",
         undoArchive: "Undo",
         undoArchiveFailed: "Couldn't undo the archive",
+        markAsReadFailed: "Failed to mark workspace as read",
+        markAsUnreadFailed: "Failed to mark workspace as unread",
       },
     },
   },
@@ -2425,6 +2577,44 @@ export const en = {
       hostLoadFailed: "Couldn't load projects from host {{hostName}}: {{message}}",
       editProject: "Edit {{projectName}}",
     },
+    projectLinks: {
+      entry: {
+        matches: "{{count}} verified matches to review",
+        matches_one: "{{count}} verified match to review",
+        matches_other: "{{count}} verified matches to review",
+        savedLinks: "Links saved on this device",
+        linkAction: "Link projects…",
+        manageAction: "Project links…",
+        hint: "Review matches and manage links on this device.",
+      },
+      sheet: {
+        title: "Project links",
+        deviceOnly:
+          "Links are stored only on this device. They do not move workspaces, settings, or files.",
+        matchesTitle: "Verified matches",
+        matchesDescription:
+          "These entries have the same Git remote and project subdirectory, but are still separate.",
+        linkedTitle: "Linked projects",
+        noMatchesTitle: "No project links to review",
+        noMatchesDescription:
+          "Open a workspace in the same repository on two hosts. Matching projects that are still separate appear here.",
+        linkProjects: "Link {{count}} projects",
+        remote: "Git remote",
+        subdirectory: "Project subdirectory",
+        path: "Path",
+        needsReviewTitle: "Needs review",
+        needsReviewDescription:
+          "The latest Git facts no longer confirm this link, so Paseo keeps these projects separate.",
+        projectUnavailable: "This project is not currently available.",
+        saving: "Saving project link…",
+        saveFailed: "Couldn't save the project link. Try again.",
+        unlink: "Unlink",
+      },
+      toasts: {
+        linked: "Projects linked on this device",
+        unlinked: "Project link removed",
+      },
+    },
     groupInfo: "About {{title}}",
     sections: {
       general: "General",
@@ -2691,11 +2881,13 @@ export const en = {
       browserData: {
         title: "Browser data",
         siteData: "Cookies and site data",
-        description: "Browser tabs share sign-ins and site data across Paseo.",
+        description:
+          "Browser tabs share sign-ins and site data across Paseo. Hosts with “Use host network for browser tabs” on keep a separate profile, and clearing removes both.",
         clear: "Clear browser data",
         clearing: "Clearing...",
         confirmTitle: "Clear browser data?",
-        confirmMessage: "Sites will be signed out and open browser tabs will reload.",
+        confirmMessage:
+          "Sites will be signed out on every profile and open browser tabs will reload.",
         success: "Browser data cleared.",
         error: "Couldn't clear browser data.",
       },
@@ -2952,6 +3144,8 @@ export const en = {
         closeCurrentTab: "Close current tab",
         jumpToWorkspace: "Jump to workspace",
         jumpToTab: "Jump to tab",
+        goBack: "Go back",
+        goForward: "Go forward",
         previousWorkspace: "Previous workspace",
         nextWorkspace: "Next workspace",
         previousTab: "Previous tab",
@@ -3095,6 +3289,34 @@ export const en = {
         removeErrorTitle: "Error",
         removeErrorMessage: "Unable to remove connection",
         timeout: "Timeout",
+      },
+      instructions: {
+        title: "Allow instructions from another host",
+        help: "Set a default approval policy for a sending host. Override it for individual workspaces.",
+        trust:
+          "Anyone who can direct agents on the sending host can use this grant. Existing full-access connections keep their current access.",
+        offline: "Connect to this host to manage incoming instructions.",
+        update: "Update this host to manage incoming instructions.",
+        source: "Sending host",
+        policy: "Default approval policy",
+        workspace: "Workspace overrides",
+        workspacePolicy: "Workspace approval policy",
+        inherit: "Use host default",
+        blocked: "Block instructions",
+        chooseWorkspace: "Choose a workspace",
+        noWorkspaces: "No active workspaces",
+        save: "Save instruction policy",
+        allWorkspaces: "All workspaces",
+        legacyConversation: "Conversation grant",
+        ask: "Ask each time",
+        unattended: "Allow unattended",
+        allow: "Allow instructions",
+        approve: "Approve",
+        deny: "Deny",
+        revoke: "Revoke",
+        noSources: "Connect another host in Settings first.",
+        pending: "Awaiting your approval",
+        updateSource: "Connect and update the sending host before granting access.",
       },
       pairDevices: {
         rowTitle: "Pair a device",
@@ -3487,7 +3709,7 @@ export const en = {
       },
       scripts: {
         title: "Scripts",
-        info: "Long-running services and one-off commands you can launch from any agent in this project",
+        info: "Named commands in the Run menu. Scripts run on demand; services stay running and expose one HTTP port. Existing worktrees use their own checked-out script definitions.",
         empty: "No scripts yet.",
         untitled: "Untitled script",
         port: "port {{port}}",
@@ -3507,6 +3729,32 @@ export const en = {
         serviceHint: "Paseo supervises the process and assigns a port via $PASEO_PORT",
         actions: {
           add: "Add script",
+          edit: "Edit",
+          remove: "Remove",
+        },
+      },
+      launches: {
+        title: "Launches",
+        info: "Commands that start a whole development stack, such as bin/dev. They appear beside scripts and services in Run. One launch runs per workspace; switching stops the current launch. These definitions apply to every workspace in this project.",
+        empty: "Already use bin/dev or npm run dev? Add it as a launch.",
+        untitled: "Untitled launch",
+        menuAccessibility: "Open launch menu",
+        removeTitle: "Remove launch?",
+        removeMessage: "Remove {{name}}?",
+        removeFallbackName: "this launch",
+        name: "Name",
+        command: "Command",
+        nameAccessibility: "Launch name",
+        commandAccessibility: "Launch command",
+        nameRequired: "Name is required",
+        nameDuplicate: "Each launch needs a unique name",
+        commandRequired: "Command is required",
+        newLaunch: "New launch",
+        editLaunch: "Edit {{name}}",
+        commandHint:
+          "Use your existing dev command and keep it running in the foreground. It receives PASEO_PORT_BASE, PASEO_PORT_END, and COMPOSE_PROJECT_NAME. Output opens in a terminal tab; listening ports appear under the launch.",
+        actions: {
+          add: "Add launch",
           edit: "Edit",
           remove: "Remove",
         },
@@ -3547,10 +3795,17 @@ type TranslationResourcesBase = WidenStringLeaves<typeof en>;
 type PluralCategory = "zero" | "one" | "two" | "few" | "many" | "other";
 type DurationPluralKey = `${"days" | "hours" | "minutes"}_${PluralCategory}`;
 type AgoPluralKey = `${"daysAgo" | "hoursAgo" | "minutesAgo"}_${PluralCategory}`;
+type ProjectLinkMatchPluralKey = `matches_${PluralCategory}`;
 
 // i18next plural categories differ by locale, so locale catalogs may add the
 // explicit v4 suffixes they need while retaining the canonical fallback keys.
 export type TranslationResources = TranslationResourcesBase & {
+  settings: TranslationResourcesBase["settings"] & {
+    projectLinks: TranslationResourcesBase["settings"]["projectLinks"] & {
+      entry: TranslationResourcesBase["settings"]["projectLinks"]["entry"] &
+        Partial<Record<ProjectLinkMatchPluralKey, string>>;
+    };
+  };
   providerUsage: TranslationResourcesBase["providerUsage"] & {
     duration: TranslationResourcesBase["providerUsage"]["duration"] &
       Partial<Record<DurationPluralKey, string>>;

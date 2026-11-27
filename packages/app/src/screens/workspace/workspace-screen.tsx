@@ -67,6 +67,7 @@ import { RetainedPanel } from "@/components/retained-panel";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import { WorkspaceScriptsButton, useWorkspaceScriptActions } from "@/screens/workspace/scripts";
+import { canManageWorkspaceLaunches } from "@/screens/workspace/workspace-launches-capability";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { useNavigateToImportedAgent } from "@/hooks/use-import-session";
 import { useToast } from "@/contexts/toast-context";
@@ -86,6 +87,7 @@ import {
   openWorkspaceTargetBeside,
 } from "@/workspace-tabs/open-beside";
 import { openWorkspacePullRequest } from "@/workspace-tabs/open-supporting-view";
+import { useRecordWorkspaceVisit } from "@/stores/navigation-active-workspace-store";
 import { traceInstant } from "@/performance/native-trace";
 import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
 import {
@@ -219,7 +221,9 @@ import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
   WorkspaceHeaderMenuDesktop,
   WorkspaceHeaderMenuMobile,
+  type WorkspaceHeaderWorkspaceActions,
 } from "@/screens/workspace/workspace-header-menu";
+import { useWorkspaceHeaderManagement } from "@/screens/workspace/workspace-header-management";
 import { PluginHeaderButtons } from "@/plugins";
 import {
   createWorkspaceFileTabTarget,
@@ -236,6 +240,7 @@ const NO_SHEETS: readonly SheetTab[] = [];
 const WORKSPACE_FLOATING_PANEL_PORTAL_HOST_PREFIX = "workspace-floating-panels";
 const EMPTY_UI_TABS: WorkspaceTab[] = [];
 const EMPTY_WORKSPACE_SCRIPTS: WorkspaceDescriptor["scripts"] = [];
+const EMPTY_WORKSPACE_LAUNCHES: NonNullable<WorkspaceDescriptor["launches"]> = [];
 const EMPTY_PINNED_AGENT_IDS = new Set<string>();
 const EMPTY_SET = new Set<string>();
 
@@ -247,6 +252,12 @@ function getWorkspaceScripts(
   workspaceDescriptor: WorkspaceDescriptor | null | undefined,
 ): WorkspaceDescriptor["scripts"] {
   return workspaceDescriptor?.scripts ?? EMPTY_WORKSPACE_SCRIPTS;
+}
+
+function getWorkspaceLaunches(
+  workspaceDescriptor: WorkspaceDescriptor | null | undefined,
+): NonNullable<WorkspaceDescriptor["launches"]> {
+  return workspaceDescriptor?.launches ?? EMPTY_WORKSPACE_LAUNCHES;
 }
 
 interface WorkspaceFileLocationFields {
@@ -476,20 +487,12 @@ function useCloseTabs(): UseCloseTabsResult {
   return { closingTabIds, closeTab };
 }
 
-interface WorkspaceHeaderTitleBarProps {
+interface WorkspaceHeaderTitleBarProps extends WorkspaceHeaderWorkspaceActions {
   isLoading: boolean;
   title: string;
   subtitle: string;
   isSubtitleDistinct: boolean;
-  currentBranchName: string | null;
   normalizedServerId: string;
-  showWorkspaceSetup: boolean;
-  importAgentDisabled: boolean;
-  copyPathDisabled: boolean;
-  onOpenImportSheet: () => void;
-  onCopyWorkspacePath: () => void;
-  onCopyBranchName: () => void;
-  onOpenSetupTab: () => void;
 }
 
 function WorkspaceHeaderTitleBar({
@@ -497,15 +500,8 @@ function WorkspaceHeaderTitleBar({
   title,
   subtitle,
   isSubtitleDistinct,
-  currentBranchName,
   normalizedServerId,
-  showWorkspaceSetup,
-  importAgentDisabled,
-  copyPathDisabled,
-  onOpenImportSheet,
-  onCopyWorkspacePath,
-  onCopyBranchName,
-  onOpenSetupTab,
+  ...workspaceActions
 }: WorkspaceHeaderTitleBarProps) {
   const actionsInBar = resolveWorkspaceActionPlacement(useWindowLayout()) === "vertical-bar";
   return (
@@ -526,16 +522,7 @@ function WorkspaceHeaderTitleBar({
       )}
       {actionsInBar ? null : (
         <View style={styles.compactHeaderMenuCluster}>
-          <WorkspaceHeaderMenuDesktop
-            currentBranchName={currentBranchName}
-            showWorkspaceSetup={showWorkspaceSetup}
-            importAgentDisabled={importAgentDisabled}
-            copyPathDisabled={copyPathDisabled}
-            onOpenImportSheet={onOpenImportSheet}
-            onCopyWorkspacePath={onCopyWorkspacePath}
-            onCopyBranchName={onCopyBranchName}
-            onOpenSetupTab={onOpenSetupTab}
-          />
+          <WorkspaceHeaderMenuDesktop {...workspaceActions} />
         </View>
       )}
     </View>
@@ -1064,6 +1051,10 @@ function WorkspaceScreenContent({
     [workspaceId],
   );
   const workspaceDescriptor = useWorkspace(normalizedServerId, normalizedWorkspaceId);
+  const workspaceHeaderManagement = useWorkspaceHeaderManagement({
+    serverId: normalizedServerId,
+    workspace: workspaceDescriptor,
+  });
   useEffect(() => {
     if (!normalizedServerId || !normalizedWorkspaceId || workspaceDescriptor) return;
     void getHostRuntimeStore()
@@ -1080,6 +1071,7 @@ function WorkspaceScreenContent({
     );
   }, [isRouteFocused, normalizedServerId, normalizedWorkspaceId]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
+  const workspaceLaunches = getWorkspaceLaunches(workspaceDescriptor);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
@@ -1087,6 +1079,9 @@ function WorkspaceScreenContent({
   const isConnected = useHostRuntimeIsConnected(normalizedServerId);
   const supportsProvidersSnapshot = useSessionStore(
     (state) => state.sessions[normalizedServerId]?.serverInfo?.features?.providersSnapshot === true,
+  );
+  const workspaceLaunchManagementAvailable = useSessionStore((state) =>
+    canManageWorkspaceLaunches(state.sessions[normalizedServerId]?.serverInfo),
   );
   const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
   const isMissingWorkspaceDirectory = Boolean(workspaceDescriptor) && !workspaceDirectory;
@@ -1611,6 +1606,15 @@ function WorkspaceScreenContent({
 
   const activeTabId = focusedPaneTabState.activeTabId;
   const activeTab = focusedPaneTabState.activeTab;
+  useRecordWorkspaceVisit({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    tabId: activeTabId,
+    routeFocused: isRouteFocused,
+    workspaceExists: Boolean(workspaceDescriptor),
+    layoutHydrated: hasHydratedWorkspaceLayoutStore,
+    hasPendingOpen: Boolean(pendingOpenTarget),
+  });
 
   const tabs = useMemo<WorkspaceTabDescriptor[]>(
     () => focusedPaneTabState.tabs.map((tab) => tab.descriptor),
@@ -3247,10 +3251,14 @@ function WorkspaceScreenContent({
     () => (
       <View style={styles.headerRight}>
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
-        {workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
+        {workspaceScripts.length > 0 ||
+        (workspaceLaunchManagementAvailable && workspaceLaunches.length > 0) ? (
           <WorkspaceScriptsButton
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
             actions={scriptActions}
-            scripts={workspaceDescriptor.scripts}
+            scripts={workspaceScripts}
+            launches={workspaceLaunchManagementAvailable ? workspaceLaunches : []}
             liveTerminalIds={liveTerminalIds}
             onViewTerminal={handleViewScriptTerminal}
             onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
@@ -3268,17 +3276,24 @@ function WorkspaceScreenContent({
         ) : null}
         {workspaceDirectory ? (
           <>
-            <WorkspaceActions serverId={normalizedServerId} cwd={workspaceDirectory} />
+            <WorkspaceActions
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              cwd={workspaceDirectory}
+            />
             {workspaceActionsInBar ? null : explorerControls.headerAction}
           </>
         ) : null}
       </View>
     ),
     [
-      workspaceDescriptor,
+      workspaceLaunchManagementAvailable,
+      workspaceLaunches,
+      workspaceScripts,
       normalizedServerId,
       normalizedWorkspaceId,
       workspaceDirectory,
+      workspaceDescriptor,
       activeFileLocation,
       liveTerminalIds,
       scriptActions,
@@ -3334,6 +3349,7 @@ function WorkspaceScreenContent({
                 isSubtitleDistinct={isWorkspaceHeaderSubtitleDistinct}
                 currentBranchName={currentBranchName}
                 normalizedServerId={normalizedServerId}
+                management={workspaceHeaderManagement}
                 showWorkspaceSetup={showWorkspaceSetup}
                 importAgentDisabled={!canOpenImportSheet}
                 copyPathDisabled={!workspaceDirectory}
@@ -3360,6 +3376,7 @@ function WorkspaceScreenContent({
       showScreenHeader,
       showWorkspaceSetup,
       workspaceDirectory,
+      workspaceHeaderManagement,
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
       isWorkspaceHeaderSubtitleDistinct,
@@ -3446,12 +3463,27 @@ function WorkspaceScreenContent({
           isSubtitleDistinct={isWorkspaceHeaderSubtitleDistinct}
           serverId={normalizedServerId}
         >
+          {workspaceLaunchManagementAvailable && workspaceLaunches.length > 0 ? (
+            <WorkspaceScriptsButton
+              serverId={normalizedServerId}
+              workspaceId={normalizedWorkspaceId}
+              actions={scriptActions}
+              scripts={workspaceScripts}
+              launches={workspaceLaunches}
+              liveTerminalIds={liveTerminalIds}
+              onScriptTerminalStarted={handleScriptTerminalStarted}
+              onViewTerminal={handleViewScriptTerminal}
+              onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+              hideLabels
+            />
+          ) : null}
           <WorkspaceHeaderMenuMobile
             pane={paneTabs?.actions.pane}
             onExitFocusMode={isFocusModeEnabled ? toggleFocusMode : undefined}
             normalizedServerId={normalizedServerId}
             normalizedWorkspaceId={normalizedWorkspaceId}
             scripts={compactHeaderScripts}
+            management={workspaceHeaderManagement}
             currentBranchName={currentBranchName}
             showWorkspaceSetup={showWorkspaceSetup}
             showCreateBrowserTab={showCreateBrowserTab}
@@ -3476,6 +3508,8 @@ function WorkspaceScreenContent({
       toggleFocusMode,
       canOpenImportSheet,
       compactHeaderScripts,
+      scriptActions,
+      workspaceScripts,
       createTerminalDisabled,
       currentBranchName,
       handleCopyBranchName,
@@ -3487,14 +3521,21 @@ function WorkspaceScreenContent({
       isRouteFocused,
       isWorkspaceHeaderLoading,
       isWorkspaceHeaderSubtitleDistinct,
+      liveTerminalIds,
       normalizedServerId,
       normalizedWorkspaceId,
+      handleScriptTerminalStarted,
+      handleViewScriptTerminal,
+      handleOpenUrlInBrowserTab,
       openImportSheet,
       showCreateBrowserTab,
       showWorkspaceSetup,
       workspaceDirectory,
+      workspaceHeaderManagement,
       workspaceHeaderSubtitle,
       workspaceHeaderTitle,
+      workspaceLaunches,
+      workspaceLaunchManagementAvailable,
     ],
   );
   const workspaceCompactHeaderTabs = {

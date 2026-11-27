@@ -17,6 +17,17 @@ const resolvePackageEntry = (packageName: string) => {
     : path.resolve(rootNodeModules, packageName);
 };
 
+// Points Reanimated's `./webUtils` at a stub that imports react-native-web's style helpers as
+// ES modules (see test-stubs/reanimated-web-utils.ts). Browser project only.
+const reanimatedWebUtils = {
+  name: "paseo-test:reanimated-web-utils",
+  enforce: "pre" as const,
+  resolveId(source: string, importer?: string) {
+    if (source !== "./webUtils" || !importer?.includes("/react-native-reanimated/")) return null;
+    return path.resolve(__dirname, "test-stubs/reanimated-web-utils.ts");
+  },
+};
+
 export default defineConfig({
   plugins: [
     {
@@ -119,6 +130,14 @@ export default defineConfig({
         extends: true,
         resolve: {
           alias: [
+            // Use the compiled web-resolvable sheet so browser tests can exercise compact overlays.
+            {
+              find: /^@gorhom\/bottom-sheet$/,
+              replacement: path.resolve(
+                rootNodeModules,
+                "@gorhom/bottom-sheet/lib/module/index.js",
+              ),
+            },
             // The app renders LegendList on native only, from the patched native build. Browser
             // tests render that build too, instead of the package's separate web build. Unit tests
             // load it outside Vite, where its react-native import would miss the web alias.
@@ -128,6 +147,7 @@ export default defineConfig({
             },
           ],
         },
+        plugins: [reanimatedWebUtils],
         test: {
           name: "browser",
           fileParallelism: false,
@@ -198,6 +218,7 @@ export default defineConfig({
       "expo-router/react-navigation",
       "@testing-library/react",
       "@tanstack/react-query",
+      "zustand/traditional",
       "@tanstack/react-virtual",
       "@legendapp/list/react-native",
       "react-i18next",
@@ -207,7 +228,7 @@ export default defineConfig({
       "react/jsx-dev-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
       "react-native-gesture-handler > invariant",
-      // Loaded by the reanimated-web-style-helpers plugin, which the dependency scan does not see.
+      // Loaded by the Reanimated web helpers used in browser tests.
       "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
       "react-native-web/dist/exports/StyleSheet/preprocess",
     ],
@@ -216,6 +237,7 @@ export default defineConfig({
       "react-native-reanimated",
       "react-native-gesture-handler",
       "react-native-keyboard-controller",
+      "@gorhom/bottom-sheet",
     ],
   },
   // babel-preset-expo compiles JSX with the automatic runtime, so app modules don't import React.

@@ -131,7 +131,7 @@ function createHarness(
   };
 }
 
-test("lists and stops each agent's subscription through the background work registry", async () => {
+test("lists and stops each agent's subscription without counting it as running", async () => {
   const home = await createTestHome();
   const h = createHarness(home);
   try {
@@ -142,6 +142,7 @@ test("lists and stops each agent's subscription through the background work regi
     const [second] = h.backgroundWork.list("second");
     expect(first).toMatchObject({
       description: "owner/repo #42",
+      changeRequestUrl: url,
       kind: "monitor",
       canStop: true,
     });
@@ -507,6 +508,7 @@ test("watches multiple forges concurrently with forge-native descriptions and cu
       "owner/repo #42",
       "org/sub/app !9",
     ]);
+    expect(h.backgroundWork.summary("agent-1")).toEqual({ count: 2, runningCount: 0 });
 
     const persisted = JSON.parse(await readFile(file, "utf8")) as Array<{
       forge?: string;

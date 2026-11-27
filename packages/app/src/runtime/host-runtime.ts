@@ -77,6 +77,7 @@ import {
   invalidateServerDataQueriesAfterReconnect,
   mountServerDataPushRouter,
 } from "@/data/push-router";
+import { mountClientNetworkRouting } from "@/desktop/browser/network-routing/lifecycle";
 import {
   getDesktopBrowserHostRegistration,
   mountBrowserAutomationDaemonClientHandler,
@@ -698,13 +699,17 @@ function createDefaultDeps(
     },
     getClientId: () => getOrCreateClientId(),
     mountClientHandlers: ({ client, host }) => {
+      const unmountNetworkRouting = mountClientNetworkRouting(client, host.serverId);
       const unmountServerData = mountServerDataPushRouter({
         client,
         queryClient,
         serverId: host.serverId,
       });
       if (!browserHostRegistration) {
-        return unmountServerData;
+        return () => {
+          unmountNetworkRouting();
+          unmountServerData();
+        };
       }
       const unmountBrowserAutomation = mountBrowserAutomationDaemonClientHandler(
         client,
@@ -712,6 +717,7 @@ function createDefaultDeps(
         { serverId: host.serverId },
       );
       return () => {
+        unmountNetworkRouting();
         unmountBrowserAutomation();
         unmountServerData();
       };

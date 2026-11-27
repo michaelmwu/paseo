@@ -50,6 +50,7 @@ than downloading a published desktop release.
 - **Repo dev scripts** default to `$ROOT/.dev/paseo-home`, where `$ROOT` is the current checkout or worktree root. This keeps all dev state scoped to the checkout instead of the packaged desktop app.
 - **`npm run cli -- ...`** runs through the same dev-home wrapper as the dev scripts, so the in-repo CLI automatically targets the current checkout's `.dev/paseo-home` and configured dev daemon endpoint.
 - **Paseo-created worktrees** seed `$PASEO_WORKTREE_PATH/.dev/paseo-home` from `$PASEO_SOURCE_CHECKOUT_PATH/.dev/paseo-home` by copying agent and project JSON metadata and configuration. Both this setup and `PASEO_DEV_SEED_HOME` use the same seeder, which disables `agents.resumeOnStartup` in the copied config. Startup repairs copied running records without resuming agents or sending recovery prompts. Schedules and heartbeats (stored under `schedules/`), runtime files, identities, sockets, and logs are not copied. Existing nonempty homes are left unchanged unless explicitly reset. Copied agents still reference the original provider sessions and working directories: manually prompting one reaches that real session.
+- **Paseo-created worktrees** read `.worktreeinclude` from the live source checkout before creation. Bare paths and `copy <path>` copy a snapshot into the new worktree; `symlink <path>` creates a live source link. Missing paths, malformed entries, unsafe paths, incompatible include overlaps, destination conflicts, unavailable platform links, and ordinary read/write failures are skipped individually and reported in the daemon log, so the rest of the plan still runs. A source symlink is allowed only when its resolved target remains inside the active source checkout. If that checkout is itself Paseo-managed, its own paths remain eligible while other managed worktree paths stay protected; `copy` snapshots that resolved target, while `symlink` links directly to it. Hard links are ordinary files. Each include is staged before it is committed; Paseo aborts creation only if it cannot safely clean up partial materialization state (or Git/worktree setup itself fails). Materialization finishes before `worktree.setup` runs.
 - **This repo's worktree setup** also best-effort seeds `packages/app/ios` and the newest `.dev/ios-build` entry from the source checkout so iOS simulator services can reuse native project and Xcode cache state when it is safe enough to do so.
 
 Override knobs:
@@ -654,6 +655,15 @@ Desktop integrations can focus an existing agent without creating one or
 sending a message. Use `paseo://h/<server-id>/agent/<agent-id>`, or run
 `paseo agent open <agent-id>`. The CLI reads the local daemon's server ID by
 default; pass `--server <server-id>` when targeting another server.
+
+Desktop integrations can also select an exact remote worktree with
+`paseo://h/<server-id>/open-workspace?path=<absolute-remote-path>`. Use the daemon's
+stable `srv_...` ID and URL-encode the canonical absolute POSIX path. Paseo opens an existing workspace
+whose recorded directory exactly matches the path. If none exists, Paseo asks before
+registering the path as a project. This action never creates an agent. The link contains no
+connection endpoint or credential. When the server ID is not saved, Paseo opens
+the Remote SSH flow and applies the pending path only if the connection the user
+approves reports that exact server ID.
 
 ## Agent state
 
