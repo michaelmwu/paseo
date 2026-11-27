@@ -2452,6 +2452,7 @@ export const es: TranslationResources = {
   },
   settings: {
     title: "Ajustes",
+    searchResults: "Resultados de búsqueda",
     loading: "Cargando configuración...",
     groups: {
       app: "Este dispositivo",

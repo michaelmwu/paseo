@@ -1,4 +1,9 @@
 import {
+  TERMINAL_AGENTS_TITLE,
+  TERMINAL_AGENT_HOOKS_TITLE,
+  TERMINAL_AGENT_HOOKS_HINT,
+} from "./terminal-agents-copy";
+import {
   ArrowDown,
   ArrowUp,
   ArrowUpToLine,
@@ -390,7 +395,13 @@ function HostAgentRuntimeSection({ serverId }: { serverId: string }) {
   );
 }
 
-export function HostDaemonPage({ serverId }: { serverId: string }) {
+export function HostDaemonPage({
+  serverId,
+  group,
+}: {
+  serverId: string;
+  group?: "status" | "runtime" | "danger";
+}) {
   const { t } = useTranslation();
   const host = useHostProfile(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
@@ -401,18 +412,23 @@ export function HostDaemonPage({ serverId }: { serverId: string }) {
 
   return (
     <View>
-      <HostStatusBadges serverId={serverId} />
-      <HostConnectionError serverId={serverId} />
-
-      {isLocalDaemon ? <LocalDaemonSection /> : null}
-
-      {!isLocalDaemon ? <UpdateDaemonCard key={host.serverId} host={host} /> : null}
-
-      <HostAgentRuntimeSection serverId={serverId} />
-
-      <SettingsSection title={t("settings.host.daemon.dangerZone")}>
-        <RestartDaemonCard host={host} />
-      </SettingsSection>
+      {!group || group === "status" ? (
+        <>
+          <HostStatusBadges serverId={serverId} />
+          <HostConnectionError serverId={serverId} />
+          {isLocalDaemon ? (
+            <LocalDaemonSection />
+          ) : (
+            <UpdateDaemonCard key={host.serverId} host={host} />
+          )}
+        </>
+      ) : null}
+      {!group || group === "runtime" ? <HostAgentRuntimeSection serverId={serverId} /> : null}
+      {!group || group === "danger" ? (
+        <SettingsSection title={t("settings.host.daemon.dangerZone")}>
+          <RestartDaemonCard host={host} />
+        </SettingsSection>
+      ) : null}
     </View>
   );
 }
@@ -825,16 +841,13 @@ function EnableTerminalAgentHooksCard({ serverId }: { serverId: string }) {
     <View style={settingsStyles.card} testID="host-page-terminal-agent-hooks-card">
       <View style={settingsStyles.row}>
         <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>Enable terminal agent hooks</Text>
-          <Text style={settingsStyles.rowHint}>
-            Get notifications and status from terminal agents. This installs hooks in your agent
-            config files.
-          </Text>
+          <Text style={settingsStyles.rowTitle}>{TERMINAL_AGENT_HOOKS_TITLE}</Text>
+          <Text style={settingsStyles.rowHint}>{TERMINAL_AGENT_HOOKS_HINT}</Text>
         </View>
         <Switch
           value={config?.enableTerminalAgentHooks === true}
           onValueChange={handleValueChange}
-          accessibilityLabel="Enable terminal agent hooks"
+          accessibilityLabel={TERMINAL_AGENT_HOOKS_TITLE}
           testID="host-page-terminal-agent-hooks-switch"
         />
       </View>
@@ -1287,7 +1300,13 @@ function TerminalProfilesSection({ serverId }: { serverId: string }) {
   );
 }
 
-export function HostTerminalsPage({ serverId }: { serverId: string }) {
+export function HostTerminalsPage({
+  serverId,
+  group,
+}: {
+  serverId: string;
+  group?: "agents" | "profiles";
+}) {
   const host = useHostProfile(serverId);
 
   if (!host) {
@@ -1296,10 +1315,12 @@ export function HostTerminalsPage({ serverId }: { serverId: string }) {
 
   return (
     <View>
-      <SettingsSection title="Terminal agents">
-        <EnableTerminalAgentHooksCard serverId={serverId} />
-      </SettingsSection>
-      <TerminalProfilesSection serverId={serverId} />
+      {!group || group === "agents" ? (
+        <SettingsSection title={TERMINAL_AGENTS_TITLE}>
+          <EnableTerminalAgentHooksCard serverId={serverId} />
+        </SettingsSection>
+      ) : null}
+      {!group || group === "profiles" ? <TerminalProfilesSection serverId={serverId} /> : null}
     </View>
   );
 }
