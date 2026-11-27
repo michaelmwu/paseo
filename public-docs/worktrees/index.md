@@ -331,6 +331,13 @@ The response changes from `dev` to `full` while the port block stays the same.
 On desktop, opening an HTTP endpoint on a supported remote host previews it in the workspace's
 Paseo browser tab through that host's network.
 
+To use an external browser or another local tool, choose **Forward to this computer**. This opens a
+listener on your computer's `127.0.0.1` that accepts connections from your OS user.
+HTTP addresses open in your regular browser. For raw TCP, copy the address into your local tool.
+If the service port is already in use locally, Paseo picks a free port. Stop the forward from
+the Run menu. Paseo also closes it when you leave the workspace, the endpoint disappears, or
+the host tunnel disconnects.
+
 ### Reverse proxy
 
 Every service is reachable through the daemon at a deterministic hostname:

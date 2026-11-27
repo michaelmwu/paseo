@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Text, View } from "react-native";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useFetchQuery } from "@/data/query";
 import { ChevronDown, Globe, Play, Square, SquareTerminal } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -19,6 +20,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToast } from "@/contexts/toast-context";
 import { getIsElectron } from "@/constants/platform";
 import { readHostBrowserRouting } from "@/desktop/browser/proxy";
+import { invokeWorkspacePortForward } from "@/desktop/workspace-port-forward";
+import { copyToClipboard } from "@/utils/copy-to-clipboard";
 import { openServiceUrl } from "@/utils/open-service-url";
 import {
   resolveWorkspaceLaunchEndpointLink,
@@ -281,6 +284,7 @@ function LaunchEndpointRow({
   onSelectRouteKind,
   onOpenUrlInBrowserTab,
   remotePreviewServerId,
+  forwardTarget,
 }: {
   activeConnection: ActiveConnection | null;
   endpoint: WorkspaceLaunches[number]["endpoints"][number];
@@ -289,6 +293,7 @@ function LaunchEndpointRow({
   onSelectRouteKind: (kind: WorkspaceScriptLinkKind) => void;
   onOpenUrlInBrowserTab?: (url: string) => void;
   remotePreviewServerId?: string;
+  forwardTarget: LaunchForwardScope | null;
 }): ReactElement {
   const { t } = useTranslation();
   // COMPAT(workspaceLaunchTcpListeners): added in v0.7.0, remove after 2027-02-28 once the
@@ -312,6 +317,10 @@ function LaunchEndpointRow({
       void openServiceUrl(selectedTarget.url, { openInApp: onOpenUrlInBrowserTab, serverId });
     }
   }, [onOpenUrlInBrowserTab, selectedTarget, serverId]);
+  const target = useMemo(
+    () => (forwardTarget ? { ...forwardTarget, port: endpoint.port } : null),
+    [forwardTarget, endpoint.port],
+  );
 
   return (
     <View style={styles.endpointRow}>
@@ -338,6 +347,92 @@ function LaunchEndpointRow({
           onPress={handleOpen}
           tooltipLabel={t("workspace.launches.actions.openService")}
         />
+      ) : null}
+      {target ? <LaunchEndpointForwardControls target={target} http={protocol === "http"} /> : null}
+    </View>
+  );
+}
+
+interface LaunchForwardScope {
+  serverId: string;
+  workspaceId: string;
+  terminalId: string;
+}
+
+function LaunchEndpointForwardControls({
+  target,
+  http,
+}: {
+  target: LaunchForwardScope & { port: number };
+  http: boolean;
+}): ReactElement {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const key = ["workspace-port-forward", target] as const;
+  const current = useFetchQuery({
+    queryKey: key,
+    queryFn: () => invokeWorkspacePortForward("get", target),
+    dataShape: "value",
+    staleTimeMs: 0,
+    refetchInterval: 2000,
+    retry: false,
+  });
+  const {
+    mutate,
+    error: mutationError,
+    isPending,
+  } = useMutation({
+    mutationFn: (action: "start" | "stop") => invokeWorkspacePortForward(action, target),
+    onSuccess: (port) => queryClient.setQueryData(key, port),
+  });
+  const address = current.data ? `127.0.0.1:${current.data}` : null;
+  const label = t(
+    address
+      ? "workspace.launches.actions.stopForwarding"
+      : "workspace.launches.actions.forwardLocally",
+  );
+  const failure = mutationError ?? current.error;
+  const toggle = useCallback(() => mutate(address ? "stop" : "start"), [mutate, address]);
+  const useAddress = useCallback(() => {
+    if (!address) return;
+    const action = http ? openServiceUrl(`http://${address}`) : copyToClipboard(address);
+    void action.catch((error: unknown) => toast.show(String(error), { variant: "error" }));
+  }, [address, http, toast]);
+  return (
+    <View style={styles.forwardControls}>
+      <LaunchActionButton
+        accessibilityLabel={label}
+        label={label}
+        pending={isPending}
+        disabled={current.isPending || isPending}
+        onPress={toggle}
+        testID={`workspace-launches-forward-${target.port}`}
+        tooltipLabel={label}
+      />
+      {address ? (
+        <LaunchActionButton
+          accessibilityLabel={t(
+            http
+              ? "workspace.launches.actions.openForward"
+              : "workspace.launches.actions.copyForward",
+            { address },
+          )}
+          label={address}
+          onPress={useAddress}
+          testID={`workspace-launches-forward-address-${target.port}`}
+          tooltipLabel={t(
+            http
+              ? "workspace.launches.actions.openForward"
+              : "workspace.launches.actions.copyForward",
+            { address },
+          )}
+        />
+      ) : null}
+      {failure ? (
+        <Text accessibilityRole="alert" style={styles.launchErrorText}>
+          {failure.message}
+        </Text>
       ) : null}
     </View>
   );
@@ -385,6 +480,7 @@ interface LaunchRowProps {
   onSelectRouteKind: (kind: WorkspaceScriptLinkKind) => void;
   onViewTerminal?: (terminalId: string) => void;
   onOpenUrlInBrowserTab?: (url: string) => void;
+  forwardScope: Omit<LaunchForwardScope, "terminalId"> | null;
   remotePreviewServerId?: string;
 }
 
@@ -403,9 +499,15 @@ function LaunchRow({
   onSelectRouteKind,
   onViewTerminal,
   onOpenUrlInBrowserTab,
+  forwardScope,
   remotePreviewServerId,
 }: LaunchRowProps): ReactElement {
   const { t } = useTranslation();
+  const forwardTarget = useMemo(
+    () =>
+      forwardScope && launch.terminalId ? { ...forwardScope, terminalId: launch.terminalId } : null,
+    [forwardScope, launch.terminalId],
+  );
   const isRunning = launch.lifecycle === "running";
   const isStartPending = pendingStartLaunchName === launch.launchName;
   const isStopPending = pendingStopLaunchName === launch.launchName;
@@ -544,6 +646,7 @@ function LaunchRow({
               onSelectRouteKind={onSelectRouteKind}
               onOpenUrlInBrowserTab={onOpenUrlInBrowserTab}
               remotePreviewServerId={remotePreviewServerId}
+              forwardTarget={forwardTarget}
             />
           ))}
         </View>
@@ -584,6 +687,10 @@ export function WorkspaceLaunchesSection({
   const toast = useToast();
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   const { activeConnection, remotePreviewServerId } = useLaunchHostRouting(serverId);
+  const forwardScope = useMemo(
+    () => (remotePreviewServerId ? { serverId: remotePreviewServerId, workspaceId } : null),
+    [remotePreviewServerId, workspaceId],
+  );
   const preferredRouteKind = useWorkspaceServiceRoutePreferencesStore(
     (state) => state.byServerId[serverId] ?? null,
   );
@@ -705,6 +812,7 @@ export function WorkspaceLaunchesSection({
           onSelectRouteKind={handleSelectRouteKind}
           onViewTerminal={onViewTerminal}
           onOpenUrlInBrowserTab={onOpenUrlInBrowserTab}
+          forwardScope={forwardScope}
           remotePreviewServerId={remotePreviewServerId}
         />
       ))}
@@ -792,6 +900,12 @@ const styles = StyleSheet.create((theme) => ({
     marginBottom: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     gap: 2,
+  },
+  forwardControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing[1],
   },
   endpointRow: {
     flexDirection: "row",

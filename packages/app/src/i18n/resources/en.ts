@@ -857,6 +857,10 @@ export const en = {
         stop: "Stop",
         view: "Output",
         openService: "View service",
+        forwardLocally: "Forward to this computer",
+        stopForwarding: "Stop forwarding",
+        openForward: "Open {{address}} in your browser",
+        copyForward: "Copy {{address}}",
       },
       accessibility: {
         switchLaunch: "Stop {{activeLaunchName}} and start {{launchName}}",

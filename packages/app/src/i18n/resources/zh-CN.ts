@@ -856,6 +856,10 @@ export const zhCN: TranslationResources = {
         stop: "停止",
         view: "输出",
         openService: "查看服务",
+        forwardLocally: "转发到本地",
+        stopForwarding: "停止转发",
+        openForward: "在浏览器中打开 {{address}}",
+        copyForward: "复制 {{address}}",
       },
       accessibility: {
         switchLaunch: "停止 {{activeLaunchName}} 并启动 {{launchName}}",

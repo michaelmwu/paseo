@@ -869,6 +869,10 @@ export const fr: TranslationResources = {
         stop: "Arrêter",
         view: "Sortie",
         openService: "Voir le service",
+        forwardLocally: "Rediriger en local",
+        stopForwarding: "Arrêter la redirection",
+        openForward: "Ouvrir {{address}} dans le navigateur",
+        copyForward: "Copier {{address}}",
       },
       accessibility: {
         switchLaunch: "Arrêter {{activeLaunchName}} et démarrer {{launchName}}",

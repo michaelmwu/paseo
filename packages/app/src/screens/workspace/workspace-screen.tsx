@@ -40,6 +40,7 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useIsFocused } from "expo-router/react-navigation";
 import { BackHandler, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
+import { useWorkspacePortForwardLifetime } from "@/desktop/workspace-port-forward";
 import { useRouter, type Href } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { useTranslation } from "react-i18next";
@@ -1145,6 +1146,12 @@ function WorkspaceScreenContent({
   }, [isRouteFocused, normalizedServerId, normalizedWorkspaceId]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
   const workspaceLaunches = getWorkspaceLaunches(workspaceDescriptor);
+  useWorkspacePortForwardLifetime(
+    normalizedServerId,
+    normalizedWorkspaceId,
+    workspaceDescriptor,
+    isRouteFocused,
+  );
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
