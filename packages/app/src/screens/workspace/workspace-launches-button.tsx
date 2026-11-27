@@ -481,6 +481,7 @@ interface LaunchRowProps {
   onViewTerminal?: (terminalId: string) => void;
   onOpenUrlInBrowserTab?: (url: string) => void;
   forwardScope: Omit<LaunchForwardScope, "terminalId"> | null;
+  remotePreviewServerId?: string;
 }
 
 function LaunchRow({
@@ -499,6 +500,7 @@ function LaunchRow({
   onViewTerminal,
   onOpenUrlInBrowserTab,
   forwardScope,
+  remotePreviewServerId,
 }: LaunchRowProps): ReactElement {
   const { t } = useTranslation();
   const forwardTarget = useMemo(
@@ -643,7 +645,7 @@ function LaunchRow({
               preferredRouteKind={preferredRouteKind}
               onSelectRouteKind={onSelectRouteKind}
               onOpenUrlInBrowserTab={onOpenUrlInBrowserTab}
-              remotePreviewServerId={forwardScope?.serverId}
+              remotePreviewServerId={remotePreviewServerId}
               forwardTarget={forwardTarget}
             />
           ))}
@@ -651,6 +653,22 @@ function LaunchRow({
       ) : null}
     </View>
   );
+}
+
+function useLaunchHostRouting(serverId: string) {
+  const tunnelSupported = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.networkTunnel === true,
+  );
+  const hostSnapshot = useHostRuntimeSnapshot(serverId);
+  const routing =
+    getIsElectron() && hostSnapshot?.connectionStatus === "online" && tunnelSupported
+      ? readHostBrowserRouting(serverId)
+      : null;
+  return {
+    activeConnection: hostSnapshot?.activeConnection ?? null,
+    remotePreviewServerId:
+      routing?.kind === "remote" && routing.support === "supported" ? serverId : undefined,
+  };
 }
 
 export function WorkspaceLaunchesSection({
@@ -668,16 +686,10 @@ export function WorkspaceLaunchesSection({
   const { t } = useTranslation();
   const toast = useToast();
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
-  const tunnelSupported = useSessionStore(
-    (state) => state.sessions[serverId]?.serverInfo?.features?.networkTunnel === true,
-  );
-  const online = useHostRuntimeSnapshot(serverId)?.connectionStatus === "online";
-  const routing =
-    getIsElectron() && online && tunnelSupported ? readHostBrowserRouting(serverId) : null;
-  const canForward = routing?.kind === "remote" && routing.support === "supported";
+  const { activeConnection, remotePreviewServerId } = useLaunchHostRouting(serverId);
   const forwardScope = useMemo(
-    () => (canForward ? { serverId, workspaceId } : null),
-    [canForward, serverId, workspaceId],
+    () => (remotePreviewServerId ? { serverId: remotePreviewServerId, workspaceId } : null),
+    [remotePreviewServerId, workspaceId],
   );
   const preferredRouteKind = useWorkspaceServiceRoutePreferencesStore(
     (state) => state.byServerId[serverId] ?? null,
@@ -801,6 +813,7 @@ export function WorkspaceLaunchesSection({
           onViewTerminal={onViewTerminal}
           onOpenUrlInBrowserTab={onOpenUrlInBrowserTab}
           forwardScope={forwardScope}
+          remotePreviewServerId={remotePreviewServerId}
         />
       ))}
     </View>

@@ -220,12 +220,16 @@ describe("resolveWorkspaceScriptLink", () => {
 });
 
 describe("resolveWorkspaceLaunchEndpointLink", () => {
-  it("opens a remote HTTP preview in Paseo without a locally forwarded port", () => {
+  it.each<ActiveConnection>([
+    { type: "relay", endpoint: "relay.paseo.sh:443", display: "relay" },
+    { type: "remoteSsh", endpoint: "user@remote-host", display: "SSH" },
+    { type: "directTcp", endpoint: "remote-host:6767", display: "direct" },
+  ])("offers a host-loopback HTTP preview over $type without forwarding", (activeConnection) => {
     const preview = { kind: "direct", label: "localhost:4100", url: "http://localhost:4100" };
     expect(
       resolveWorkspaceLaunchEndpointLink({
         endpoint: runningLaunchEndpoint,
-        activeConnection: { type: "relay", endpoint: "relay.paseo.sh:443", display: "relay" },
+        activeConnection,
         inAppRemotePreview: true,
       }),
     ).toEqual({ primary: preview, targets: [preview] });
