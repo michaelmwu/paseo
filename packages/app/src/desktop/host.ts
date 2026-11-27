@@ -19,6 +19,7 @@ export interface DesktopDialogAskOptions {
   title?: string;
   okLabel?: string;
   cancelLabel?: string;
+  defaultToCancel?: boolean;
   kind?: "info" | "warning" | "error";
 }
 
@@ -203,6 +204,13 @@ export interface DesktopBrowserBridge {
   }) => Promise<void>;
   getHostProxyStatus?: (serverId: string) => Promise<DesktopBrowserProxyStatusSnapshot | null>;
   releaseHostProxy?: (serverId: string) => Promise<void>;
+  workspacePortForward?: (
+    input: { serverId: string; workspaceId: string } & (
+      | { action: "get" | "stop"; terminalId: string; port: number }
+      | { action: "start"; terminalId: string; port: number; target: DesktopBrowserProxyTarget }
+      | { action: "prune"; endpoints: readonly { terminalId: string; port: number }[] }
+    ),
+  ) => Promise<number | null>;
   deliverProxyTicket?: (input: {
     requestId: string;
     ticket?: string;
@@ -232,6 +240,9 @@ export interface DesktopHostBridge {
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;
+  workspaceNavigation?: {
+    ready?: () => Promise<void>;
+  };
   events?: DesktopEventsBridge;
   window?: DesktopWindowModuleBridge;
   dialog?: DesktopDialogBridge;

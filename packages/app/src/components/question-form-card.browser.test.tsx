@@ -42,21 +42,28 @@ afterEach(() => {
 function buildPermission(
   question: Record<string, unknown>,
   following: Record<string, unknown>[] = [],
+  provider: "claude" | "codex" = "claude",
+  name = "AskUserQuestion",
 ): PendingPermission {
   return {
     key: "perm-1",
     agentId: "agent-1",
     request: {
       id: "perm-1",
-      provider: "claude",
-      name: "AskUserQuestion",
+      provider,
+      name,
       kind: "question",
       input: { questions: [question, ...following] },
     },
   };
 }
 
-function mountCard(question: Record<string, unknown>, following: Record<string, unknown>[] = []) {
+function mountCard(
+  question: Record<string, unknown>,
+  following: Record<string, unknown>[] = [],
+  provider: "claude" | "codex" = "claude",
+  name = "AskUserQuestion",
+) {
   const onRespond = vi.fn<(response: AgentPermissionResponse) => void>();
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -64,7 +71,7 @@ function mountCard(question: Record<string, unknown>, following: Record<string, 
   act(() =>
     root.render(
       <QuestionFormCard
-        permission={buildPermission(question, following)}
+        permission={buildPermission(question, following, provider, name)}
         onRespond={onRespond}
         isResponding={false}
         responseError={null}
@@ -82,8 +89,7 @@ function mountCard(question: Record<string, unknown>, following: Record<string, 
         view.queryByRole("radio", { name: label }) ?? view.getByRole("checkbox", { name: label })
       ).click(),
     );
-  const type = (text: string) => {
-    const input = otherInput();
+  const type = (text: string, input = otherInput()) => {
     const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     if (!valueSetter) throw new Error("HTML input value setter is unavailable");
     act(() => {
@@ -187,5 +193,38 @@ describe("QuestionFormCard explicit navigation", () => {
       "true",
     );
     expect(card.onRespond).not.toHaveBeenCalled();
+  });
+});
+
+describe("Codex question delivery", () => {
+  it("labels an async answer as a chat message before submission", () => {
+    const card = mountCard(
+      { question: "What should I use?", header: "Question 1", options: [], isOther: true },
+      [],
+      "codex",
+      "request_user_input_async",
+    );
+
+    expect(card.view.getByTestId("question-form-chat-delivery-warning").textContent).toContain(
+      "Your answer will appear in chat",
+    );
+    expect(card.view.getByRole("button", { name: "Send to chat" })).toBeTruthy();
+  });
+
+  it("masks and submits a native Codex secret answer", () => {
+    const card = mountCard(
+      { question: "Password?", header: "Password", options: [], isSecret: true },
+      [],
+      "codex",
+      "request_user_input",
+    );
+
+    const input = card.view.getByLabelText<HTMLInputElement>("Password?");
+    expect(input.type).toBe("password");
+    card.type("test-password-123", input);
+    card.submit();
+
+    expect(card.submittedAnswers()).toEqual({ Password: "test-password-123" });
+    expect(card.view.queryByTestId("question-form-chat-delivery-warning")).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { useWorkspaceRowPress } from "../../../modules/paseo-press-feedback";
 import { PressHighlight as Pressable } from "@/components/ui/press-highlight";
 import {
+  Children,
   memo,
   useCallback,
   useEffect,
@@ -287,43 +288,46 @@ export function SidebarStatusWorkspaceList({
       }),
     [renderPinnedWorkspaceRow],
   );
-  const content = (
-    <>
-      {pinnedWorkspaces.length > 0 ? (
-        <View style={styles.pinnedSection} testID="sidebar-pinned-section">
-          <SidebarSectionHeader
-            title={t("sidebar.pinned.title")}
-            collapsed={pinnedCollapsed}
-            onToggle={togglePinnedCollapsed}
-            testID="sidebar-pinned-section-header"
-          />
-          {pinnedCollapsed ? null : (
-            <>
-              {leadingPinnedWorkspace ? renderPinnedWorkspaceRow(leadingPinnedWorkspace) : null}
-              <DraggableList
-                testID="sidebar-pinned-list"
-                data={visiblePinnedWorkspaces}
-                keyExtractor={statusWorkspaceKeyExtractor}
-                renderItem={renderPinnedWorkspace}
-                onDragEnd={onPinnedWorkspaceReorder}
-                scrollEnabled={false}
-                useDragHandle
-                nestable={platformIsNative}
-                simultaneousGestureRef={parentGestureRef}
-                gestureHostPresented={dragGestureHostActive}
+  const pinnedSection =
+    pinnedWorkspaces.length > 0 ? (
+      <View style={styles.pinnedSection} testID="sidebar-pinned-section">
+        <SidebarSectionHeader
+          title={t("sidebar.pinned.title")}
+          collapsed={pinnedCollapsed}
+          onToggle={togglePinnedCollapsed}
+          testID="sidebar-pinned-section-header"
+        />
+        {pinnedCollapsed ? null : (
+          <>
+            {leadingPinnedWorkspace ? renderPinnedWorkspaceRow(leadingPinnedWorkspace) : null}
+            <DraggableList
+              testID="sidebar-pinned-list"
+              data={visiblePinnedWorkspaces}
+              keyExtractor={statusWorkspaceKeyExtractor}
+              renderItem={renderPinnedWorkspace}
+              onDragEnd={onPinnedWorkspaceReorder}
+              scrollEnabled={false}
+              useDragHandle
+              nestable={platformIsNative}
+              simultaneousGestureRef={parentGestureRef}
+              gestureHostPresented={dragGestureHostActive}
+            />
+            {canTogglePinnedWorkspaces ? (
+              <SidebarGroupToggleRow
+                expanded={pinnedWorkspacesExpanded}
+                onPress={togglePinnedWorkspacesExpanded}
+                testID="sidebar-pinned-show-more"
               />
-              {canTogglePinnedWorkspaces ? (
-                <SidebarGroupToggleRow
-                  expanded={pinnedWorkspacesExpanded}
-                  onPress={togglePinnedWorkspacesExpanded}
-                  testID="sidebar-pinned-show-more"
-                />
-              ) : null}
-            </>
-          )}
-        </View>
-      ) : null}
-      {listHeaderComponent}
+            ) : null}
+          </>
+        )}
+      </View>
+    ) : null;
+  const header = listHeaderComponent;
+  const content = Children.toArray([
+    pinnedSection,
+    pinnedSection ? header : null,
+    <>
       {sidebarFilterEmpty ? (
         <SidebarFilterEmptyState />
       ) : (
@@ -342,15 +346,18 @@ export function SidebarStatusWorkspaceList({
         />
       )}
       <SidebarToastClearance />
-    </>
-  );
+    </>,
+  ]);
+  const stickyHeaderIndices = pinnedSection && header ? [1] : undefined;
 
   return (
     <View style={styles.container}>
+      {!pinnedSection && header ? <View style={styles.fixedHeader}>{header}</View> : null}
       {platformIsNative ? (
         <NestableScrollContainer
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          stickyHeaderIndices={stickyHeaderIndices}
           showsVerticalScrollIndicator={false}
           testID="sidebar-status-list-scroll"
         >
@@ -360,6 +367,7 @@ export function SidebarStatusWorkspaceList({
         <ScrollView
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          stickyHeaderIndices={stickyHeaderIndices}
           showsVerticalScrollIndicator={false}
           testID="sidebar-status-list-scroll"
         >
@@ -775,14 +783,18 @@ function StatusWorkspaceRowWithMenu({
     });
   const handleMarkAsRead = useCallback(() => {
     void clearAttention().catch((error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to mark workspace as read");
+      toast.error(
+        error instanceof Error ? error.message : t("sidebar.workspace.toasts.markAsReadFailed"),
+      );
     });
-  }, [clearAttention, toast]);
+  }, [clearAttention, t, toast]);
   const handleMarkAsUnread = useCallback(() => {
     void markUnread().catch((error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to mark workspace as unread");
+      toast.error(
+        error instanceof Error ? error.message : t("sidebar.workspace.toasts.markAsUnreadFailed"),
+      );
     });
-  }, [markUnread, toast]);
+  }, [markUnread, t, toast]);
 
   return (
     <>
@@ -1185,15 +1197,18 @@ function getStatusWorkspaceRowStyle({
 
 const styles = StyleSheet.create((theme) => ({
   container: {
+    // Keep the optical inset outside the scroll range so the header sticks at its resting height.
+    paddingTop: 2,
     flex: 1,
   },
   list: {
     flex: 1,
   },
+  fixedHeader: {
+    paddingHorizontal: theme.spacing[2],
+  },
   listContent: {
     paddingHorizontal: theme.spacing[2],
-    // Keep status mode's Pinned/Workspaces boundary identical to project mode.
-    paddingTop: 2,
     // Room for the sidebar toast comes from SidebarToastClearance at the end of the content.
     paddingBottom: theme.spacing[4],
   },

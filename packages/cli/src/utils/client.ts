@@ -180,15 +180,7 @@ export function resolveDaemonCredential(
 
 async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonClient> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
-  const host =
-    options.target.kind === "endpoint"
-      ? options.target.host
-      : (
-          await waitForDaemonReady(options.target.home, {
-            timeoutMs: timeout,
-            instance: options.instance,
-          })
-        ).listen;
+  const host = await resolveDaemonConnection(options);
   const home = resolveClientPaseoHome(options.target);
   const credential = resolveDaemonCredential(host, home);
   const client = createHostClient(host, {
@@ -209,6 +201,16 @@ async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonCli
     await client.close();
     throw error;
   }
+}
+
+export async function resolveDaemonConnection(options: ConnectOptions): Promise<string> {
+  if (options.target.kind === "endpoint") return options.target.host;
+  return (
+    await waitForDaemonReady(options.target.home, {
+      timeoutMs: options.timeout ?? DEFAULT_TIMEOUT,
+      instance: options.instance,
+    })
+  ).listen;
 }
 
 export async function connectToDaemon(options: ConnectOptions): Promise<DaemonClient> {

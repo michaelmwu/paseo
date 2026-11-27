@@ -1,5 +1,12 @@
 import { useAddHost } from "@/hosts/add-host";
 import type { CreateWorkspaceRequestOptions } from "@getpaseo/client/internal/daemon-client";
+import { draftCreations } from "@/composer/draft/creation-attempts";
+import {
+  flushDraftPersistStorage,
+  prepareDraftCreation,
+  claimDraftCreation,
+  useDraftStore,
+} from "@/stores/draft-store";
 import type { AgentSnapshotPayload, CreationSnapshot } from "@getpaseo/protocol/messages";
 import { encodeImages } from "@/utils/encode-images";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
@@ -24,7 +31,6 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
-import { draftCreationKey } from "@/composer/draft/creation-key";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useForgeSearchQuery } from "@/git/use-forge-search-query";
 import { getForgePresentation } from "@/git/forge";
@@ -86,6 +92,7 @@ import { isEmptyWorkspaceSubmission, runCreateEmptyWorkspace } from "./new-works
 import {
   getWorkspaceNamingAttachments,
   remapDraftCwdToWorkspace,
+  resolveNewWorkspaceBaseContext,
 } from "./new-workspace-fork-context";
 import {
   buildPickerOptionData,
@@ -359,23 +366,31 @@ async function createMultiplicityWorkspace(input: {
     workspaces: ReturnType<typeof normalizeWorkspaceDescriptor>[],
   ) => void;
   serverId: string;
+  claimIdentity: () => Promise<void>;
   createFailedMessage: string;
 }): Promise<WorkspaceCreationResult> {
   const projectId = getHostProjectId(input.project, input.serverId);
   if (!projectId) throw new Error("Project is not available on the selected host");
   const isWorktree = input.isolation === "worktree";
+  const worktreeSlug = isWorktree
+    ? await draftCreations.worktreeSlug({
+        serverId: input.serverId,
+        draftId: input.idempotencyKey,
+        proposed: input.worktreeSlug,
+      })
+    : undefined;
   const firstAgentContext = buildFirstAgentContext({
     prompt: input.prompt,
     attachments: input.attachments,
   });
-  const request: Omit<CreateWorkspaceRequestOptions, "idempotencyKey" | "onEvent"> = {
+  const request: CreateWorkspaceRequestOptions = {
     agent: input.agent,
     source: isWorktree
       ? {
           kind: "worktree",
           cwd: input.sourceDirectory,
           projectId,
-          worktreeSlug: input.worktreeSlug,
+          worktreeSlug,
           ...input.checkoutRequest,
           ...(input.branchName && startsNewBranch(input.checkoutRequest)
             ? { branchName: input.branchName }
@@ -389,13 +404,56 @@ async function createMultiplicityWorkspace(input: {
     ...(firstAgentContext ? { firstAgentContext } : {}),
     ...(Object.keys(input.metadata).length > 0 ? { metadata: { ...input.metadata } } : {}),
   };
-  const payload = await input.client.createWorkspace({
-    ...request,
-    idempotencyKey: draftCreationKey(input.idempotencyKey, {
-      request,
-      launchTarget: input.launchTarget,
-    }),
+  const admissionRequest = { request, launchTarget: input.launchTarget };
+  const retry = await draftCreations.workspaceRetry({
+    serverId: input.serverId,
+    draftId: input.idempotencyKey,
+    request: admissionRequest,
+    observe: (kind, key, onEvent) => input.client.waitForCreation(kind, key, onEvent),
+  });
+  if (retry.kind === "reuse") {
+    const ready = retry.workspace;
+    const workspace = normalizeWorkspaceDescriptor(ready);
+    if (!input.agent) return { workspace };
+    if (!input.agent.config) throw new Error("Agent configuration is required");
+    const cwd = remapDraftCwdToWorkspace({
+      cwd: input.agent.config.cwd,
+      sourceDirectory: input.sourceDirectory,
+      workspaceDirectory: workspace.workspaceDirectory,
+    });
+    const agentRequest = {
+      ...input.agent,
+      config: { ...input.agent.config, cwd },
+      workspaceId: ready.id,
+    };
+    const reconciled = await draftCreations.reconcileWorkspace({
+      serverId: input.serverId,
+      draftId: input.idempotencyKey,
+      workspaceId: ready.id,
+      request: agentRequest,
+      observe: (kind, key, onEvent) => input.client.waitForCreation(kind, key, onEvent),
+    });
+    const agent =
+      reconciled ??
+      (await draftCreations.submit({
+        serverId: input.serverId,
+        draftId: input.idempotencyKey,
+        kind: "agent",
+        onAdmitted: input.claimIdentity,
+        request: agentRequest,
+        onEvent: (snapshot) => input.onEvent?.({ ...snapshot, workspace: ready }),
+        send: (options) => input.client.createAgent({ ...agentRequest, ...options }),
+      }));
+    return { workspace, agent };
+  }
+  const payload = await draftCreations.submit({
+    serverId: input.serverId,
+    draftId: input.idempotencyKey,
+    kind: "workspace",
+    onAdmitted: input.claimIdentity,
+    request: admissionRequest,
     onEvent: input.onEvent,
+    send: (options) => input.client.createWorkspace({ ...request, ...options }),
   });
   if (payload.error || !payload.workspace) {
     throw new Error(payload.error ?? input.createFailedMessage);
@@ -424,6 +482,7 @@ interface CreateChatAgentInput {
   draftKey: string;
   clearDraft: (lifecycle: "sent" | "abandoned") => void;
   draftId?: string;
+  sourceDraftId?: string;
   draftContextScopeKey: string | null;
   supportsForgeSearch: boolean;
   resolveClient: () => DaemonClient;
@@ -457,16 +516,15 @@ function buildWorkspaceDraftSetupForCreatedWorkspace(input: {
   workspaceDirectory: string;
   provider: AgentProvider;
   composerState: NewWorkspaceComposerState;
-}): WorkspaceDraftTabSetup | undefined {
-  if (!input.forkDraftSetup) {
-    return undefined;
-  }
+}): WorkspaceDraftTabSetup {
   return buildWorkspaceDraftSetupFromComposer({
-    cwd: remapDraftCwdToWorkspace({
-      cwd: input.forkDraftSetup.setup.cwd,
-      sourceDirectory: input.forkDraftSetup.sourceDirectory,
-      workspaceDirectory: input.workspaceDirectory,
-    }),
+    cwd: input.forkDraftSetup
+      ? remapDraftCwdToWorkspace({
+          cwd: input.forkDraftSetup.setup.cwd,
+          sourceDirectory: input.forkDraftSetup.sourceDirectory,
+          workspaceDirectory: input.workspaceDirectory,
+        })
+      : input.workspaceDirectory,
     provider: input.provider,
     composerState: input.composerState,
   });
@@ -540,49 +598,51 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     images: images?.length ? images : undefined,
     attachments: wirePayload.attachments?.length ? wirePayload.attachments : undefined,
   };
+  const handOffWorkspace = (workspace: WorkspaceDescriptor) => {
+    if (navigated) return;
+    navigated = true;
+    if (!input.isStillOnCreateScreen()) return;
+    getHostRuntimeStore().acceptWorkspaceSnapshots(serverId, [{ ...workspace, status: "running" }]);
+    const initialSetup = buildWorkspaceDraftSetupForCreatedWorkspace({
+      forkDraftSetup: input.forkDraftSetup,
+      workspaceDirectory: workspace.workspaceDirectory,
+      provider,
+      composerState,
+    });
+    delivery.outcome = submitWorkspaceDraft({
+      clearConsumedDraft,
+      draftKey: input.draftKey,
+      draftContextScopeKey: input.draftContextScopeKey,
+      resolveClient: input.resolveClient,
+      isStillOnCreateScreen: input.isStillOnCreateScreen,
+      serverId,
+      clearDraft,
+      draftId: input.draftId,
+      initialSetup,
+      workspaceId: workspace.id,
+      workspaceDirectory: workspace.workspaceDirectory,
+      text,
+      attachments,
+      provider,
+      composerState,
+      supportsForgeSearch: input.supportsForgeSearch,
+      agentCreation,
+    });
+  };
   const execute = async (): Promise<AgentSnapshotPayload> => {
-    const { agent } = await ensureWorkspace({
+    const { workspace, agent } = await ensureWorkspace({
       cwd,
       prompt: text,
       attachments: workspaceNamingAttachments,
       withInitialAgent: true,
       agent: initialAgent,
       onEvent: (snapshot) => {
-        if (!snapshot.workspace || navigated) return;
-        navigated = true;
-        if (!input.isStillOnCreateScreen()) return;
-        const workspace = normalizeWorkspaceDescriptor(snapshot.workspace);
-        getHostRuntimeStore().acceptWorkspaceSnapshots(serverId, [
-          { ...workspace, status: "running" },
-        ]);
-        const initialSetup = buildWorkspaceDraftSetupForCreatedWorkspace({
-          forkDraftSetup: input.forkDraftSetup,
-          workspaceDirectory: workspace.workspaceDirectory,
-          provider,
-          composerState,
-        });
-        delivery.outcome = submitWorkspaceDraft({
-          clearConsumedDraft,
-          draftKey: input.draftKey,
-          draftContextScopeKey: input.draftContextScopeKey,
-          resolveClient: input.resolveClient,
-          isStillOnCreateScreen: input.isStillOnCreateScreen,
-          serverId,
-          clearDraft,
-          draftId: input.draftId,
-          initialSetup,
-          workspaceId: workspace.id,
-          workspaceDirectory: workspace.workspaceDirectory,
-          text,
-          attachments,
-          provider,
-          composerState,
-          supportsForgeSearch: input.supportsForgeSearch,
-          agentCreation,
-        });
+        if (snapshot.workspace) handOffWorkspace(normalizeWorkspaceDescriptor(snapshot.workspace));
       },
     });
     if (!agent) throw new Error("Workspace creation returned no agent");
+    // Legacy agent creation has no lifecycle events. Its result still proves readiness.
+    handOffWorkspace(workspace);
     return agent;
   };
   // A retry after a failed agent start belongs to the ready workspace's draft, not to this creation.
@@ -594,7 +654,10 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     if (delivery.outcome === "navigated") return delivery.outcome;
     throw error;
   }
-  if (delivery.outcome === "background") clearConsumedDraft();
+  if (delivery.outcome === "background") {
+    clearConsumedDraft();
+    await flushDraftPersistStorage();
+  }
   return delivery.outcome;
 }
 
@@ -965,8 +1028,7 @@ export function NewWorkspaceScreen({
   // COMPAT(workspaceMultiplicity): added in v0.1.97, drop the gate when floor >= v0.1.97
   const supportsWorkspaceMultiplicity = useHostFeature(selectedServerId, "workspaceMultiplicity");
   const supportsForgeSearch = useHostFeature(selectedServerId, "forgeSearch");
-  const [creationIdentity] = useState(() => ({
-    draftId: draftId ?? generateDraftId(),
+  const [creationIdentity, setCreationIdentity] = useState(() => ({
     worktreeSlug: createNameId(),
   }));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -1067,6 +1129,14 @@ export function NewWorkspaceScreen({
   });
   const draftKey = buildNewWorkspaceDraftKey(draftId);
   const forkDraftSetup = usePendingWorkspaceDraftSetup(draftId);
+  const { checkoutSourceDirectory, forkFromCurrentBranch } = resolveNewWorkspaceBaseContext({
+    forkSetup: forkDraftSetup,
+    selectedServerId,
+    sourceServerId: serverId,
+    selectedProject,
+    sourceProject: routeProject,
+    sourceDirectory: selectedSourceDirectory,
+  });
   const draftContextScopeKey = useDraftWorkspaceAttachmentScopeKey(draftId);
   const visibleDraftContextScopeKeys = useMemo(
     () => resolveVisibleDraftContextScopeKeys({ isDraftHandoffActive, draftContextScopeKey }),
@@ -1141,7 +1211,7 @@ export function NewWorkspaceScreen({
 
   const { status: checkoutStatus } = useCheckoutStatusQuery({
     serverId: selectedServerId,
-    cwd: selectedSourceDirectory ?? "",
+    cwd: checkoutSourceDirectory ?? "",
   });
 
   const {
@@ -1162,6 +1232,7 @@ export function NewWorkspaceScreen({
   const branchSuggestionsQuery = useQuery({
     queryKey: [
       "branch-suggestions",
+      "all-remotes",
       selectedServerId,
       selectedSourceDirectory,
       debouncedPickerSearchQuery,
@@ -1171,11 +1242,36 @@ export function NewWorkspaceScreen({
         throw new Error("Choose a project");
       }
       const connectedClient = withConnectedClient();
-      return connectedClient.getBranchSuggestions({
+      const request = {
         cwd: selectedSourceDirectory,
         query: debouncedPickerSearchQuery || undefined,
-        limit: 20,
-      });
+      };
+      // Keep origin's local/remote divergence rows while making other remotes selectable.
+      const [suggestions, exactRefs] = await Promise.all([
+        connectedClient.getBranchSuggestions({ ...request, limit: 20 }),
+        connectedClient.getBranchSuggestions({ ...request, refMode: "exact", limit: 200 }),
+      ]);
+      return {
+        ...suggestions,
+        branchDetails: [
+          ...normalizeBranchDetails(suggestions),
+          ...normalizeBranchDetails(exactRefs)
+            .filter(
+              (detail) =>
+                detail.name.startsWith("refs/remotes/") &&
+                (detail.remoteName !== undefined
+                  ? detail.remoteName !== "origin"
+                  : !detail.name.startsWith("refs/remotes/origin/")),
+            )
+            .map(({ name, committerDate, branchName, remoteName }) => ({
+              name,
+              refName: name,
+              committerDate,
+              branchName,
+              remoteName,
+            })),
+        ],
+      };
     },
     enabled: pickerQueryEnabled,
     staleTime: 15_000,
@@ -1210,8 +1306,10 @@ export function NewWorkspaceScreen({
   }, [forgeSearchAuthenticated, githubPrSearchQuery.data?.items]);
 
   const baseItem = useMemo(
-    () => selectedItem ?? (checkoutStatus ? defaultBasePickerItem(checkoutStatus) : null),
-    [checkoutStatus, selectedItem],
+    () =>
+      selectedItem ??
+      (checkoutStatus ? defaultBasePickerItem(checkoutStatus, { forkFromCurrentBranch }) : null),
+    [checkoutStatus, selectedItem, forkFromCurrentBranch],
   );
   const { options, itemById, selectedOptionId }: PickerOptionData = useMemo(
     () =>
@@ -1224,8 +1322,8 @@ export function NewWorkspaceScreen({
   );
   const triggerLabel = useMemo(() => {
     const displayItem = itemById.get(selectedOptionId);
-    return displayItem ? pickerItemLabel(displayItem) : "main";
-  }, [itemById, selectedOptionId]);
+    return displayItem ? pickerItemLabel(displayItem) : t("newWorkspace.tooltips.startingRef");
+  }, [itemById, selectedOptionId, t]);
   const selectPickerItem = useCallback(
     (item: PickerItem) => {
       setup.chooseRef(item);
@@ -1336,14 +1434,17 @@ export function NewWorkspaceScreen({
   }, []);
 
   const ensureWorkspace = useCallback(
-    async (input: {
-      cwd: string;
-      prompt: string;
-      attachments: AgentAttachment[];
-      withInitialAgent: boolean;
-      agent?: CreateWorkspaceRequestOptions["agent"];
-      onEvent?: (snapshot: CreationSnapshot) => void;
-    }) => {
+    async (
+      input: {
+        cwd: string;
+        prompt: string;
+        attachments: AgentAttachment[];
+        withInitialAgent: boolean;
+        agent?: CreateWorkspaceRequestOptions["agent"];
+        onEvent?: (snapshot: CreationSnapshot) => void;
+      },
+      preparedId?: string,
+    ) => {
       if (creationResult.workspace) {
         return creationResult;
       }
@@ -1354,27 +1455,42 @@ export function NewWorkspaceScreen({
         throw new Error("Choose a host for this project");
       }
       const connectedClient = withConnectedClient();
+      const creationDraftId =
+        preparedId ??
+        (await prepareDraftCreation({
+          serverId: selectedServerId,
+          draftKey,
+          proposedId: draftId ?? generateDraftId(),
+        }));
       const createsWorktree = !supportsWorkspaceMultiplicity || effectiveIsolation === "worktree";
       const checkoutStatusForCreate = createsWorktree
         ? await ensureCheckoutStatus({
             queryClient,
             client: connectedClient,
             serverId: selectedServerId,
-            cwd: selectedSourceDirectory,
+            cwd: checkoutSourceDirectory ?? selectedSourceDirectory,
           })
         : null;
       const checkoutRequest = checkoutStatusForCreate
         ? checkoutRequestOrExplain(
             () =>
               setup.checkoutRequestFor(
-                selectedItem ?? defaultBasePickerItem(checkoutStatusForCreate),
+                selectedItem ??
+                  defaultBasePickerItem(checkoutStatusForCreate, { forkFromCurrentBranch }),
               ),
             t,
           )
         : undefined;
+      const requiresStartingRef =
+        createsWorktree &&
+        (forkFromCurrentBranch || checkoutStatusForCreate?.defaultBranchRef === null) &&
+        !checkoutRequest;
+      if (requiresStartingRef) throw new Error(t("newWorkspace.tooltips.startingRef"));
       const normalizedWorkspace = await createMultiplicityWorkspace({
-        idempotencyKey: creationIdentity.draftId,
+        idempotencyKey: creationDraftId,
         launchTarget,
+        claimIdentity: () =>
+          claimDraftCreation({ serverId: selectedServerId, draftKey, expectedId: creationDraftId }),
         worktreeSlug: creationIdentity.worktreeSlug,
         client: connectedClient,
         isolation: createsWorktree ? "worktree" : "local",
@@ -1398,7 +1514,11 @@ export function NewWorkspaceScreen({
     [
       creationIdentity,
       creationResult,
+      draftId,
+      draftKey,
+      checkoutSourceDirectory,
       effectiveIsolation,
+      forkFromCurrentBranch,
       launchTarget,
       mergeWorkspaces,
       queryClient,
@@ -1420,13 +1540,36 @@ export function NewWorkspaceScreen({
         setErrorMessage(null);
         await composerState?.persistFormPreferences();
         await updateFormPreferences({ launchTarget });
-        if (isEmptyWorkspaceSubmission(payload)) {
-          setPendingAction("empty");
+        const emptyWorkspace = isEmptyWorkspaceSubmission(payload);
+        setPendingAction(emptyWorkspace ? "empty" : "chat");
+        const creationDraftId = await prepareDraftCreation({
+          serverId: selectedServerId,
+          draftKey,
+          proposedId: draftId ?? generateDraftId(),
+        });
+        if (emptyWorkspace) {
           let outcome: SubmitOutcome = "background";
+          const clearConsumedDraft = captureWorkspaceDraftCleanup({
+            serverId: selectedServerId,
+            draftId: creationDraftId,
+            sourceDraftId: draftId,
+            draftKey,
+            clearDraft: chatDraft.clear,
+            draftContextScopeKey,
+          });
           await runCreateEmptyWorkspace({
             payload,
-            ensureWorkspace: async (request) => (await ensureWorkspace(request)).workspace,
+            ensureWorkspace: async (request) =>
+              (await ensureWorkspace(request, creationDraftId)).workspace,
             serverId: selectedServerId,
+            retireWorkspace: async (workspaceId) => {
+              await draftCreations.retireWorkspace({
+                serverId: selectedServerId,
+                draftId: creationDraftId,
+                workspaceId,
+                retire: clearConsumedDraft,
+              });
+            },
             navigate: (targetServerId, workspaceId) => {
               if (!isStillOnCreateScreen()) {
                 return;
@@ -1436,6 +1579,9 @@ export function NewWorkspaceScreen({
               navigateToWorkspace({ serverId: targetServerId, workspaceId });
             },
           });
+          await flushDraftPersistStorage();
+          setCreationResult({ workspace: null });
+          setCreationIdentity({ worktreeSlug: createNameId() });
           // Nothing navigated, so this screen may still be mounted under another route. Release
           // the pending lock it would otherwise keep forever.
           if (outcome === "background") {
@@ -1444,16 +1590,21 @@ export function NewWorkspaceScreen({
           return;
         }
 
-        setPendingAction("chat");
         const outcome = await runCreateChatAgent({
           payload,
-          composerState,
+          composerState: composerState
+            ? {
+                ...composerState,
+                metadata: useDraftStore.getState().metadataByDraftKey[draftKey] ?? {},
+              }
+            : composerState,
           forkDraftSetup,
-          ensureWorkspace,
+          ensureWorkspace: (request) => ensureWorkspace(request, creationDraftId),
           serverId: selectedServerId,
           clearDraft: chatDraft.clear,
           draftKey,
-          draftId: creationIdentity.draftId,
+          draftId: creationDraftId,
+          sourceDraftId: draftId,
           draftContextScopeKey,
           supportsForgeSearch,
           resolveClient: withConnectedClient,
@@ -1478,7 +1629,7 @@ export function NewWorkspaceScreen({
     [
       composerState,
       draftContextScopeKey,
-      creationIdentity,
+      draftId,
       chatDraft.clear,
       draftKey,
       ensureWorkspace,
@@ -1501,12 +1652,20 @@ export function NewWorkspaceScreen({
       await updateFormPreferences({ launchTarget });
       setPendingAction("terminal");
       let outcome: SubmitOutcome = "background";
+      let terminalIdentity: { draftId: string; workspaceId: string } | undefined;
       await runCreateTerminalWorkspace({
         cwd: workingDirectory ?? "",
         prompt: terminalPromptText,
         profile: selectedTerminalProfile,
         profileName: selectedTerminalProfile?.name,
-        ensureWorkspace: async (request) => (await ensureWorkspace(request)).workspace,
+        ensureWorkspace: async (request) => {
+          const { workspace: readyWorkspace } = await ensureWorkspace(request);
+          const id = useDraftStore
+            .getState()
+            .getDraftCreationId({ serverId: selectedServerId, draftKey });
+          if (id) terminalIdentity = { draftId: id, workspaceId: readyWorkspace.id };
+          return readyWorkspace;
+        },
         createTerminal: async (input) => {
           const connectedClient = withConnectedClient();
           const createdTerminal = await connectedClient.createTerminal(
@@ -1546,6 +1705,22 @@ export function NewWorkspaceScreen({
           navigateToWorkspace({ serverId: targetServerId, workspaceId, target });
         },
       });
+      const owner = terminalIdentity;
+      if (owner)
+        await draftCreations.retireWorkspace({
+          ...owner,
+          serverId: selectedServerId,
+          retire: () => {
+            const store = useDraftStore.getState();
+            if (
+              store.getDraftCreationId({ serverId: selectedServerId, draftKey }) === owner.draftId
+            )
+              store.clearDraftCreationId({ serverId: selectedServerId, draftKey });
+          },
+        });
+      await flushDraftPersistStorage();
+      setCreationResult({ workspace: null });
+      setCreationIdentity({ worktreeSlug: createNameId() });
       if (outcome === "background") {
         setPendingAction(null);
       }
@@ -1558,6 +1733,7 @@ export function NewWorkspaceScreen({
       }
     }
   }, [
+    draftKey,
     ensureWorkspace,
     isStillOnCreateScreen,
     launchTarget,

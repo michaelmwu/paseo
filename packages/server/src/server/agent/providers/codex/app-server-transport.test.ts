@@ -1,3 +1,6 @@
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { createInterface } from "node:readline";
 import { describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
@@ -8,6 +11,81 @@ import {
 import { CodexAppServerClient, CodexAppServerExitError } from "./app-server-transport.js";
 
 describe("Codex app-server transport", () => {
+  test("shows a readable recovery message and logs technical details once after SIGKILL", async () => {
+    const child = createCodexAppServerChildProcess();
+    const logger = createTestLogger();
+    const logError = vi.spyOn(logger, "error");
+    const client = new CodexAppServerClient(child, logger);
+    const onTermination = vi.fn();
+    client.setUnexpectedTerminationHandler(onTermination);
+    const request = client.request("turn/start", {});
+    // Stderr chunks need not align with lines or ANSI escape sequences.
+    child.stderr.write("\u001b[31mCustom tool call output is missing for call id: call_");
+    child.stderr.write("123\u001b[0m\n");
+    child.stderr.write("write_stdin failed: Unknown process id 9076\n");
+    child.stderr.write("Custom tool call output is missing for call id: call_123\n");
+    child.emit("exit", null, "SIGKILL");
+    child.emit("exit", null, "SIGKILL");
+    child.emit("close", null, "SIGKILL");
+
+    const expectedMessage = [
+      "Codex stopped unexpectedly.",
+      "Check any interrupted commands, then send a message to continue.",
+      "Technical details are in the host's daemon log.",
+    ].join("\n\n");
+    await expect(request).rejects.toThrow(expectedMessage);
+    expect(onTermination).toHaveBeenCalledTimes(1);
+    expect(onTermination.mock.calls[0]![0].message).toBe(expectedMessage);
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: null,
+        signal: "SIGKILL",
+        stderr: expect.stringContaining("write_stdin failed: Unknown process id 9076"),
+      }),
+      "Codex app-server terminated unexpectedly",
+    );
+    expect(logError.mock.calls[0]![0]).toEqual(
+      expect.objectContaining({
+        stderr: expect.stringContaining("Custom tool call output is missing for call id: call_123"),
+      }),
+    );
+    await expect(client.request("model/list")).rejects.toThrow("client is closed");
+    child.stdout.end();
+    child.stderr.end();
+    child.stdin.end();
+  });
+
+  test("ordinary exits show recovery guidance and keep provider errors in logs", () => {
+    const child = createCodexAppServerChildProcess();
+    const logger = createTestLogger();
+    const logError = vi.spyOn(logger, "error");
+    const client = new CodexAppServerClient(child, logger);
+    const onTermination = vi.fn();
+    client.setUnexpectedTerminationHandler(onTermination);
+    child.stderr.write("\u001b[31mprovider crashed\u001b[0m\n");
+    child.emit("exit", 17, null);
+
+    expect(onTermination.mock.calls[0]![0].message).toBe(
+      [
+        "Codex stopped unexpectedly.",
+        "Check any interrupted commands, then send a message to continue.",
+        "Technical details are in the host's daemon log.",
+      ].join("\n\n"),
+    );
+    expect(logError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 17,
+        signal: null,
+        stderr: "\u001b[31mprovider crashed\u001b[0m\n",
+      }),
+      "Codex app-server terminated unexpectedly",
+    );
+    child.stdout.end();
+    child.stderr.end();
+    child.stdin.end();
+  });
+
   test("classifies startup diagnostics delivered after the child exits", async () => {
     const child = createCodexAppServerChildProcess();
     const client = new CodexAppServerClient(child, createTestLogger());
@@ -284,3 +362,82 @@ describe("Codex stdout byte admission", () => {
     child.stderr.end();
   });
 });
+
+test.skipIf(process.platform === "win32")(
+  "dispose confirms a tool exits even if the app-server exits first",
+  () =>
+    withStubbornTool(async (client, owner, toolPid) => {
+      await client.dispose();
+      expect(owner.signalCode).toBe("SIGTERM");
+      expect(isExecutingProcess(toolPid)).toBe(false);
+    }),
+);
+
+test.skipIf(process.platform === "win32")(
+  "dispose can retry a surviving tool after the app-server exits",
+  () =>
+    withStubbornTool(async (client, owner, toolPid) => {
+      const kill = process.kill.bind(process);
+      const mock = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+        if (pid === toolPid && signal === "SIGKILL") {
+          throw Object.assign(new Error("Cannot signal tool"), { code: "EPERM" });
+        }
+        return kill(pid, signal);
+      });
+      try {
+        await expect(client.dispose()).rejects.toThrow("Cannot signal tool");
+        expect(owner.signalCode).toBe("SIGTERM");
+        expect(isExecutingProcess(toolPid)).toBe(true);
+      } finally {
+        mock.mockRestore();
+      }
+
+      await client.dispose();
+      expect(isExecutingProcess(toolPid)).toBe(false);
+    }),
+);
+
+async function withStubbornTool(
+  run: (client: CodexAppServerClient, owner: ChildProcess, toolPid: number) => Promise<void>,
+): Promise<void> {
+  const owner = spawn(process.execPath, [
+    "-e",
+    `
+    const { spawn } = require("node:child_process");
+    const tool = spawn(process.execPath, ["-e", ${JSON.stringify(`
+      process.on("SIGTERM", () => {});
+      process.send(process.pid);
+      setInterval(() => {}, 1000);
+    `)}], { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
+    tool.on("message", (pid) => console.log(pid));
+  `,
+  ]);
+  const lines = createInterface({ input: owner.stdout });
+  let toolPid: number | undefined;
+  try {
+    const [pid] = await once(lines, "line", { signal: AbortSignal.timeout(3_000) });
+    toolPid = Number(pid);
+    expect(toolPid).toBeGreaterThan(0);
+    const client = new CodexAppServerClient(owner, createTestLogger());
+    await run(client, owner, toolPid);
+  } finally {
+    lines.close();
+    if (toolPid && isExecutingProcess(toolPid)) process.kill(toolPid, "SIGKILL");
+    owner.kill("SIGKILL");
+  }
+}
+
+// An exited tool can still have a process table entry until its parent reaps it.
+function isExecutingProcess(pid: number): boolean {
+  try {
+    return !execFileSync("ps", ["-p", String(pid), "-o", "stat="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .startsWith("Z");
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return false;
+    throw error;
+  }
+}

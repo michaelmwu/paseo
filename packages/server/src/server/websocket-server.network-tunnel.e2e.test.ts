@@ -7,6 +7,8 @@ import {
 import { afterEach, describe, expect, test } from "vitest";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { openHostNetworkTunnel } from "@getpaseo/client/node";
+import { startTcpForward } from "../../../cli/src/commands/script/forward-tcp.js";
 import { buildRelayWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
 import {
   decodeNetworkTunnelFrame,
@@ -473,6 +475,34 @@ function createTunnelHandle(params: {
 }
 
 describe("WebSocketServer network tunnel E2E", () => {
+  test(
+    "the CLI forward serves a loopback HTTP target through the upstream ticket tunnel",
+    async () => {
+      const { port: targetPort } = await startLocalHttpTarget();
+      daemon = await createTestPaseoDaemon();
+      const control = await connectDirectDaemonClient(daemon.port, "cli-network-forward");
+      const mux = await openHostNetworkTunnel(control, `127.0.0.1:${daemon.port}`);
+      // Both the local forward and target share this machine, so the default port is in use.
+      let forward: Awaited<ReturnType<typeof startTcpForward>> | undefined;
+      try {
+        await expect(startTcpForward(mux, targetPort, targetPort, false)).rejects.toMatchObject({
+          code: "EADDRINUSE",
+        });
+        forward = await startTcpForward(mux, targetPort, targetPort, true);
+        expect(forward.port).not.toBe(targetPort);
+        const response = await fetch(`http://127.0.0.1:${forward.port}/hello`, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        expect(response.status).toBe(200);
+        await expect(response.text()).resolves.toBe("hello from remote daemon target");
+      } finally {
+        await forward?.close();
+        mux.close();
+      }
+    },
+    TEST_TIMEOUT_MS,
+  );
+
   test(
     "direct secondary WS tunnels HTTP + streaming TCP half-close, blocks replay & SSRF, and receives zero control broadcasts",
     async () => {
