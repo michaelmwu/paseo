@@ -29,9 +29,47 @@ import {
   mapCodexPatchNotificationToToolCall,
   mapCodexPlanUpdateToTodo,
   mapCodexPlanToToolCall,
+  mapCodexQuestionRequestToToolCall,
   normalizeCodexOutputSchema,
   toAgentUsage,
 } from "./codex-app-server-agent.js";
+
+test("keeps native secret answers out of Paseo's completed question timeline", () => {
+  const item = mapCodexQuestionRequestToToolCall({
+    callId: "question-1",
+    status: "completed",
+    questions: [
+      {
+        id: "password",
+        header: "Password",
+        question: "Enter password",
+        options: [],
+        isSecret: true,
+      },
+      { id: "color", header: "Color", question: "Choose a color", options: [] },
+    ],
+    answers: { password: ["private-value"], color: ["blue"] },
+  });
+
+  expect(item.detail).toEqual({
+    type: "plain_text",
+    text: "Password: Enter password\n\nColor: Choose a color\n\nAnswers:\n\ncolor: blue",
+    icon: "brain",
+  });
+  expect(item.metadata).toEqual({
+    questions: [
+      {
+        id: "password",
+        header: "Password",
+        question: "Enter password",
+        options: [],
+        isSecret: true,
+      },
+      { id: "color", header: "Color", question: "Choose a color", options: [] },
+    ],
+    answers: { color: ["blue"] },
+  });
+});
 
 describe("mapCodexPlanUpdateToTodo", () => {
   test("preserves checklist progress without creating a plan card", () => {
@@ -564,7 +602,7 @@ describe("Codex active-turn steering admission", () => {
     await appServer.waitForRequest("turn/steer");
     appServer.disconnect();
 
-    await expect(steer).rejects.toThrow("Codex app-server exited");
+    await expect(steer).rejects.toThrow("Codex stopped unexpectedly.");
     expect(appServer.requests().filter((request) => request.method === "turn/steer")).toHaveLength(
       1,
     );
@@ -4277,6 +4315,50 @@ describe("Codex app-server provider", () => {
     ]);
   });
 
+  test("returns a secret answer to Codex without broadcasting it in Paseo events", async () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const nativeReply = asInternals(session).handleToolApprovalRequest({
+      itemId: "secret-question",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      questions: [
+        {
+          id: "password",
+          header: "Password",
+          question: "Enter password",
+          options: [],
+          isSecret: true,
+        },
+      ],
+    });
+
+    await session.respondToPermission("permission-secret-question", {
+      behavior: "allow",
+      updatedInput: { answers: { Password: "private-value" } },
+    });
+
+    expect(await nativeReply).toEqual({ answers: { password: { answers: ["private-value"] } } });
+    const resolvedPermission = events.find((event) => event.type === "permission_resolved");
+    expect(resolvedPermission).toMatchObject({ resolution: { behavior: "allow" } });
+    expect(resolvedPermission).not.toHaveProperty("resolution.updatedInput");
+    const completedQuestion = events.findLast(
+      (event) =>
+        event.type === "timeline" &&
+        event.item.type === "tool_call" &&
+        event.item.callId === "secret-question" &&
+        event.item.status === "completed",
+    );
+    expect(completedQuestion).toMatchObject({
+      item: {
+        detail: { text: "Password: Enter password" },
+        metadata: { questions: [expect.objectContaining({ isSecret: true })] },
+      },
+    });
+    expect(completedQuestion).not.toHaveProperty("item.metadata.answers");
+  });
+
   test("converts Codex collab agent notifications through the normal timeline path", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
@@ -5437,8 +5519,7 @@ describe("Codex app-server provider", () => {
     );
 
     try {
-      const resultPromise = session.run("Start working.");
-      await appServer.waitForTurnStart();
+      await session.startTurn("Start working.");
 
       const interruptPromise = session.interrupt();
       appServer.startsTurn({ threadId: "thread-1", turnId: "turn-identified-late" });
@@ -5446,9 +5527,6 @@ describe("Codex app-server provider", () => {
       await interruptPromise;
 
       expect(interruptedTurns).toEqual([{ threadId: "thread-1", turnId: "turn-identified-late" }]);
-      appServer.completeTurn();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      await resultPromise;
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -5471,14 +5549,12 @@ describe("Codex app-server provider", () => {
     );
 
     try {
-      const resultPromise = session.run("Finish before identification.");
-      await appServer.waitForTurnStart();
+      await session.startTurn("Finish before identification.");
       const interruptPromise = session.interrupt();
       appServer.completeTurn();
       await new Promise<void>((resolve) => setImmediate(resolve));
 
       await expect(interruptPromise).resolves.toBeUndefined();
-      await resultPromise;
       expect(interruptedTurns).toEqual([]);
       appServer.assertNoErrors();
     } finally {
@@ -5512,33 +5588,21 @@ describe("Codex app-server provider", () => {
       async () => appServer.child,
     );
     const resultPromise = session.run("Start after the delayed thread.");
+    void resultPromise.catch(() => undefined);
 
     try {
       await appServer.waitForRequest("thread/start");
-      let interruptSettled = false;
-      const interruptPromise = session.interrupt().then(() => {
-        interruptSettled = true;
-        return undefined;
-      });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(interruptSettled).toBe(false);
-
-      threadStart.resolve({ thread: { id: "thread-1" } });
-      await expect(interruptPromise).resolves.toBeUndefined();
+      await expect(session.interrupt()).resolves.toBeUndefined();
       await expect(resultPromise).resolves.toMatchObject({ canceled: true, timeline: [] });
+      expect(
+        appServer.requests().filter((request) => request.method === "initialize"),
+      ).toHaveLength(1);
       expect(appServer.requests()).not.toContainEqual(
         expect.objectContaining({ method: "turn/start" }),
       );
       appServer.assertNoErrors();
     } finally {
       threadStart.resolve({ thread: { id: "thread-1" } });
-      const nativeStart = await appServer.waitForTurnStart().catch(() => null);
-      if (nativeStart) {
-        appServer.startsTurn({ threadId: "thread-1", turnId: "cleanup-turn" });
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        appServer.completeTurn();
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
       await resultPromise.catch(() => undefined);
       await session.close();
     }
@@ -8879,9 +8943,52 @@ test("Codex runtime safety queries live terminals and retains unsupported app se
         .requests()
         .findLast((request) => request.method === "thread/backgroundTerminals/list"),
     ).toMatchObject({ params: { threadId: "thread-1" } });
+    const requestCount = appServer.requests().length;
+    appServer.disconnect();
+    expect(await session.canStopRuntime()).toBe(true);
+    expect(appServer.requests()).toHaveLength(requestCount);
     appServer.assertNoErrors();
   } finally {
     await session.close();
+  }
+});
+
+test("Codex runtime safety vetoes collection while command listing reconnects a disposed transport", async () => {
+  const initialize = deferred<Record<string, unknown>>();
+  const first = createFakeCodexAppServer();
+  const replacement = createFakeCodexAppServer({ initialize: () => initialize.promise });
+  const codexHome = await mkdtemp(path.join(tmpdir(), "codex-runtime-reconnect-"));
+  let spawns = 0;
+  const session = new CodexAppServerAgentSession(
+    createConfig(),
+    null,
+    createTestLogger(),
+    async () => (++spawns === 1 ? first.child : replacement.child),
+    { codexHome },
+  );
+  let commands: Promise<AgentSlashCommand[]> | null = null;
+  try {
+    await session.startTurn("hello");
+    await first.waitForTurnStart();
+    first.completeTurn();
+    await expect.poll(() => session.canStopRuntime()).toBe(true);
+    first.disconnect();
+    commands = session.listCommands();
+    await replacement.waitForRequest("initialize");
+    expect(await session.canStopRuntime()).toBe(false);
+    initialize.resolve({ userAgent: "codex/0.150.0" });
+    await expect(commands).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "compact" })]),
+    );
+    expect(await session.canStopRuntime()).toBe(true);
+    expect(spawns).toBe(2);
+    first.assertNoErrors();
+    replacement.assertNoErrors();
+  } finally {
+    initialize.resolve({ userAgent: "codex/0.150.0" });
+    await commands;
+    await session.close();
+    rmSync(codexHome, { recursive: true, force: true });
   }
 });
 

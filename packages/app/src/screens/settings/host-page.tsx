@@ -55,6 +55,7 @@ import {
 import { ProviderList } from "@/provider-settings";
 import { openProviderSettings } from "@/navigation/settings-navigation";
 import { HostUsageSection } from "@/usage";
+import { HostInstructionsSection } from "./host-instructions-section";
 import { MetadataGenerationPage } from "@/screens/settings/metadata-generation-page";
 import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
@@ -243,7 +244,12 @@ export function HostDevicesPage({ serverId }: { serverId: string }) {
     return <HostNotFound />;
   }
 
-  return <WaysToConnect serverId={serverId} />;
+  return (
+    <View>
+      <WaysToConnect serverId={serverId} />
+      <HostInstructionsSection host={host} />
+    </View>
+  );
 }
 
 export function HostToolsPage({ serverId }: { serverId: string }) {

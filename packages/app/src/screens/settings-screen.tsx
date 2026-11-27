@@ -307,7 +307,7 @@ const hostSearchGroups: Record<HostSectionSlug, SettingsSearchGroup[]> = {
     },
   ],
   plugins: [{ translationPrefixes: ["settings.plugins"], resultMode: "sidebar-only" }],
-  devices: [{ translationPrefixes: ["devices"] }],
+  devices: [{ translationPrefixes: ["devices", "settings.host.instructions"] }],
   daemon: [
     {
       id: "daemon.status",

@@ -3,14 +3,7 @@ import React, { useCallback, useMemo } from "react";
 import { View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
-import {
-  Archive,
-  Copy,
-  Ellipsis,
-  Globe,
-  Import as ImportIcon,
-  Settings,
-} from "lucide-react-native";
+import { Copy, Ellipsis, Globe, Import as ImportIcon, Pencil, Settings } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
@@ -20,6 +13,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  type MenuPageDefinition,
 } from "@/components/ui/dropdown-menu";
 import {
   extraMutedIconColorMapping,
@@ -28,7 +22,6 @@ import {
   useIconButtonChromeStyle,
 } from "@/components/ui/icon-button-chrome";
 import { TerminalProfileIcon } from "@/components/terminal-profile-icon";
-import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import {
   getTerminalProfileIcon,
@@ -40,13 +33,19 @@ import {
   useWorkspaceScriptsMenuPages,
   type UseWorkspaceScriptsMenuPagesInput,
 } from "@/screens/workspace/scripts";
+import {
+  useWorkspaceLaunchErrors,
+  WorkspaceLaunchesSection,
+  type WorkspaceLaunchesSectionProps,
+} from "@/screens/workspace/workspace-launches-button";
 import { usePluginWorkspaceMenu } from "@/plugins";
+import { useKeyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher-context";
 
 const ThemedEllipsis = withUnistyles(Ellipsis);
-const ThemedArchive = withUnistyles(Archive);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedGlobe = withUnistyles(Globe);
 const ThemedImport = withUnistyles(ImportIcon);
+const ThemedPencil = withUnistyles(Pencil);
 const ThemedSettings = withUnistyles(Settings);
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -54,7 +53,7 @@ const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMut
 const MENU_NEW_BROWSER_ICON = <ThemedGlobe size={16} uniProps={mutedColorMapping} />;
 const MENU_IMPORT_ICON = <ThemedImport size={16} uniProps={mutedColorMapping} />;
 const MENU_COPY_ICON = <ThemedCopy size={16} uniProps={mutedColorMapping} />;
-const MENU_ARCHIVE_ICON = <ThemedArchive size={16} uniProps={mutedColorMapping} />;
+const MENU_RENAME_ICON = <ThemedPencil size={16} uniProps={mutedColorMapping} />;
 const MENU_SETTINGS_ICON = <ThemedSettings size={16} uniProps={mutedColorMapping} />;
 function WorkspaceHeaderMenuTriggerIcon() {
   return (
@@ -87,6 +86,7 @@ const COMPACT_HEADER_BUTTON_HIT_SLOP = { top: 8, bottom: 8 } as const;
  * from the same callbacks, so the two surfaces can't drift.
  */
 export interface WorkspaceHeaderWorkspaceActions {
+  management: { pages: readonly MenuPageDefinition[]; items: React.ReactNode };
   currentBranchName: string | null;
   showWorkspaceSetup: boolean;
   importAgentDisabled: boolean;
@@ -98,6 +98,7 @@ export interface WorkspaceHeaderWorkspaceActions {
 }
 
 function WorkspaceHeaderWorkspaceActionItems({
+  management,
   currentBranchName,
   showWorkspaceSetup,
   importAgentDisabled,
@@ -108,6 +109,12 @@ function WorkspaceHeaderWorkspaceActionItems({
   onOpenSetupTab,
 }: WorkspaceHeaderWorkspaceActions) {
   const { t } = useTranslation();
+  const keyboardActionDispatcher = useKeyboardActionDispatcher();
+  // The global WorkspaceRenameHost owns the dialog for the active workspace, the same one the
+  // command center opens, so the header and the sidebar row share one rename flow.
+  const handleRename = useCallback(() => {
+    keyboardActionDispatcher.dispatch({ id: "workspace.rename", scope: "workspace" });
+  }, [keyboardActionDispatcher]);
   return (
     <>
       <DropdownMenuItem
@@ -128,6 +135,13 @@ function WorkspaceHeaderWorkspaceActionItems({
         </DropdownMenuItem>
       ) : null}
       <DropdownMenuItem
+        testID="workspace-header-rename"
+        leading={MENU_RENAME_ICON}
+        onSelect={handleRename}
+      >
+        {t("workspace.header.actions.rename")}
+      </DropdownMenuItem>
+      <DropdownMenuItem
         testID="workspace-header-import-agent"
         leading={MENU_IMPORT_ICON}
         disabled={importAgentDisabled}
@@ -147,6 +161,7 @@ function WorkspaceHeaderWorkspaceActionItems({
           </DropdownMenuItem>
         </>
       ) : null}
+      {management.items}
     </>
   );
 }
@@ -178,7 +193,12 @@ export function WorkspaceHeaderMenuDesktop(props: WorkspaceHeaderWorkspaceAction
       >
         <WorkspaceHeaderMenuTriggerIcon />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" width={220} testID="workspace-header-menu">
+      <DropdownMenuContent
+        align="start"
+        width={220}
+        testID="workspace-header-menu"
+        pages={props.management.pages}
+      >
         <WorkspaceHeaderWorkspaceActionItems {...props} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -216,11 +236,17 @@ function HeaderMenuProfileItem({
   );
 }
 
+export type WorkspaceHeaderLaunchesInput = Omit<
+  WorkspaceLaunchesSectionProps,
+  "launchErrors" | "onLaunchError" | "onClearLaunchError"
+>;
+
 export interface WorkspaceHeaderMenuMobileProps extends WorkspaceHeaderWorkspaceActions {
   pane?: WorkspaceCompactHeaderActions["pane"];
   onExitFocusMode?: () => void;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
+  launches: WorkspaceHeaderLaunchesInput;
   scripts: UseWorkspaceScriptsMenuPagesInput;
   showCreateBrowserTab: boolean;
   createTerminalDisabled: boolean;
@@ -239,6 +265,7 @@ export interface WorkspaceHeaderMenuMobileProps extends WorkspaceHeaderWorkspace
 export function WorkspaceHeaderMenuMobile({
   normalizedServerId,
   normalizedWorkspaceId,
+  launches,
   scripts,
   showCreateBrowserTab,
   createTerminalDisabled,
@@ -269,15 +296,16 @@ export function WorkspaceHeaderMenuMobile({
   const handleEditProfiles = useCallback(() => {
     router.push(buildSettingsHostSectionRoute(normalizedServerId, "terminals") as Href);
   }, [normalizedServerId, router]);
-  const { canArchive, archive } = useActiveWorkspaceArchive();
-  const handleArchiveWorkspace = useCallback(() => {
-    archive();
-  }, [archive]);
   const scriptsMenu = useWorkspaceScriptsMenuPages(scripts);
+  const { launchErrors, onLaunchError, onClearLaunchError } = useWorkspaceLaunchErrors(
+    launches.workspaceId,
+  );
+  const hasLaunches = launches.launches.length > 0;
   const pluginMenu = usePluginWorkspaceMenu(normalizedServerId, normalizedWorkspaceId);
+  const managementPages = workspaceActions.management.pages;
   const pages = useMemo(
-    () => [...scriptsMenu.pages, ...pluginMenu.pages],
-    [scriptsMenu.pages, pluginMenu.pages],
+    () => [...scriptsMenu.pages, ...pluginMenu.pages, ...managementPages],
+    [scriptsMenu.pages, pluginMenu.pages, managementPages],
   );
 
   return (
@@ -306,6 +334,15 @@ export function WorkspaceHeaderMenuMobile({
         pages={pages}
         sheetTitle={t("workspace.header.actions.workspaceActions")}
       >
+        {hasLaunches ? (
+          <WorkspaceLaunchesSection
+            {...launches}
+            launchErrors={launchErrors}
+            onLaunchError={onLaunchError}
+            onClearLaunchError={onClearLaunchError}
+          />
+        ) : null}
+        {hasLaunches && scriptsMenu.trigger ? <DropdownMenuSeparator /> : null}
         {onExitFocusMode ? (
           <DropdownMenuItem onSelect={onExitFocusMode}>
             {t("workspace.tabs.actions.exitFocusMode")}
@@ -343,15 +380,6 @@ export function WorkspaceHeaderMenuMobile({
           </DropdownMenuItem>
         ) : null}
         <WorkspaceHeaderWorkspaceActionItems {...workspaceActions} />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          testID="workspace-header-archive-workspace"
-          leading={MENU_ARCHIVE_ICON}
-          disabled={!canArchive}
-          onSelect={handleArchiveWorkspace}
-        >
-          {t("sidebar.workspace.actions.archiveWorkspace")}
-        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</DropdownMenuLabel>
         {profiles.map((profile) => (

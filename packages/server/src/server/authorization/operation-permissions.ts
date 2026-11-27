@@ -6,6 +6,7 @@ type OutboundOperation = SessionOutboundMessage["type"];
 export type PermissionRequirement = DaemonPermission | readonly DaemonPermission[] | null;
 
 const INBOUND_PERMISSION = {
+  "host.instructions.manage.request": "access.manage",
   "hosts.list.request": "daemon.read",
   "hosts.add.request": "tunnel.manage",
   "hosts.update.request": "tunnel.manage",
@@ -22,6 +23,7 @@ const INBOUND_PERMISSION = {
   "agent.provider_subagents.list.request": "workspace.read",
   "agent.background_work.list.request": "workspace.read",
   "agent.background_work.stop.request": ["workspace.write", "hub.execute"],
+  "agent.change_request.subscribe.request": ["workspace.write", "hub.execute"],
   "agent.provider_subagents.timeline.get.request": "workspace.read",
   "agent.rewind.request": "workspace.write",
   "agent.skills.get_status.request": "daemon.read",
@@ -36,6 +38,7 @@ const INBOUND_PERMISSION = {
   "subscription.release.request": null,
   "session.events.set_subscription.request": ["workspace.read", "daemon.read", "hub.execute"],
   "agent.timeline.set_subscription.request": ["workspace.read", "hub.execute"],
+  "agent.plan.review.request": "workspace.write",
   agent_permission_response: "workspace.write",
   archive_agent_request: ["workspace.write", "hub.execute"],
   archive_workspace_request: ["workspace.manage", "hub.execute"],
@@ -193,6 +196,7 @@ const INBOUND_PERMISSION = {
   "schedule/run-once": "automation.manage",
   "schedule/update": "automation.manage",
   send_agent_message_request: ["workspace.write", "hub.execute"],
+  "agent.message.get_delivery_status.request": ["workspace.read", "hub.execute"],
   set_agent_feature_request: "workspace.write",
   set_agent_mode_request: "workspace.write",
   set_agent_model_request: "workspace.write",
@@ -231,6 +235,9 @@ const INBOUND_PERMISSION = {
   "workspace.label.delete.request": "workspace.manage",
   "workspace.label.list.request": "workspace.read",
   "workspace.label.update.request": "workspace.manage",
+  "workspace.launch.list.request": "workspace.read",
+  "workspace.launch.start.request": "workspace.write",
+  "workspace.launch.stop.request": "workspace.write",
   "agent.metadata.update.request": "workspace.write",
   "workspace.metadata.update.request": "workspace.manage",
   "workspace.pin.set.request": "workspace.manage",
@@ -249,6 +256,7 @@ const INBOUND_PERMISSION = {
 } as const satisfies Record<InboundOperation, PermissionRequirement>;
 
 const OUTBOUND_PERMISSION = {
+  "host.instructions.manage.response": "access.manage",
   "hosts.list.response": "daemon.read",
   "hosts.changed": "daemon.read",
   "hosts.add.response": "tunnel.manage",
@@ -271,6 +279,7 @@ const OUTBOUND_PERMISSION = {
   "agent.provider_subagents.update": "workspace.read",
   "agent.background_work.list.response": "workspace.read",
   "agent.background_work.stop.response": ["workspace.write", "hub.execute"],
+  "agent.change_request.subscribe.response": ["workspace.write", "hub.execute"],
   "agent.background_work.update": "workspace.read",
   "agent.rewind.response": "workspace.write",
   "agent.skills.get_status.response": "daemon.read",
@@ -291,6 +300,7 @@ const OUTBOUND_PERMISSION = {
   agent_deleted: ["workspace.read", "hub.execute"],
   agent_permission_request: ["workspace.read", "hub.execute"],
   agent_permission_resolved: ["workspace.write", "hub.execute"],
+  "agent.plan.review.response": "workspace.write",
   agent_status: ["workspace.read", "hub.execute"],
   agent_stream: ["workspace.read", "hub.execute"],
   agent_update: ["workspace.read", "hub.execute"],
@@ -457,6 +467,7 @@ const OUTBOUND_PERMISSION = {
   "schedule/update/response": "automation.manage",
   script_status_update: "workspace.read",
   send_agent_message_response: ["workspace.write", "hub.execute"],
+  "agent.message.get_delivery_status.response": ["workspace.read", "hub.execute"],
   set_agent_feature_response: "workspace.write",
   set_agent_mode_response: "workspace.write",
   set_agent_model_response: "workspace.write",
@@ -494,6 +505,9 @@ const OUTBOUND_PERMISSION = {
   "workspace.label.list.response": "workspace.read",
   "workspace.label.update": "workspace.read",
   "workspace.label.update.response": "workspace.manage",
+  "workspace.launch.list.response": "workspace.read",
+  "workspace.launch.start.response": "workspace.write",
+  "workspace.launch.stop.response": "workspace.write",
   "agent.metadata.update.response": "workspace.write",
   "workspace.metadata.update.response": "workspace.manage",
   "workspace.pin.set.response": "workspace.manage",

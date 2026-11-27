@@ -35,19 +35,11 @@ export type BrowserProxyTarget =
       minimumSecurityMode?: "protected";
     };
 
-export interface TunnelReadyLimits {
-  maxFramePayloadBytes: number;
-  initialStreamWindowBytes: number;
-  initialConnectionWindowBytes: number;
-}
-
-export interface TunnelWireConnection {
-  readonly ready: TunnelReadyLimits;
-  sendBinary(bytes: Uint8Array): Promise<void>;
-  onBinary(handler: (bytes: Uint8Array) => void): () => void;
-  onClose(handler: (error?: Error) => void): () => void;
-  close(): void;
-}
+import type { TunnelWireConnection } from "@getpaseo/client/internal/node-tunnel";
+export type {
+  TunnelWireConnection,
+  TunnelReadyLimits,
+} from "@getpaseo/client/internal/node-tunnel";
 
 export class TunnelHandshakeError extends Error {
   public readonly code: string;

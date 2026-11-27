@@ -131,6 +131,20 @@ export const en = {
     },
   },
   composer: {
+    outbox: {
+      pending: "Saved on this device. Waiting for the host or agent to be ready.",
+      sending: "Sending…",
+      needsReview: "Delivery is unconfirmed. Check status before taking another action.",
+      retry: "Retry delivery",
+      discard: "Discard saved message",
+      attachmentMessage: "Message with attachments",
+
+      failed: "Not delivered. Retry this saved message.",
+      inFlight: "The host is still processing this message. Checking automatically…",
+      checking: "Checking delivery…",
+      check: "Check delivery status",
+    },
+    viewMessage: "Find message",
     placeholders: {
       desktop: "Message the agent, tag @files, or use /commands and /skills",
       mobile: "Message, @files, /commands",
@@ -193,8 +207,14 @@ export const en = {
       removeReview: "Remove review attachment",
     },
     errors: {
+      messageLookupFailed:
+        "Could not refresh the conversation. Delivery is still unconfirmed. Reconnect and try finding the message again.",
+      messageNotFound:
+        "Could not find this message in the available history. Delivery is still unconfirmed.",
       failedToSend: "Failed to send message",
       failedToCreateAgent: "Failed to create agent",
+      creationOutcomeUnknown:
+        "The previous start may still be running. Check your workspaces and agents before starting another.",
       noHostSelected: "No host selected",
       initialPromptRequired: "Initial prompt is required",
       alreadyLoading: "Already loading",
@@ -265,6 +285,12 @@ export const en = {
       implement: "Implement",
       question: "How would you like to proceed?",
       proposedPlan: "Proposed plan",
+      addFeedback: "Add feedback",
+      requestChanges: "Request changes",
+      implementWithNotes: "Implement with notes",
+      feedbackPlaceholder: "Give feedback on the plan",
+      stalePlan: "This plan is no longer awaiting review.",
+      planReviewFailed: "Couldn't send plan feedback.",
     },
   },
   agentPanel: {
@@ -399,6 +425,8 @@ export const en = {
     question: {
       responseFailed: "Could not send your response. Try again.",
       submit: "Submit",
+      sendToChat: "Send to chat",
+      chatDeliveryWarning: "Your answer will appear in chat. Do not enter passwords or secrets.",
       next: "Next",
       answerPlaceholder: "Type your answer...",
       otherPlaceholder: "Other...",
@@ -804,6 +832,7 @@ export const en = {
         importSession: "Import session",
         copyPath: "Copy workspace path",
         copyBranchName: "Copy branch name",
+        rename: "Rename workspace",
         showSetup: "Show setup",
       },
       toasts: {
@@ -826,7 +855,7 @@ export const en = {
         view: "View terminal",
       },
       accessibility: {
-        trigger: "Workspace scripts",
+        trigger: "Run workspace commands",
         openService: "View {{scriptName}} service",
         viewTerminal: "View {{scriptName}} terminal",
         runScript: "Run {{scriptName}} script",
@@ -847,6 +876,38 @@ export const en = {
         stopFailed: "Failed to stop {{scriptName}}",
         running: "Running",
         runningCount: "{{count}} running",
+      },
+    },
+    launches: {
+      title: "Launches",
+      actions: {
+        switch: "Switch",
+        start: "Start",
+        stop: "Stop",
+        view: "Output",
+        openService: "View service",
+        forwardLocally: "Forward to this computer",
+        stopForwarding: "Stop forwarding",
+        openForward: "Open {{address}} in your browser",
+        copyForward: "Copy {{address}}",
+      },
+      accessibility: {
+        switchLaunch: "Stop {{activeLaunchName}} and start {{launchName}}",
+        trigger: "Workspace launches",
+        launch: "{{launchName}} launch",
+        startLaunch: "Start {{launchName}}",
+        stopLaunch: "Stop {{launchName}}",
+        viewTerminal: "View {{launchName}} terminal",
+        openService: "View {{hostname}} service",
+      },
+      states: {
+        running: "Running",
+        stopped: "Stopped",
+        stopping: "Stopping…",
+        noListeners: "No listening ports detected yet",
+        startFailed: "Failed to start {{launchName}}",
+        stopFailed: "Failed to stop {{launchName}}",
+        portRange: "ports {{base}}–{{end}}",
       },
     },
     tree: {
@@ -886,6 +947,18 @@ export const en = {
           label_mr: "Create MR",
           pending_mr: "Creating MR...",
           success_mr: "MR Created",
+          relatedIssueTitle: "Related issue #{{number}}",
+          linkIssue: "Link issue",
+          skipIssue: "Skip",
+          closeIssueTitle: "Close issue #{{number}} when merged?",
+          closeIssueMessage:
+            "Choose Close to add a closing reference, or Reference only to link without closing.",
+          closeIssue: "Close on merge",
+          referenceOnly: "Reference only",
+          previewTitle: "Review pull request",
+          draftState: "Draft",
+          readyState: "Ready for review",
+          confirmCreate: "Create pull request",
         },
         mergeBranch: {
           label: "Merge locally",
@@ -1041,6 +1114,12 @@ export const en = {
         checkingRepository: "Checking repository...",
         notRepository: "Not a git repository",
         diffMode: "Diff mode",
+        latestTurn: "Latest turn",
+        latestTurnOpen: "View latest turn changes",
+        latestTurnDescription: "Worktree changes during the agent’s latest turn",
+        latestTurnChooseAgent: "Choose an agent",
+        latestTurnRunning: "Changes will appear when this turn finishes.",
+        latestTurnUnavailable: "No capture available for the latest turn.",
         all: "All changes",
         uncommitted: "Uncommitted",
         committed: "Committed",
@@ -1074,6 +1153,22 @@ export const en = {
           addToChat: "Add to chat",
           addAllToChat: "Add all to chat",
           addingToChat: "Adding...",
+        },
+        watch: {
+          manage: "Stop this watch in Background work.",
+          thisAgent: "Watch with this agent",
+          watching: "Watching {{reference}}",
+          action: "Watch {{abbreviation}}",
+          recipient: "Send updates to",
+          noAgents: "Open an agent in this workspace to start a watch.",
+          untitledAgent: "Untitled agent",
+          starting: "Starting watch…",
+          started: "Watch started. Manage it in the agent’s Background work.",
+          failed: "Could not start the watch. Try again.",
+          closed: "This {{abbreviation}} has already closed.",
+          updateHost:
+            "Update the host to start watches here. On Paseo 0.17.1 or later, you can ask the agent to watch the URL in chat.",
+          disconnected: "Reconnect to the host and try again.",
         },
         checksOverview: {
           headline: {
@@ -1404,6 +1499,8 @@ export const en = {
         select: "Select",
         archive: "Archive",
         archiveWorkspace: "Archive workspace",
+        markAsRead: "Mark as read",
+        markAsUnread: "Mark as unread",
         hideFromSidebar: "Hide from sidebar",
         archiving: "Archiving...",
         hiding: "Hiding...",
@@ -1436,6 +1533,8 @@ export const en = {
         archivedCount: "{{count}} workspaces archived",
         undoArchive: "Undo",
         undoArchiveFailed: "Couldn't undo the archive",
+        markAsReadFailed: "Failed to mark workspace as read",
+        markAsUnreadFailed: "Failed to mark workspace as unread",
       },
     },
   },
@@ -2444,6 +2543,46 @@ export const en = {
       hostLoadFailed: "Couldn't load projects from host {{hostName}}: {{message}}",
       editProject: "Edit {{projectName}}",
     },
+    projectLinks: {
+      entry: {
+        sectionTitle: "Projects across hosts",
+        linkProjects: "Link projects",
+        matches: "{{count}} verified matches to review",
+        matches_one: "{{count}} verified match to review",
+        matches_other: "{{count}} verified matches to review",
+        savedLinks: "Links saved on this device",
+        linkAction: "Link projects…",
+        manageAction: "Project links…",
+        hint: "Group copies of the same Git repository in your sidebar.",
+      },
+      sheet: {
+        title: "Link projects across hosts",
+        deviceOnly:
+          "Linking groups projects in the sidebar on this device. Workspaces, settings, and files stay on their hosts.",
+        matchesTitle: "Verified matches",
+        matchesDescription:
+          "These entries have the same Git remote and project subdirectory, but are still separate.",
+        linkedTitle: "Linked projects",
+        noMatchesTitle: "No project links to review",
+        noMatchesDescription:
+          "Open a workspace in the same repository on two hosts. Matching projects that are still separate appear here.",
+        linkProjects: "Link {{count}} projects",
+        remote: "Git remote",
+        subdirectory: "Project subdirectory",
+        path: "Path",
+        needsReviewTitle: "Needs review",
+        needsReviewDescription:
+          "The latest Git facts no longer confirm this link, so Paseo keeps these projects separate.",
+        projectUnavailable: "This project is not currently available.",
+        saving: "Saving project link…",
+        saveFailed: "Couldn't save the project link. Try again.",
+        unlink: "Unlink",
+      },
+      toasts: {
+        linked: "Projects linked on this device",
+        unlinked: "Project link removed",
+      },
+    },
     groupInfo: "About {{title}}",
     sections: {
       general: "General",
@@ -2924,6 +3063,12 @@ export const en = {
         description: "Show an outline for jumping between prompts",
       },
       sidebar: {
+        workspaces: {
+          title: "Workspaces",
+          sortLabel: "Workspace sort",
+          manualHint: "Choose Manual to drag workspaces into a custom order within each project.",
+          projectHint: "Workspace sort applies when grouping by project.",
+        },
         view: {
           title: "Sidebar view",
           label: "View",
@@ -3013,6 +3158,8 @@ export const en = {
         closeCurrentTab: "Close current tab",
         jumpToWorkspace: "Jump to workspace",
         jumpToTab: "Jump to tab",
+        goBack: "Go back",
+        goForward: "Go forward",
         previousWorkspace: "Previous workspace",
         nextWorkspace: "Next workspace",
         previousTab: "Previous tab",
@@ -3156,6 +3303,34 @@ export const en = {
         removeErrorTitle: "Error",
         removeErrorMessage: "Unable to remove connection",
         timeout: "Timeout",
+      },
+      instructions: {
+        title: "Allow instructions from another host",
+        help: "Set a default approval policy for a sending host. Override it for individual workspaces.",
+        trust:
+          "Anyone who can direct agents on the sending host can use this grant. Existing full-access connections keep their current access.",
+        offline: "Connect to this host to manage incoming instructions.",
+        update: "Update this host to manage incoming instructions.",
+        source: "Sending host",
+        policy: "Default approval policy",
+        workspace: "Workspace overrides",
+        workspacePolicy: "Workspace approval policy",
+        inherit: "Use host default",
+        blocked: "Block instructions",
+        chooseWorkspace: "Choose a workspace",
+        noWorkspaces: "No active workspaces",
+        save: "Save instruction policy",
+        allWorkspaces: "All workspaces",
+        legacyConversation: "Conversation grant",
+        ask: "Ask each time",
+        unattended: "Allow unattended",
+        allow: "Allow instructions",
+        approve: "Approve",
+        deny: "Deny",
+        revoke: "Revoke",
+        noSources: "Connect another host in Settings first.",
+        pending: "Awaiting your approval",
+        updateSource: "Connect and update the sending host before granting access.",
       },
       pairDevices: {
         rowTitle: "Pair a device",
@@ -3514,6 +3689,13 @@ export const en = {
       },
     },
     project: {
+      details: {
+        title: "Project details",
+        sourceDirectory: "Source directory",
+        copySourceDirectory: "Copy source directory",
+        repository: "Repository",
+        openRepositoryFailed: "Couldn't open the repository.",
+      },
       noEditableTarget: "This project isn't editable on this host.",
       backToProjects: "Back to projects",
       edit: {
@@ -3553,7 +3735,7 @@ export const en = {
       },
       scripts: {
         title: "Scripts",
-        info: "Long-running services and one-off commands you can launch from any agent in this project",
+        info: "Named commands in the Run menu. Scripts run on demand; services stay running and expose one HTTP port. Existing worktrees use their own checked-out script definitions.",
         empty: "No scripts yet.",
         untitled: "Untitled script",
         port: "port {{port}}",
@@ -3573,6 +3755,32 @@ export const en = {
         serviceHint: "Paseo supervises the process and assigns a port via $PASEO_PORT",
         actions: {
           add: "Add script",
+          edit: "Edit",
+          remove: "Remove",
+        },
+      },
+      launches: {
+        title: "Launches",
+        info: "Commands that start a whole development stack, such as bin/dev. They appear beside scripts and services in Run. One launch runs per workspace; switching stops the current launch. These definitions apply to every workspace in this project.",
+        empty: "Already use bin/dev or npm run dev? Add it as a launch.",
+        untitled: "Untitled launch",
+        menuAccessibility: "Open launch menu",
+        removeTitle: "Remove launch?",
+        removeMessage: "Remove {{name}}?",
+        removeFallbackName: "this launch",
+        name: "Name",
+        command: "Command",
+        nameAccessibility: "Launch name",
+        commandAccessibility: "Launch command",
+        nameRequired: "Name is required",
+        nameDuplicate: "Each launch needs a unique name",
+        commandRequired: "Command is required",
+        newLaunch: "New launch",
+        editLaunch: "Edit {{name}}",
+        commandHint:
+          "Use your existing dev command and keep it running in the foreground. It receives PASEO_PORT_BASE, PASEO_PORT_END, and COMPOSE_PROJECT_NAME. Output opens in a terminal tab; listening ports appear under the launch.",
+        actions: {
+          add: "Add launch",
           edit: "Edit",
           remove: "Remove",
         },
@@ -3617,6 +3825,9 @@ type AgoPluralKey = `${"daysAgo" | "hoursAgo" | "minutesAgo"}_${PluralCategory}`
 // i18next plural categories differ by locale, so locale catalogs may add the
 // explicit v4 suffixes they need while retaining the canonical fallback keys.
 export type TranslationResources = TranslationResourcesBase & {
+  settings: TranslationResourcesBase["settings"] & {
+    projectLinks: { entry: Partial<Record<`matches_${PluralCategory}`, string>> };
+  };
   providerUsage: TranslationResourcesBase["providerUsage"] & {
     duration: TranslationResourcesBase["providerUsage"]["duration"] &
       Partial<Record<DurationPluralKey, string>>;

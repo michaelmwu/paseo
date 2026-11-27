@@ -70,6 +70,7 @@ const worktreeRequestSchema = z.discriminatedUnion("kind", [
     .object({
       ...worktreeRequestFields,
       kind: z.literal("checkout-branch"),
+      remoteRef: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -266,24 +267,26 @@ export function publishAgentStream(
   lifecycle: PluginLifecycle,
   agent: PluginHookAgent,
   event: AgentStreamEvent,
+  captureOwner?: "core",
 ): void {
+  const turn = { agent, ...(captureOwner ? { captureOwner } : {}) };
   if (event.type === "turn_started") {
-    lifecycle.emit("agent.turn.before", { agent, turnId: event.turnId ?? null });
+    lifecycle.emit("agent.turn.before", { ...turn, turnId: event.turnId ?? null });
   } else if (event.type === "turn_completed") {
     lifecycle.emit("agent.turn.after", {
-      agent,
+      ...turn,
       turnId: event.turnId ?? null,
       outcome: { kind: "completed" },
     });
   } else if (event.type === "turn_failed") {
     lifecycle.emit("agent.turn.after", {
-      agent,
+      ...turn,
       turnId: event.turnId ?? null,
       outcome: { kind: "failed", error: { message: event.error, code: event.code } },
     });
   } else if (event.type === "turn_canceled") {
     lifecycle.emit("agent.turn.after", {
-      agent,
+      ...turn,
       turnId: event.turnId ?? null,
       outcome: { kind: "canceled", reason: event.reason },
     });
@@ -324,6 +327,17 @@ function validateWorktreeBeforeResult(
 ): WorktreeBeforeRequest {
   if (previous.repoRoot !== next.repoRoot || previous.sourceCheckout !== next.sourceCheckout) {
     throw new Error("worktree.create.before hooks cannot change repoRoot or sourceCheckout");
+  }
+  if (next.kind === "checkout-branch") {
+    const remoteRef = previous.kind === "checkout-branch" ? previous.remoteRef : undefined;
+    if (next.remoteRef !== undefined && next.remoteRef !== remoteRef) {
+      throw new Error("worktree.create.before hooks cannot change remoteRef");
+    }
+    if (previous.kind === "checkout-branch" && previous.branch === next.branch) {
+      return { ...next, ...(remoteRef ? { remoteRef } : {}) };
+    }
+    const { remoteRef: _remoteRef, ...changedBranch } = next;
+    return changedBranch;
   }
   if (previous.kind === "branch-off" && next.kind === "branch-off") {
     if (next.startPoint !== undefined && next.startPoint !== previous.startPoint) {
