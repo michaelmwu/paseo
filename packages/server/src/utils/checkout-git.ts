@@ -1,4 +1,5 @@
 import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@getpaseo/protocol/websocket-message-limit";
+import { randomUUID } from "node:crypto";
 import { resolve, dirname, basename } from "path";
 import {
   open as openFile,
@@ -268,6 +269,8 @@ interface GitRef {
 
 export interface BranchSuggestion {
   name: string;
+  branchName?: string;
+  remoteName?: string;
   committerDate: number;
   hasLocal: boolean;
   hasRemote: boolean;
@@ -333,6 +336,15 @@ function sortBranchSuggestions(
   });
 }
 
+async function listGitRemoteNames(cwd: string): Promise<string[]> {
+  const { stdout } = await runGitCommand(["remote"], { cwd, envOverlay: READ_ONLY_GIT_ENV });
+  // A remote name can contain slashes; the longest configured prefix owns the ref.
+  return stdout
+    .split("\n")
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+}
+
 export async function listBranchSuggestions(
   cwd: string,
   options: { query?: string; limit?: number; refMode?: "exact" } = {},
@@ -345,23 +357,34 @@ export async function listBranchSuggestions(
   const query = normalizeBranchSuggestionName(rawQuery) ?? rawQuery;
 
   if (options.refMode === "exact") {
-    const refs = await listGitRefs(cwd, "refs");
+    const [refs, remotes] = await Promise.all([listGitRefs(cwd, "refs"), listGitRemoteNames(cwd)]);
     const branches = refs.filter((ref) => {
       const isBranch = ref.name.startsWith("refs/heads/") || ref.name.startsWith("refs/remotes/");
       return isBranch && !ref.name.endsWith("/HEAD") && ref.name.toLowerCase().includes(rawQuery);
     });
     branches.sort((a, b) => b.committerDate - a.committerDate || a.name.localeCompare(b.name));
-    return branches.slice(0, limit).map((ref) => ({
-      name: ref.name,
-      committerDate: ref.committerDate,
-      hasLocal: ref.name.startsWith("refs/heads/"),
-      hasRemote: ref.name.startsWith("refs/remotes/"),
-    }));
+    return branches.slice(0, limit).map((ref) => {
+      const hasLocal = ref.name.startsWith("refs/heads/");
+      const remoteName = remotes.find((remote) => ref.name.startsWith(`refs/remotes/${remote}/`));
+      const suggestion: BranchSuggestion = {
+        name: ref.name,
+        committerDate: ref.committerDate,
+        hasLocal,
+        hasRemote: !hasLocal,
+      };
+      if (hasLocal) suggestion.branchName = ref.name.slice("refs/heads/".length);
+      if (remoteName) {
+        suggestion.remoteName = remoteName;
+        suggestion.branchName = ref.name.slice(`refs/remotes/${remoteName}/`.length);
+      }
+      return suggestion;
+    });
   }
 
-  const [localRefs, remoteRefs] = await Promise.all([
+  const [localRefs, remoteRefs, remotes] = await Promise.all([
     listGitRefs(cwd, "refs/heads"),
     listGitRefs(cwd, "refs/remotes/origin"),
+    listGitRemoteNames(cwd),
   ]);
 
   const branchMeta = new Map<string, BranchSuggestionMeta>();
@@ -380,6 +403,13 @@ export async function listBranchSuggestions(
   }
 
   for (const ref of remoteRefs) {
+    // An origin/team remote is not an origin branch named team/… .
+    if (
+      remotes.some(
+        (remote) => remote !== "origin" && ref.name.startsWith(`refs/remotes/${remote}/`),
+      )
+    )
+      continue;
     const normalized = normalizeBranchSuggestionName(ref.name);
     if (!normalized) continue;
     const existing = branchMeta.get(normalized);
@@ -906,6 +936,7 @@ export interface CheckoutStatusGitNonPaseo {
   isDirty: boolean;
   baseRef: string | null;
   baseRefExact?: string | null;
+  defaultBranchRef?: string | null;
   comparisonBaseRef?: string | null;
   aheadBehind: AheadBehind | null;
   // Remote-tracking ref for currentBranch, e.g. "refs/remotes/origin/main". Null when the
@@ -936,6 +967,7 @@ export interface CheckoutStatusGitPaseo {
   isDirty: boolean;
   baseRef: string;
   baseRefExact?: string | null;
+  defaultBranchRef?: string | null;
   comparisonBaseRef?: string | null;
   aheadBehind: AheadBehind | null;
   upstreamRef: string | null;
@@ -983,6 +1015,9 @@ export interface CheckoutContext {
   facts?: CheckoutSnapshotFacts | null;
   readSession?: CheckoutReadSession;
   runGitCommand?: RunGitCommand;
+  resolveDefaultBranchRef?: (
+    input: ResolveRepositoryDefaultBranchRefInput,
+  ) => Promise<string | null>;
   // `git config --get` results shared by the lookups of one snapshot, keyed by config key.
   // Several lookups read the same keys; this keeps each to one process.
   gitConfigReads?: Map<string, Promise<string | null>>;
@@ -1768,6 +1803,54 @@ export async function resolveRepositoryDefaultBranch(
 
 async function resolveBaseRef(repoRoot: string, context?: CheckoutContext): Promise<string | null> {
   return resolveRepositoryDefaultBranch(repoRoot, context);
+}
+
+// Workspace creation prefers the remote tip. Diff and merge bases keep their existing
+// local-branch policy in resolveRepositoryDefaultBranch.
+export interface ResolveRepositoryDefaultBranchRefInput {
+  cwd: string;
+  context?: CheckoutContext;
+}
+
+export async function resolveRepositoryDefaultBranchRef({
+  cwd,
+  context,
+}: ResolveRepositoryDefaultBranchRefInput): Promise<string | null> {
+  const { stdout } = await getRunGitCommand(context)(
+    ["for-each-ref", "--format=%(refname)%00%(symref)%00%(upstream)", "refs/heads", "refs/remotes"],
+    { cwd, envOverlay: READ_ONLY_GIT_ENV },
+  );
+  const refs = new Map<string, string>();
+  const upstreams = new Map<string, string>();
+  const lines = stdout.split("\n");
+  const refLines = lines.filter(Boolean);
+  for (const line of refLines) {
+    const [ref, target = "", upstream = ""] = line.split("\0");
+    refs.set(ref, target);
+    upstreams.set(ref, upstream);
+  }
+  const originDefault = refs.get("refs/remotes/origin/HEAD");
+  if (originDefault && refs.has(originDefault)) return originDefault;
+  const remoteDefaults: string[] = [];
+  const localBranches: string[] = [];
+  for (const [ref, target] of refs) {
+    if (ref.startsWith("refs/heads/")) localBranches.push(ref);
+    const isRemoteDefault = ref.startsWith("refs/remotes/") && ref.endsWith("/HEAD");
+    if (isRemoteDefault && refs.has(target)) remoteDefaults.push(target);
+  }
+  if (remoteDefaults.length === 1) return remoteDefaults[0];
+  if (remoteDefaults.length > 1) return null;
+  const conventionalDefaults = ["main", "master", "trunk", "develop"];
+  const conventionalRefs = conventionalDefaults.map((branch) => `refs/heads/${branch}`);
+  let localDefault = conventionalRefs.find((ref) => refs.has(ref));
+  if (!localDefault && localBranches.length === 1) localDefault = localBranches[0];
+  if (!localDefault) return null;
+  const branch = localDefault.slice("refs/heads/".length);
+  const originRef = `refs/remotes/origin/${branch}`;
+  if (refs.has(originRef)) return originRef;
+  const upstream = upstreams.get(localDefault);
+  if (upstream?.startsWith("refs/remotes/") && refs.has(upstream)) return upstream;
+  return localDefault;
 }
 
 interface ComparisonBaseRefName {
@@ -2664,6 +2747,9 @@ export async function getCheckoutStatus(
     baseRef && currentBranch
       ? await getAheadBehind(cwd, baseRef, currentBranch, factsContext)
       : null;
+  const resolveDefaultBranchRef =
+    context?.resolveDefaultBranchRef ?? resolveRepositoryDefaultBranchRef;
+  const defaultBranchRef = await resolveDefaultBranchRef({ cwd, context: factsContext });
   // The wire carries the display name: clients label the base with it and send it back to
   // request diffs and merges. The exact ref stays in worktree.json and in facts, where the
   // comparisons and actions read it.
@@ -2689,6 +2775,7 @@ export async function getCheckoutStatus(
       isDirty,
       baseRef: displayBaseRef ?? baseRef,
       baseRefExact: baseRef,
+      defaultBranchRef,
       comparisonBaseRef,
       aheadBehind,
       ...upstream,
@@ -2707,6 +2794,7 @@ export async function getCheckoutStatus(
     isDirty,
     baseRef: displayBaseRef,
     baseRefExact: baseRef,
+    defaultBranchRef,
     comparisonBaseRef,
     aheadBehind,
     ...upstream,
@@ -4738,6 +4826,11 @@ function parseHeadPushRefspec(refspec: string | null): string | null {
 }
 
 export interface CreatePullRequestOptions {
+  approvedApiHost?: string;
+  approvedRepositoryUrl?: string;
+  approvedOriginConfig?: Array<[string, string]>;
+  approvedPushUrls?: string[];
+  approvedHeadSha?: string;
   title: string;
   body?: string;
   base?: string;
@@ -4803,6 +4896,56 @@ export type ChecksStatus = "none" | "pending" | "success" | "failure";
 
 export type ReviewDecision = "approved" | "changes_requested" | "pending" | null;
 
+function approvedPushConfigEnv(config: Array<[string, string]>): Record<string, string> {
+  const offset = Number(process.env.GIT_CONFIG_COUNT ?? "0");
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(offset + config.length) };
+  for (const [index, [key, value]] of config.entries()) {
+    env[`GIT_CONFIG_KEY_${offset + index}`] = key;
+    env[`GIT_CONFIG_VALUE_${offset + index}`] = value;
+  }
+  return env;
+}
+
+export async function capturePrCheckoutState(
+  cwd: string,
+  requestedBaseRef?: string,
+  context?: CheckoutContext,
+) {
+  const attachedHead = await runGitCommand(["symbolic-ref", "--quiet", "HEAD"], {
+    cwd,
+    acceptExitCodes: [0, 1],
+  });
+  const headRef = attachedHead.stdout.trim();
+  if (!headRef.startsWith("refs/heads/"))
+    throw new Error("Finish the rebase or attach a branch before preparing a PR");
+  const head = headRef.slice("refs/heads/".length);
+  const { storedBaseRef, resolvedBaseRef } = await resolveBaseRefForCwd(cwd, context);
+  const base = resolveOperationBaseRef({ storedBaseRef, resolvedBaseRef, requestedBaseRef });
+  if (!head || !base) throw new Error("Unable to determine PR head and base");
+  const git = async (...args: string[]) => (await runGitCommand(args, { cwd })).stdout.trim();
+  const config = await runGitCommand(["config", "--null", "--get-regexp", "^remote\\.origin\\."], {
+    cwd,
+    acceptExitCodes: [0, 1],
+  });
+  const originConfig = config.stdout
+    .split("\0")
+    .filter(Boolean)
+    .map((entry): [string, string] => {
+      const separator = entry.indexOf("\n");
+      return [entry.slice("remote.origin.".length, separator), entry.slice(separator + 1)];
+    })
+    .filter(([key]) => key !== "url" && key !== "pushurl");
+  return {
+    head,
+    base,
+    headSha: await git("rev-parse", "HEAD"),
+    baseSha: await git("rev-parse", await resolveBestComparisonBaseRef(cwd, base)),
+    origin: await git("remote", "get-url", "origin"),
+    pushUrls: (await git("remote", "get-url", "--push", "--all", "origin")).split("\n"),
+    originConfig,
+  };
+}
+
 export async function createPullRequest(
   cwd: string,
   options: CreatePullRequestOptions,
@@ -4826,18 +4969,100 @@ export async function createPullRequest(
   }
   const normalizedBase = branchNameFromRef(base);
 
-  // The push deliberately happens before the adapter resolves the target
-  // repository: slug resolution is adapter-internal (e.g. `gh repo view`, which
-  // handles GHES and renamed repos), and the RPC path only reaches here after
-  // the forge resolver has already matched the origin remote to a forge. If the
-  // adapter still fails after the push, retrying is safe — the non-force push
-  // of the head branch is idempotent.
-  await runGitCommand(["push", "-u", "origin", head], { cwd, timeout: 120_000 });
+  // Approved workflows pin both the transport and API repository before any
+  // hook can change origin. Legacy callers still let the adapter resolve it.
+  // Push the approved commit rather than a branch tip that may have moved
+  // since confirmation. This remains a non-force push.
+  const originSettings = new Map(
+    options.approvedOriginConfig?.map(([key, value]) => [key.toLowerCase(), value]),
+  );
+  for (const destination of options.approvedPushUrls ?? ["origin"]) {
+    const remote = `paseo-approved-${randomUUID()}`;
+    const remoteConfig: Array<[string, string]> = options.approvedOriginConfig
+      ? [
+          [`remote.${remote}.url`, destination],
+          [`remote.${remote}.pushurl`, destination],
+          // This URL is already expanded by remote get-url. An identity rule
+          // at the full destination takes precedence over shorter rewrites.
+          [`url.${destination}.insteadOf`, destination],
+          [`url.${destination}.pushInsteadOf`, destination],
+          ...options.approvedOriginConfig.map(([key, value]): [string, string] => [
+            `remote.${remote}.${key}`,
+            value,
+          ]),
+        ]
+      : [];
+    if (remoteConfig.length) {
+      const resolved = await runGitCommand(["ls-remote", "--get-url", remote], {
+        cwd,
+        envOverlay: approvedPushConfigEnv(remoteConfig),
+      });
+      if (resolved.stdout.trim() !== destination)
+        throw new Error("Approved push URL cannot be preserved by Git's URL configuration");
+    }
+    const pushArgs = options.approvedHeadSha
+      ? [
+          "push",
+          ...(originSettings.has("receivepack")
+            ? [`--receive-pack=${originSettings.get("receivepack")}`]
+            : []),
+          "--",
+          // An unconfigured URL keeps the superproject's SHA refspec out of
+          // recursive pushes. Submodules use their own remotes/refspecs.
+          originSettings.has("vcs") ? `${originSettings.get("vcs")}::${destination}` : destination,
+          `${options.approvedHeadSha}:refs/heads/${head}`,
+        ]
+      : ["push", "-u", "origin", head];
+    const recursivePushConfig: Array<[string, string]> = options.approvedHeadSha
+      ? [["push.default", "current"]]
+      : [];
+    const pushConfig = [
+      ...remoteConfig,
+      // Recursive URL pushes run the child's default push. A fresh matching
+      // branch must publish without requiring or writing upstream tracking.
+      ...recursivePushConfig,
+      ...["proxy", "proxyauthmethod"].flatMap(
+        (key): Array<[string, string]> =>
+          originSettings.has(key) ? [[`http.${destination}.${key}`, originSettings.get(key)!]] : [],
+      ),
+    ];
+    // Unlike -c name=value, this preserves '=' inside URL-bearing keys.
+    await runGitCommand(pushArgs, {
+      cwd,
+      timeout: 120_000,
+      envOverlay: approvedPushConfigEnv(pushConfig),
+    });
+  }
+  if (options.approvedHeadSha) {
+    // Match push -u without requiring a remote-tracking ref: single-branch
+    // clones may deliberately exclude this branch from origin's fetch refspec.
+    await runGitCommand(["config", `branch.${head}.remote`, "origin"], { cwd });
+    await runGitCommand(["config", `branch.${head}.merge`, `refs/heads/${head}`], { cwd });
+    // Literal-URL pushes do not update origin's tracking refs. Let Git resolve
+    // the configured fetch mapping (which may deliberately exclude this head).
+    const upstream = (
+      await runGitCommand(["for-each-ref", "--format=%(upstream)", `refs/heads/${head}`], { cwd })
+    ).stdout.trim();
+    if (upstream.startsWith("refs/remotes/")) {
+      const symbolic = await runGitCommand(["symbolic-ref", "--quiet", upstream], {
+        cwd,
+        acceptExitCodes: [0, 1],
+      });
+      if (symbolic.exitCode === 1) {
+        await runGitCommand(["update-ref", "--no-deref", upstream, options.approvedHeadSha], {
+          cwd,
+        });
+      }
+    }
+  }
 
   const result = await forgeService.createPullRequest({
     cwd,
+    ...(options.approvedRepositoryUrl ? { repositoryUrl: options.approvedRepositoryUrl } : {}),
+    ...(options.approvedApiHost ? { repositoryApiHost: options.approvedApiHost } : {}),
     title: options.title,
     body: options.body,
+    draft: options.draft,
     head,
     base: normalizedBase,
   });

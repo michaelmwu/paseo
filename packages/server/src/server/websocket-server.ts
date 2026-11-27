@@ -1,3 +1,4 @@
+import type { HostInstructionsRuntime } from "./host-instructions/runtime.js";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -29,6 +30,7 @@ import { join } from "path";
 import { getCachedHostMachineKind } from "./host-machine-kind.js";
 import { getHostName } from "./host-name.js";
 import { randomUUID } from "node:crypto";
+import type { AddressInfo } from "node:net";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
@@ -101,6 +103,8 @@ import {
 import type { ScriptHealthState } from "./script-health-monitor.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
 import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import type { WorkspaceRuntimeEnvironmentService } from "./workspace-runtime-environment.js";
+import type { WorkspaceLaunchManager } from "./workspace-launch-manager.js";
 import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
 import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
 import {
@@ -134,8 +138,10 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
+import { reachableDirectEndpoints } from "./direct-endpoints.js";
+import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
 
-import type { SecurityMode } from "@getpaseo/relay/e2ee";
+import type { KeyPair, SecurityMode } from "@getpaseo/relay/e2ee";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
@@ -196,6 +202,8 @@ interface WebSocketConnectionIdentity {
 }
 
 interface WebSocketServerConfig {
+  daemonKeyPair?: KeyPair;
+  getBoundTcpAddresses?: () => readonly (AddressInfo | string | null)[];
   allowedOrigins?: Set<string>;
   hostnames?: HostnamesConfig;
   getAllowedOrigins?: () => Set<string>;
@@ -203,6 +211,7 @@ interface WebSocketServerConfig {
   daemonStatusRpc?: boolean;
   relayConfig?: boolean;
   startPaused?: boolean;
+  hostInstructions?: HostInstructionsRuntime;
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
@@ -285,6 +294,7 @@ function createFallbackWorkspaceGitService(): WorkspaceGitService {
       mainRepoRoot: null,
     }),
     getSnapshot: async (cwd: string) => createFallbackWorkspaceGitSnapshot(cwd),
+    peekSnapshot: () => null,
     resolveForge: async () => null,
     getCheckoutDiff: async () => ({ diff: "" }),
     validateBranchRef: async () => ({ kind: "not-found" }),
@@ -626,7 +636,9 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
+  private readonly hostInstructions: HostInstructionsRuntime | undefined;
   private readonly connectedHosts: ConnectedHosts;
+  private readonly getBoundTcpAddresses: () => readonly (AddressInfo | string | null)[];
 
   toolHosts() {
     return createToolHosts(this.connectedHosts);
@@ -644,6 +656,8 @@ export class VoiceAssistantWebSocketServer {
   private terminalManager!: TerminalManager | null;
   private serviceProxy!: ServiceProxySubsystem | null;
   private scriptRuntimeStore!: WorkspaceScriptRuntimeStore | null;
+  private workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService | null = null;
+  private workspaceLaunchManager: WorkspaceLaunchManager | null = null;
   private getDaemonTcpPort!: (() => number | null) | null;
   private getDaemonTcpHost!: (() => string | null) | null;
   private serviceProxyPublicBaseUrl!: string | null;
@@ -673,6 +687,8 @@ export class VoiceAssistantWebSocketServer {
   private unsubscribeSpeechReadiness: (() => void) | null = null;
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
   private unsubscribeTerminalActivity: (() => void) | null = null;
+  private directEndpointsInterval: ReturnType<typeof setInterval> | null = null;
+  private lastDirectEndpoints = "";
   private readonly browserToolsBroker: BrowserToolsBroker | null;
   private readonly hubRelationships: HubRelationshipManagement | null;
   private connectionLifecycle: "starting" | "accepting" | "stopping" = "accepting";
@@ -750,6 +766,7 @@ export class VoiceAssistantWebSocketServer {
     workspaceLabelService?: WorkspaceLabelService,
     workspaceArchiveOperations?: WorkspaceArchiveOperations,
     pushNotifications?: PushNotifications,
+    private readonly changeRequestWatches?: SessionOptions["changeRequestWatches"],
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -775,7 +792,7 @@ export class VoiceAssistantWebSocketServer {
         agentManager.tryRunOutOfBand(
           request.recipientId,
           request.prompt,
-          { clientMessageId: request.messageIds[0] },
+          { clientMessageId: request.messageIds[0], submittedMessages: request.submittedMessages },
           onAccepted,
         ),
       isRunning: (agentId) => agentManager.hasInFlightRun(agentId),
@@ -801,7 +818,10 @@ export class VoiceAssistantWebSocketServer {
           sessionMode: batch.sessionMode,
           clearPendingPermissions: batch.clearPendingPermissions,
           unarchive: batch.unarchive,
-          runOptions: { clientMessageId: batch.messageIds[0] },
+          runOptions: {
+            clientMessageId: batch.messageIds[0],
+            submittedMessages: batch.submittedMessages,
+          },
           logger: this.logger,
         });
         if (dispatch.disposition === "turn_started")
@@ -844,7 +864,9 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.paseoHome = paseoHome;
+    this.hostInstructions = wsConfig.hostInstructions;
     this.connectedHosts = new ConnectedHosts(paseoHome, { serverId, label: getHostName() });
+    this.getBoundTcpAddresses = wsConfig.getBoundTcpAddresses ?? (() => [server.address()]);
     this.passwordHash = auth?.password;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
@@ -901,10 +923,19 @@ export class VoiceAssistantWebSocketServer {
     });
 
     this.wss = this.createWebSocketServer(server, wsConfig, auth);
+    this.startDirectEndpointsInterval();
     this.startRuntimeMetricsInterval();
     this.startApplicationSocketLeaseInterval();
 
     this.logger.info("WebSocket server initialized on /ws");
+  }
+
+  setWorkspaceLaunchServices(params: {
+    workspaceRuntimeEnvironment: WorkspaceRuntimeEnvironmentService;
+    workspaceLaunchManager: WorkspaceLaunchManager;
+  }): void {
+    this.workspaceRuntimeEnvironment = params.workspaceRuntimeEnvironment;
+    this.workspaceLaunchManager = params.workspaceLaunchManager;
   }
 
   private assignOptionalServices(params: {
@@ -981,6 +1012,22 @@ export class VoiceAssistantWebSocketServer {
     });
     wss.on("connection", (ws, request) => {
       const socket = Object.assign(ws, { maxFrameBytes: DIRECT_WEBSOCKET_FRAME_BYTES });
+      if (new URL(request.url ?? "/ws", "http://localhost").searchParams.get("secure") === "1") {
+        if (!wsConfig.daemonKeyPair) {
+          socket.close(1011, "Secure direct transport unavailable");
+          return;
+        }
+        void admitSecuredRelaySocket(
+          socket,
+          {
+            daemonKeyPair: wsConfig.daemonKeyPair,
+            logger: this.logger,
+            requireProtectedMode: () => true,
+          },
+          async ({ socket: securedSocket }) => this.attachSocket(securedSocket, request),
+        );
+        return;
+      }
       void this.attachAuthenticatedSocket(socket, request, password);
     });
     return wss;
@@ -1007,6 +1054,23 @@ export class VoiceAssistantWebSocketServer {
     }, APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS);
     this.applicationSocketLeaseInterval = interval;
     (interval as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private getDirectEndpoints(): string[] {
+    return reachableDirectEndpoints({
+      boundAddresses: this.getBoundTcpAddresses(),
+    });
+  }
+
+  private startDirectEndpointsInterval(): void {
+    this.lastDirectEndpoints = JSON.stringify(this.getDirectEndpoints());
+    this.directEndpointsInterval = setInterval(() => {
+      const current = JSON.stringify(this.getDirectEndpoints());
+      if (current === this.lastDirectEndpoints) return;
+      this.lastDirectEndpoints = current;
+      this.broadcastServerInfoUpdate();
+    }, 15_000);
+    this.directEndpointsInterval.unref?.();
   }
 
   // Main-loop stall visibility: terminal frames and agent traffic share one event
@@ -1162,7 +1226,7 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
     this.serverCapabilities = next;
-    this.broadcastCapabilitiesUpdate();
+    this.broadcastServerInfoUpdate();
   }
 
   public async attachExternalSocket(
@@ -1257,6 +1321,10 @@ export class VoiceAssistantWebSocketServer {
     if (this.applicationSocketLeaseInterval) {
       clearInterval(this.applicationSocketLeaseInterval);
       this.applicationSocketLeaseInterval = null;
+    }
+    if (this.directEndpointsInterval) {
+      clearInterval(this.directEndpointsInterval);
+      this.directEndpointsInterval = null;
     }
     this.applicationSocketLease.clear();
     this.flushRuntimeMetrics({ final: true });
@@ -1757,6 +1825,14 @@ export class VoiceAssistantWebSocketServer {
           ),
         );
       },
+      emitWorkspaceUpdatesForExternalWorkspaceIds: async (workspaceIds) => {
+        const workspaceIdList = Array.from(workspaceIds);
+        await Promise.all(
+          this.listSessions().map((activeSession) =>
+            activeSession.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
+          ),
+        );
+      },
       publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
       downloadTokenStore: this.downloadTokenStore,
       createNetworkTunnelTicket: (permissions) =>
@@ -1766,6 +1842,7 @@ export class VoiceAssistantWebSocketServer {
         }),
       pushNotifications: this.pushNotifications,
       paseoHome: this.paseoHome,
+      hostInstructions: this.hostInstructions,
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
@@ -1778,6 +1855,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceLabelService: this.workspaceLabelService ?? undefined,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
+      changeRequestWatches: this.changeRequestWatches,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -1797,6 +1875,8 @@ export class VoiceAssistantWebSocketServer {
       hubRelationships: options.hubRelationships,
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
+      workspaceRuntimeEnvironment: this.workspaceRuntimeEnvironment ?? undefined,
+      workspaceLaunchManager: this.workspaceLaunchManager ?? undefined,
       workspaceSetupObservation: this.workspaceSetupObservation,
       workspaceSetupRuntime: this.workspaceSetupRuntime,
       workspaceArchiveOperations: this.workspaceArchiveOperations,
@@ -2113,13 +2193,18 @@ export class VoiceAssistantWebSocketServer {
       version: this.daemonVersion,
       ...(machineKind ? { machineKind } : {}),
       sourceId: session.getHostSourceId(),
+      directEndpoints: this.getDirectEndpoints(),
       permissions: session.getPermissions(),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         connectedHosts: true,
+        hostInstructions: this.hostInstructions !== undefined,
+        hostInstructionWorkspacePolicies: this.hostInstructions !== undefined,
+        hostInstructionRegistrationRecovery: this.hostInstructions !== undefined,
         hostMultiplexing: true,
+        learnedDirectEndpoints: true,
         // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.
         relayProtectedSecurity: true,
         usageSetting: true,
@@ -2129,6 +2214,7 @@ export class VoiceAssistantWebSocketServer {
         providerOptionControls: true,
         entityMetadata: true,
         diffSubscription: true,
+        latestTurnChanges: this.agentManager.latestTurnChangesEnabled,
         binaryChunkingV1: true,
         agentRequestReceipts: true,
         workspaceRequestReceipts: true,
@@ -2142,6 +2228,7 @@ export class VoiceAssistantWebSocketServer {
         checkoutWorktreeList: true,
         // COMPAT(worktreeRefActions): added after v0.16.2, remove gate after 2027-11-19.
         worktreeRefActions: true,
+        worktreeExactCheckoutRefs: true,
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: true,
         // COMPAT(workspaceLabels): added in v0.5.0, remove after 2027-08-14.
@@ -2159,6 +2246,7 @@ export class VoiceAssistantWebSocketServer {
         // feature gate and legacy fallback after 2027-01-17 once the supported
         // daemon floor is >= v0.2.0.
         checkoutForgeSetAutoMerge: true,
+        checkoutPrPreview: true,
         // COMPAT(checkoutGithubSetAutoMerge): added in v0.1.75 and retained as
         // the fallback for checkoutForgeSetAutoMerge. Stop advertising it after
         // 2027-01-17 once supported floors are >= v0.2.0.
@@ -2272,6 +2360,7 @@ export class VoiceAssistantWebSocketServer {
         agentBackgroundWork: true,
         // COMPAT(agentBackgroundWorkStop): added after v0.15.0, remove after 2027-05-03.
         agentBackgroundWorkStop: true,
+        agentChangeRequestSubscribe: this.changeRequestWatches !== undefined,
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain advertisement.
         projectedSubagentTimeline: true,
         wholeTurnTimeline: true,
@@ -2285,6 +2374,7 @@ export class VoiceAssistantWebSocketServer {
         hubRelationship: true,
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
         projectGithubClone: true,
+        projectGithubCloneFolderName: true,
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.
         workspaceGithubRepositorySearch: true,
         // COMPAT(projectCreateDirectory): added in v0.1.108, remove gate after 2027-01-15.
@@ -2320,10 +2410,13 @@ export class VoiceAssistantWebSocketServer {
         agentMessageBatching: true,
         // COMPAT(agentActiveTurnBehaviors): added in v0.17.2, remove gate after 2027-05-22.
         agentActiveTurnBehaviors: true,
+        messageDeliveryStatus: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,
         // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.
         workspaceScriptManagement: true,
+        // COMPAT(workspaceLaunchManagement): added in v0.7.0, remove gate after 2027-08-29.
+        workspaceLaunchManagement: true,
         // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
         projectCustomIcon: true,
         // COMPAT(fsEntryOps): added in v0.3.0, remove gate after 2027-02-08.
@@ -2339,6 +2432,7 @@ export class VoiceAssistantWebSocketServer {
         agentConfigApply: true,
         // COMPAT(networkTunnel): added in v0.17.6, remove gate after 2027-05-26.
         networkTunnel: true,
+        planReview: true,
       },
     };
   }
@@ -2363,7 +2457,7 @@ export class VoiceAssistantWebSocketServer {
     });
   }
 
-  private broadcastCapabilitiesUpdate(): void {
+  private broadcastServerInfoUpdate(): void {
     for (const connection of new Set(this.sessions.values())) {
       if (
         ![...connection.sockets].some((socket) =>

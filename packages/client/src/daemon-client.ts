@@ -7,6 +7,7 @@ import {
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
+  ChunkedTransportCapacityError,
 } from "@getpaseo/protocol/chunked-transport";
 import {
   HOST_ROUTE_OPCODE,
@@ -14,7 +15,7 @@ import {
   decodeHostRouteFrame,
   type HostRouteFrame,
 } from "@getpaseo/protocol/binary-frames/index";
-import { messageTooLargeError } from "./daemon-client-transport-utils.js";
+import { messageTooLargeError, MessageTooLargeError } from "./daemon-client-transport-utils.js";
 import type { HostAdd, HostUpdate, HostDirectory } from "@getpaseo/protocol/hosts";
 import type { PluginListingDetail, PluginListingIndex } from "@getpaseo/protocol/plugin-registry";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
@@ -300,10 +301,12 @@ function chooseConnectionAuth(
   if (localCredential) helloAuth = { kind: "localCredential", token: localCredential };
   else if (password) helloAuth = { kind: "password", password };
   const headers: Record<string, string> = {};
-  const compatibleBearer = localCredential ? null : compatibleBearerPassword(password);
+  const compatibleBearer =
+    localCredential || config.e2ee?.enabled ? null : compatibleBearerPassword(password);
   // COMPAT(headerAuth): added in v0.9.1, remove after 2027-03-24.
   if (compatibleBearer) headers.Authorization = `Bearer ${compatibleBearer}`;
-  else if (!localCredential && config.authHeader) headers.Authorization = config.authHeader;
+  else if (!localCredential && !config.e2ee?.enabled && config.authHeader)
+    headers.Authorization = config.authHeader;
   return {
     helloAuth,
     headers,
@@ -577,6 +580,7 @@ export interface CreatePaseoWorktreeInput extends Pick<
   | "worktreeSlug"
   | "firstAgentContext"
   | "refName"
+  | "refMode"
   | "action"
   | "checkoutSource"
   | "githubPrNumber"
@@ -1110,6 +1114,20 @@ export type PluginCatalogEntry = Omit<PluginCatalogResponseEntry, "clientBundle"
   clientBundle: string;
 };
 
+export class AgentMessageSendError extends Error {
+  readonly deliveryOutcome: "not_submitted" | "rejected" | "unknown";
+  constructor(input: {
+    message: string;
+    deliveryOutcome: "not_submitted" | "rejected" | "unknown";
+    cause?: unknown;
+  }) {
+    super(input.message, { cause: input.cause });
+    this.deliveryOutcome = input.deliveryOutcome;
+    this.name = "AgentMessageSendError";
+  }
+}
+class DaemonClientClosedError extends Error {}
+
 export class DaemonConnectionError extends Error {
   readonly serverId?: string;
   readonly outcome?: "unknown";
@@ -1122,6 +1140,14 @@ export class DaemonConnectionError extends Error {
     this.serverId = context?.serverId;
     this.outcome = context?.outcome;
     this.name = "DaemonConnectionError";
+  }
+}
+
+/** Creation failed locally before handing any creation to the transport. */
+export class CreationNotSentError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "CreationNotSentError";
   }
 }
 
@@ -1185,6 +1211,9 @@ const DEFAULT_RECONNECT_MAX_DELAY_MS = 30000;
 const DEFAULT_SESSION_RPC_TIMEOUT_MS = 60_000;
 // The daemon allows 90s per provider; retain its result through the delivery margin.
 const RECENT_PROVIDER_SESSIONS_TIMEOUT_MS = 100_000;
+
+// A send waits for host preparation and provider admission (Codex alone allows 90s).
+const AGENT_MESSAGE_ACK_TIMEOUT_MS = 180_000;
 const PUSH_TOKEN_REVOCATION_TIMEOUT_MS = 2_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_LIVENESS_TIMEOUT_MS = 5000;
@@ -1345,7 +1374,16 @@ function toReasonCode(reason: string | null | undefined): string | null {
   return "unknown";
 }
 
+function isCreationRequest(messageType: string): boolean {
+  return (
+    messageType === "agent.create.request" ||
+    messageType === "create_agent_request" ||
+    messageType === "workspace.create.request"
+  );
+}
+
 interface PendingSend {
+  message?: SessionInboundMessage;
   send: () => void | Promise<void>;
   resolve: () => void;
   reject: (error: Error) => void;
@@ -1475,6 +1513,7 @@ export class DaemonClient {
   > = new Map();
   private eventListeners: Set<DaemonEventHandler> = new Set();
   private waiters: Set<Waiter<unknown>> = new Set();
+  private readonly creationReceiptLifetime = new AbortController();
   private checkoutStatusInFlight: Map<string, Promise<CheckoutStatusPayload>> = new Map();
   private connectionListeners: Set<(status: ConnectionState) => void> = new Set();
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1854,11 +1893,14 @@ export class DaemonClient {
     this.resetConnectTimeout();
     this.disposeTransport(1000, "Client closed");
     this.providerSnapshotUpdates.clear();
-    this.clearWaiters(new Error("Daemon client closed"));
+    const closedError = new DaemonClientClosedError("Daemon client closed");
+    this.creationReceiptLifetime.abort();
+    this.clearWaiters(closedError);
+    this.rejectPendingSendQueue(closedError);
     await this.diffStreams.close();
     await this.owned.close();
+    await this.creations.settleRequests();
     this.creations.close();
-    this.rejectPendingSendQueue(new Error("Daemon client closed"));
     this.rejectPingProbe(new Error("Daemon client closed"));
     this.rejectPongWaiters(new Error("Daemon client closed"));
     this.terminalStreams.clearSlots();
@@ -1911,6 +1953,17 @@ export class DaemonClient {
       throw Object.assign(new Error("Update the managing daemon to use connected hosts"), {
         code: "unsupported_capability",
       });
+  }
+  async manageHostInstructions(
+    command: import("@getpaseo/protocol/messages").HostInstructionsCommand,
+  ) {
+    if (!this.lastServerInfoMessage?.features?.hostInstructions) {
+      throw new Error("Update the daemon to use host instructions");
+    }
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "host.instructions.manage.request", command },
+      responseType: "host.instructions.manage.response",
+    });
   }
   async listHosts(): Promise<HostDirectory> {
     this.requireConnectedHosts();
@@ -2192,8 +2245,18 @@ export class DaemonClient {
         messageType,
         ...describeRequestIdentity(message),
       });
+    const rejectSend = (error: unknown): never => {
+      if (
+        isCreationRequest(messageType) &&
+        (error instanceof MessageTooLargeError || error instanceof ChunkedTransportCapacityError)
+      )
+        throw new CreationNotSentError(error);
+      throw error;
+    };
     try {
-      return this.sendTransportFrame(JSON.stringify(message), submitted);
+      return this.sendTransportFrame(JSON.stringify(message), submitted).catch(rejectSend);
+    } catch (error) {
+      return rejectSend(error);
     } finally {
       this.endTraceSection(isOpen);
     }
@@ -2282,11 +2345,15 @@ export class DaemonClient {
    * is queued and will be sent once connected (or rejected after timeout).
    * This prevents waiters from hanging forever when called during connection.
    */
-  private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
+  private sendSessionMessageOrThrow(
+    message: SessionInboundMessage,
+    onDispatch?: () => void,
+  ): Promise<void> {
     return this.sendWhenConnected(() => {
+      onDispatch?.();
       const payload = SessionInboundMessageSchema.parse(message);
       return this.sendSessionPayload(payload);
-    });
+    }, message);
   }
 
   /** Resolves once connected, waiting out a connection that is still being established. */
@@ -2294,7 +2361,10 @@ export class DaemonClient {
     return this.sendWhenConnected(() => undefined);
   }
 
-  private sendWhenConnected(send: () => void | Promise<void>): Promise<void> {
+  private sendWhenConnected(
+    send: () => void | Promise<void>,
+    message?: SessionInboundMessage,
+  ): Promise<void> {
     const status = this.connectionState.status;
 
     // If connected, send immediately
@@ -2311,15 +2381,16 @@ export class DaemonClient {
           if (idx !== -1) {
             this.pendingSendQueue.splice(idx, 1);
           }
+          const error = new DaemonConnectionError(
+            "Timed out waiting for connection to send message",
+            "DAEMON_REQUEST_TIMEOUT",
+          );
           reject(
-            new DaemonConnectionError(
-              "Timed out waiting for connection to send message",
-              "DAEMON_REQUEST_TIMEOUT",
-            ),
+            message && isCreationRequest(message.type) ? new CreationNotSentError(error) : error,
           );
         }, DEFAULT_SEND_QUEUE_TIMEOUT_MS);
 
-        this.pendingSendQueue.push({ send, resolve, reject, timeoutHandle });
+        this.pendingSendQueue.push({ send, resolve, reject, timeoutHandle, message });
       });
     }
 
@@ -2396,17 +2467,38 @@ export class DaemonClient {
       { ...params.options, requestId: params.requestId, requestType: params.message.type },
     );
 
+    // Custom transmitters own handoff; only session sends can prove they stayed queued.
+    let dispatched = params.transmit !== undefined;
     // The response deadline still applies while the transport waits for drain.
     void promise.catch(() => undefined);
     try {
       const sent = params.transmit
         ? params.transmit()
-        : this.sendSessionMessageOrThrow(wire.message);
+        : this.sendSessionMessageOrThrow(wire.message, () => {
+            dispatched = true;
+          });
       const result = await Promise.race([promise, sent.then(() => promise)]);
       if (result.kind === "error") throw result.error;
       return result.value;
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
+      let err = error instanceof Error ? error : new Error(String(error));
+      // Close clears both waiters and the queue. Keep callback ownership proof locally
+      // so either rejection can release admission without reclassifying a dispatched frame.
+      if (
+        !dispatched &&
+        isCreationRequest(wire.message.type) &&
+        (err instanceof DaemonConnectionError || err instanceof DaemonClientClosedError)
+      ) {
+        err = new CreationNotSentError(err);
+        const index = this.pendingSendQueue.findIndex(
+          (pending) => pending.message === wire.message,
+        );
+        if (index !== -1) {
+          const [pending] = this.pendingSendQueue.splice(index, 1);
+          clearTimeout(pending!.timeoutHandle);
+          pending!.reject(err);
+        }
+      }
       cancel(err);
       throw err;
     } finally {
@@ -3265,13 +3357,19 @@ export class DaemonClient {
   }
 
   async cloneGithubProject(
-    input: { repo: string; targetDirectory: string; cloneProtocol?: ProjectGithubCloneProtocol },
+    input: {
+      repo: string;
+      targetDirectory: string;
+      cloneProtocol?: ProjectGithubCloneProtocol;
+      folderName?: string;
+    },
     requestId?: string,
   ): Promise<ProjectGithubClonePayload> {
     const message = {
       type: "project.github.clone.request",
       repo: input.repo,
       targetDirectory: input.targetDirectory,
+      ...(input.folderName !== undefined ? { folderName: input.folderName } : {}),
       ...(input.cloneProtocol ? { cloneProtocol: input.cloneProtocol } : {}),
     } as const;
     return this.sendNamespacedCorrelatedSessionRequest<"project.github.clone.response">({
@@ -3337,6 +3435,47 @@ export class DaemonClient {
       requestId,
       message: { type: "workspace.script.stop.request", workspaceId, scriptName },
       responseType: "workspace.script.stop.response",
+    });
+  }
+
+  async listWorkspaceLaunches(
+    workspaceId: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.list.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.list.request", workspaceId },
+      responseType: "workspace.launch.list.response",
+    });
+  }
+
+  async startWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.start.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.start.request", workspaceId, launchName },
+      responseType: "workspace.launch.start.response",
+    });
+  }
+
+  async stopWorkspaceLaunch(
+    workspaceId: string,
+    launchName: string,
+    requestId?: string,
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "workspace.launch.stop.response" }>["payload"]
+  > {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "workspace.launch.stop.request", workspaceId, launchName },
+      responseType: "workspace.launch.stop.response",
     });
   }
 
@@ -3488,6 +3627,51 @@ export class DaemonClient {
     legacyWorkspace: (input) => this.createLegacyWorkspace(input, input.requestId),
   });
 
+  /** Observe a saved operation without retrying its side effects. Legacy hosts cannot reconcile it. */
+  async waitForCreation(
+    kind: CreationSnapshot["kind"],
+    idempotencyKey: string,
+    onEvent: (snapshot: CreationSnapshot) => void,
+  ): Promise<CreationSnapshot | null> {
+    const signal = this.creationReceiptLifetime.signal;
+    if (signal.aborted) throw new DaemonClientClosedError("Daemon client closed");
+    if (this.lastServerInfoMessage?.features?.creationLifecycle !== true) return null;
+    const observation = this.observe("creation.subscribe.response", {
+      type: "creation.subscribe.request",
+      kind,
+      idempotencyKey,
+    });
+    let rejectClosed!: () => void;
+    const result = new Promise<CreationSnapshot | null>((resolve, reject) => {
+      rejectClosed = () => reject(new DaemonClientClosedError("Daemon client closed"));
+      signal.addEventListener("abort", rejectClosed, { once: true });
+      if (signal.aborted) {
+        rejectClosed();
+        return;
+      }
+      const accept = (snapshot: CreationSnapshot | null) => {
+        if (!snapshot) {
+          resolve(null);
+          return;
+        }
+        onEvent(snapshot);
+        if (snapshot.phase === "failed" || snapshot.phase === "completed") resolve(snapshot);
+      };
+      observation.subscribe({
+        snapshot: (payload) => accept(payload.snapshot),
+        update: (message) => {
+          if (message.type === "workspace.create.update" || message.type === "agent.create.update")
+            accept(message.payload);
+        },
+        error: reject,
+      });
+    });
+    return result.finally(() => {
+      signal.removeEventListener("abort", rejectClosed);
+      void observation.release().catch(() => undefined);
+    });
+  }
+
   // Entity metadata is gated once at the transport boundary.
   private requireEntityMetadata(): void {
     if (this.lastServerInfoMessage?.features?.entityMetadata !== true) {
@@ -3518,20 +3702,26 @@ export class DaemonClient {
   }
 
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
-    if (options.git !== undefined || options.worktreeName !== undefined) {
-      throw new Error(
-        "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) or create a workspace first and pass workspaceId.",
-      );
+    let prepared: CreateAgentRequestOptions;
+    try {
+      if (options.git !== undefined || options.worktreeName !== undefined) {
+        throw new Error(
+          "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) or create a workspace first and pass workspaceId.",
+        );
+      }
+      if (options.background !== undefined) this.requireBackgroundCreation(options);
+      if (options.metadata !== undefined) this.requireEntityMetadata();
+      const config = resolveAgentConfig(options);
+      prepared = {
+        ...options,
+        config: this.carriesLegacyOptions(config)
+          ? await this.routeLegacyCreateConfig(config)
+          : config,
+      };
+    } catch (error) {
+      throw new CreationNotSentError(error);
     }
-    if (options.background !== undefined) this.requireBackgroundCreation(options);
-    if (options.metadata !== undefined) this.requireEntityMetadata();
-    const config = resolveAgentConfig(options);
-    const result = await this.creations.createAgent({
-      ...options,
-      config: this.carriesLegacyOptions(config)
-        ? await this.routeLegacyCreateConfig(config)
-        : config,
-    });
+    const result = await this.creations.createAgent(prepared);
     if (result.error || !result.agent) throw new Error(result.error ?? "Agent creation failed");
     return result.agent;
   }
@@ -4142,6 +4332,24 @@ export class DaemonClient {
     return payload.items;
   }
 
+  async subscribeAgentChangeRequest(
+    input: { agentId: string; url: string },
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<boolean> {
+    // COMPAT(agentChangeRequestSubscribe): added after v0.17.4, remove after 2027-05-25.
+    if (this.lastServerInfoMessage?.features?.agentChangeRequestSubscribe !== true) {
+      throw new Error("Update the host to start a watch from the Pull request tab.");
+    }
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.change_request.subscribe.response">({
+        requestId: options.requestId,
+        timeout: options.timeout ?? 60_000,
+        message: { type: "agent.change_request.subscribe.request", ...input },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload.subscribed;
+  }
+
   async stopAgentBackgroundWork(
     agentId: string,
     item: AgentBackgroundWorkItem,
@@ -4296,13 +4504,19 @@ export class DaemonClient {
       options.sourceAgentId &&
       this.lastServerInfoMessage?.features?.agentMessageProvenance !== true
     ) {
-      throw new Error("Update the Paseo host to send messages with agent provenance.");
+      throw new AgentMessageSendError({
+        message: "Update the Paseo host to send messages with agent provenance.",
+        deliveryOutcome: "not_submitted",
+      });
     }
     if (
       options.sourceAgentServerId &&
       this.lastServerInfoMessage?.features?.agentMessageBatching !== true
     ) {
-      throw new Error("Update the Paseo host to send messages with a qualified agent address.");
+      throw new AgentMessageSendError({
+        message: "Update the Paseo host to send messages with a qualified agent address.",
+        deliveryOutcome: "not_submitted",
+      });
     }
     const activeTurnBehavior = this.activeTurnBehaviorForHost(options);
     const requestId = this.createRequestId();
@@ -4323,6 +4537,7 @@ export class DaemonClient {
     const payload = await this.sendRequest({
       requestId,
       message,
+      timeout: AGENT_MESSAGE_ACK_TIMEOUT_MS,
       options: { skipQueue: true },
       select: (msg) => {
         if (msg.type !== "send_agent_message_response") {
@@ -4335,7 +4550,10 @@ export class DaemonClient {
       },
     });
     if (!payload.accepted) {
-      throw new Error(payload.error ?? "sendAgentMessage rejected");
+      throw new AgentMessageSendError({
+        message: payload.error ?? "sendAgentMessage rejected",
+        deliveryOutcome: payload.deliveryOutcome ?? "unknown",
+      });
     }
     return {
       ...(payload.deliveryStatus ? { deliveryStatus: payload.deliveryStatus } : {}),
@@ -4365,12 +4583,55 @@ export class DaemonClient {
     return requested === "interrupt" ? "interrupt" : undefined;
   }
 
+  async getAgentMessageDeliveryStatus(
+    input: SendMessageOptions & { agentId: string; text: string; messageId: string },
+  ) {
+    if (this.getLastServerInfoMessage()?.features?.messageDeliveryStatus !== true)
+      throw new Error("Update the Paseo host to check message delivery status.");
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      ...input,
+      type: "agent.message.get_delivery_status.request",
+      requestId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.message.get_delivery_status.response" &&
+        msg.payload.requestId === requestId
+          ? msg.payload
+          : null,
+    });
+    if (payload.error || payload.status === null)
+      throw new Error(payload.error ?? "Could not check message delivery");
+    return { status: payload.status, failure: payload.failure };
+  }
+
   async sendMessage(
     agentId: string,
     text: string,
     options?: SendMessageOptions,
   ): Promise<AgentMessageReceipt> {
     return this.sendAgentMessage(agentId, text, options);
+  }
+
+  async reviewAgentPlan(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "agent.plan.review.request" }>,
+      "type" | "requestId"
+    >,
+  ): Promise<void> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.plan.review.response">(
+      {
+        message: { type: "agent.plan.review.request", ...input },
+        timeout: 60_000,
+      },
+    );
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
   }
 
   async rewindAgent(
@@ -5249,7 +5510,15 @@ export class DaemonClient {
 
   async checkoutPrCreate(
     cwd: string,
-    input: { title?: string; body?: string; baseRef?: string },
+    input: {
+      title?: string;
+      body?: string;
+      draft?: boolean;
+      baseRef?: string;
+      previewOnly?: boolean;
+      proposalId?: string;
+      issueLinks?: Array<{ number: number; relation: "reference" | "close" }>;
+    },
     requestId?: string,
   ): Promise<CheckoutPrCreatePayload> {
     return this.sendCorrelatedSessionRequest({
@@ -5259,6 +5528,10 @@ export class DaemonClient {
         cwd,
         title: input.title,
         body: input.body,
+        draft: input.draft,
+        previewOnly: input.previewOnly,
+        proposalId: input.proposalId,
+        issueLinks: input.issueLinks,
         baseRef: input.baseRef,
       },
       responseType: "checkout_pr_create_response",
@@ -5509,10 +5782,37 @@ export class DaemonClient {
     });
   }
 
+  private checkoutRefForHost(
+    input: Pick<
+      CreatePaseoWorktreeInput,
+      "action" | "refName" | "refMode" | "checkoutSource" | "githubPrNumber"
+    >,
+  ): Pick<CreatePaseoWorktreeInput, "refName" | "refMode"> {
+    const exact = { refName: input.refName, refMode: input.refMode };
+    if (
+      input.refMode !== "exact" ||
+      input.action !== "checkout" ||
+      input.checkoutSource ||
+      input.githubPrNumber !== undefined ||
+      this.lastServerInfoMessage?.features?.worktreeExactCheckoutRefs === true
+    )
+      return exact;
+    // COMPAT(worktreeExactCheckoutRefs): added after v0.17.3; remove after 2027-11-24.
+    // Existing local/origin checkouts keep their original wire format on older hosts.
+    for (const prefix of ["refs/heads/", "refs/remotes/origin/"]) {
+      if (input.refName?.startsWith(prefix))
+        return { refName: input.refName.slice(prefix.length), refMode: undefined };
+    }
+    if (input.refName?.startsWith("refs/remotes/"))
+      throw new Error("Update the host to check out a selected non-origin remote branch.");
+    return { refName: input.refName, refMode: undefined };
+  }
+
   async createPaseoWorktree(
     input: CreatePaseoWorktreeInput,
     requestId?: string,
   ): Promise<CreatePaseoWorktreePayload> {
+    const checkoutRef = this.checkoutRefForHost(input);
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
@@ -5523,7 +5823,8 @@ export class DaemonClient {
         ...(input.firstAgentContext !== undefined
           ? { firstAgentContext: input.firstAgentContext }
           : {}),
-        ...(input.refName !== undefined ? { refName: input.refName } : {}),
+        ...(checkoutRef.refName !== undefined ? { refName: checkoutRef.refName } : {}),
+        ...(checkoutRef.refMode !== undefined ? { refMode: checkoutRef.refMode } : {}),
         ...(input.action !== undefined ? { action: input.action } : {}),
         ...(input.checkoutSource !== undefined ? { checkoutSource: input.checkoutSource } : {}),
         ...(input.githubPrNumber !== undefined ? { githubPrNumber: input.githubPrNumber } : {}),
@@ -5540,21 +5841,32 @@ export class DaemonClient {
     input: CreateWorkspaceRequestOptions,
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
-    const resolvedRequestId = this.createRequestId(requestId ?? input.requestId);
-    if (input.background !== undefined || input.callerAgentId) this.requireBackgroundWorkspaces();
-    if (input.agent?.background !== undefined)
-      throw new Error("Configure background on the workspace, not its initial agent.");
-    if (input.metadata !== undefined || input.agent?.metadata !== undefined)
-      this.requireEntityMetadata();
-    let agentConfig = input.agent ? resolveAgentConfig(input.agent) : undefined;
-    if (agentConfig && this.carriesLegacyOptions(agentConfig)) {
-      agentConfig = await this.routeLegacyCreateConfig(agentConfig);
+    let resolvedRequestId: string;
+    let prepared: CreateWorkspaceRequestOptions;
+    try {
+      resolvedRequestId = this.createRequestId(requestId ?? input.requestId);
+      if (input.background !== undefined || input.callerAgentId) this.requireBackgroundWorkspaces();
+      if (input.agent?.background !== undefined)
+        throw new Error("Configure background on the workspace, not its initial agent.");
+      if (input.metadata !== undefined || input.agent?.metadata !== undefined)
+        this.requireEntityMetadata();
+      let agentConfig = input.agent ? resolveAgentConfig(input.agent) : undefined;
+      if (agentConfig && this.carriesLegacyOptions(agentConfig)) {
+        agentConfig = await this.routeLegacyCreateConfig(agentConfig);
+      }
+      prepared = {
+        ...input,
+        source:
+          input.source.kind === "worktree"
+            ? { ...input.source, ...this.checkoutRefForHost(input.source) }
+            : input.source,
+        requestId: resolvedRequestId,
+        ...(input.agent && agentConfig ? { agent: { ...input.agent, config: agentConfig } } : {}),
+      };
+    } catch (error) {
+      throw new CreationNotSentError(error);
     }
-    const result = await this.creations.createWorkspace({
-      ...input,
-      requestId: resolvedRequestId,
-      ...(input.agent && agentConfig ? { agent: { ...input.agent, config: agentConfig } } : {}),
-    });
+    const result = await this.creations.createWorkspace(prepared);
     return {
       ...result,
       workspace: result.workspace ?? null,

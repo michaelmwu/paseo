@@ -1,4 +1,8 @@
-import { createHostClient, parseHostTarget } from "@getpaseo/client/node";
+import {
+  createHostTransportFactory,
+  createHostClient,
+  parseHostTarget,
+} from "@getpaseo/client/node";
 import {
   waitForDaemonReady,
   resolvePaseoHome,
@@ -178,7 +182,7 @@ export function resolveDaemonCredential(
   return token ? { kind: "localCredential", token } : null;
 }
 
-async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonClient> {
+export async function connectToDaemonWithTransport(options: ConnectOptions) {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
   const host =
     options.target.kind === "endpoint"
@@ -191,7 +195,9 @@ async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonCli
         ).listen;
   const home = resolveClientPaseoHome(options.target);
   const credential = resolveDaemonCredential(host, home);
+  const transportFactory = createHostTransportFactory(host);
   const client = createHostClient(host, {
+    transportFactory,
     clientId: await getOrCreateCliClientId(home),
     clientType: "cli",
     appVersion: resolveCliVersion(),
@@ -204,7 +210,7 @@ async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonCli
   });
   try {
     await client.connect();
-    return client;
+    return { client, transportFactory };
   } catch (error) {
     await client.close();
     throw error;
@@ -213,7 +219,7 @@ async function connectSelectedDaemon(options: ConnectOptions): Promise<DaemonCli
 
 export async function connectToDaemon(options: ConnectOptions): Promise<DaemonClient> {
   try {
-    return await connectSelectedDaemon(options);
+    return (await connectToDaemonWithTransport(options)).client;
   } catch (error) {
     throw buildDaemonConnectionCommandError({ ...options, error });
   }

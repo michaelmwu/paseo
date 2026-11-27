@@ -1,3 +1,4 @@
+import { messageFingerprint } from "../../message-receipts/fingerprint.js";
 import {
   AgentTurnBusyError,
   AgentTurnChangedError,
@@ -5,7 +6,11 @@ import {
   type PromptDispatchResult,
 } from "../agent-prompt.js";
 import { randomUUID } from "node:crypto";
-import type { AgentPromptInput, AgentPromptContentBlock } from "../agent-sdk-types.js";
+import type {
+  AgentPromptInput,
+  AgentPromptContentBlock,
+  SubmittedMessageFingerprint,
+} from "../agent-sdk-types.js";
 import { envelopeMessage, prepareAgentMessage, type AgentPromptSource } from "./envelope.js";
 import { describeAgentMessage, type AgentMessageBehavior } from "./guidance.js";
 
@@ -72,6 +77,7 @@ interface Inbox {
 interface DispatchRequest {
   recipientId: string;
   messageIds: readonly string[];
+  submittedMessages: readonly SubmittedMessageFingerprint[];
   prompt: AgentPromptInput;
   activeTurnBehavior: "steer" | "interrupt";
   idleOnly: boolean;
@@ -97,6 +103,7 @@ interface DirectPrompt {
 interface JoinedPrompt {
   prompt: AgentPromptInput;
   messageId?: string;
+  submittedMessages: readonly SubmittedMessageFingerprint[];
   sessionMode?: string;
   unarchive: boolean;
 }
@@ -236,6 +243,10 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
         return true;
       },
       messageIds: messages.map((message) => message.receipt.messageId),
+      submittedMessages: messages.map((message) => ({
+        clientMessageId: message.receipt.messageId,
+        promptFingerprint: messageFingerprint(message.prompt),
+      })),
       prompt: combine(messages.map(envelope)),
       // A batch that waited for the turn to end is dispatched idle-only, so it never steers.
       activeTurnBehavior: messages.some((message) => message.urgency === "interrupt")
@@ -485,11 +496,23 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
   }
 
   function join(queued: Admitted[], direct: DirectPrompt): JoinedPrompt {
+    const submittedMessages = queued.map((message) => ({
+      clientMessageId: message.receipt.messageId,
+      promptFingerprint: messageFingerprint(message.prompt),
+    }));
     if (!queued.length) {
       const own = prepareAgentMessage(direct.prompt, direct.source, direct.messageId);
       return {
         prompt: own.prompt,
         messageId: own.messageId,
+        submittedMessages: own.messageId
+          ? [
+              {
+                clientMessageId: own.messageId,
+                promptFingerprint: messageFingerprint(direct.prompt),
+              },
+            ]
+          : [],
         sessionMode: direct.sessionMode,
         unarchive: direct.unarchive !== false,
       };
@@ -497,9 +520,16 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
     // Sharing a prompt with agent messages, a person's text needs its own envelope to stay
     // a separate row with its own identity.
     const own = envelopeMessage(direct.prompt, direct.source ?? null, direct.messageId);
+    if (own.messageId) {
+      submittedMessages.push({
+        clientMessageId: own.messageId,
+        promptFingerprint: messageFingerprint(direct.prompt),
+      });
+    }
     return {
       prompt: combine([...queued.map(envelope), own.prompt]),
       messageId: own.messageId,
+      submittedMessages,
       sessionMode:
         direct.sessionMode ?? queued.findLast((message) => message.sessionMode)?.sessionMode,
       unarchive:

@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router/react-navigation";
 import { StyleSheet } from "react-native-unistyles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Clipboard from "expo-clipboard";
 import { MoreVertical, Pencil, Plus } from "lucide-react-native";
 import { ProjectIconView } from "@/components/project-icon-view";
+import { ProjectLinksEntry } from "@/components/project-links-entry";
 import type {
   PaseoConfigRaw,
   PaseoConfigRevision,
@@ -31,23 +33,36 @@ import { SettingsGroup } from "@/components/settings/headings/settings-group";
 import { SettingsSection } from "@/components/settings/headings/settings-section";
 import type { PageTitleParent } from "@/components/page-layout";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { SettingsDetailHeader } from "@/components/settings";
+import {
+  SettingsCard,
+  SettingsDetailHeader,
+  SettingsDetailRow,
+  SettingsRow,
+} from "@/components/settings";
 import { settingsStyles } from "@/styles/settings";
-import { useProjects } from "@/hooks/use-projects";
+import { useProjects, type UseProjectsResult } from "@/hooks/use-projects";
+import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
 import type { ProjectEditFormSnapshot } from "@/projects/edit-form";
 import { useProjectIcons } from "@/projects/icons";
 import { createProjectIconTarget } from "@/projects/icon-target";
 import { useHostRuntimeClient, useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { useToast } from "@/contexts/toast-context";
+import { forgeFromRemoteUrl } from "@/git/forge";
+import { buildForgeRepositoryUrl } from "@/git/forge-url";
+import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { openExternalUrl } from "@/utils/open-external-url";
+import { openDesktopTarget, useDesktopOpenTargets } from "@/workspace/desktop-open-targets";
 import {
   applyDraftToConfig,
   configToDraft,
+  getDuplicateLaunchNames,
   METADATA_PROMPT_KEYS,
   type LifecycleOriginalKind,
   type MetadataPromptKey,
   type ProjectConfigDraft,
+  type ProjectLaunchDraft,
   type ProjectScriptDraft,
 } from "@/utils/project-config-form";
 import {
@@ -104,7 +119,7 @@ export default function ProjectSettingsScreen({
   projectId,
   onBackToProjects,
 }: ProjectSettingsScreenProps) {
-  const { projects } = useProjects();
+  const { projects, projectLinkPlacements, projectLinkSuggestions } = useProjects();
   const project = useMemo(
     () => getProjectSummaryForHostProject(projects, serverId, projectId),
     [projectId, projects, serverId],
@@ -133,6 +148,8 @@ export default function ProjectSettingsScreen({
       client={client}
       isHostGone={isHostGone}
       onBackToProjects={onBackToProjects}
+      projectLinkPlacements={projectLinkPlacements}
+      projectLinkSuggestions={projectLinkSuggestions}
     />
   );
 }
@@ -182,7 +199,10 @@ function useProjectsParent(onPress: () => void): PageTitleParent {
   );
 }
 
-interface ProjectSettingsBodyProps {
+interface ProjectSettingsBodyProps extends Pick<
+  UseProjectsResult,
+  "projectLinkPlacements" | "projectLinkSuggestions"
+> {
   project: ProjectSummary;
   selectedHost: ProjectHostEntry;
   client: DaemonClient;
@@ -196,6 +216,8 @@ function ProjectSettingsBody({
   client,
   isHostGone,
   onBackToProjects,
+  projectLinkPlacements,
+  projectLinkSuggestions,
 }: ProjectSettingsBodyProps) {
   const { t } = useTranslation();
   const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
@@ -224,6 +246,10 @@ function ProjectSettingsBody({
 
   const data = readQuery.data;
   const supportsCustomIcon = useHostFeature(selectedHost.serverId, "projectCustomIcon");
+  const supportsWorkspaceLaunchManagement = useHostFeature(
+    selectedHost.serverId,
+    "workspaceLaunchManagement",
+  );
   const customIconRevision = selectedHost.customIconRevision ?? null;
   const projectIconTargets = useMemo(() => {
     const target = createProjectIconTarget({
@@ -284,6 +310,30 @@ function ProjectSettingsBody({
     [openEditSheet, t],
   );
 
+  const renderProjectSettings = (entry: ReactNode) =>
+    renderContent({
+      readQuery,
+      loadedConfig,
+      loadedRevision,
+      hasUncommittedWorktreeSetupChanges,
+      readError,
+      selectedHost,
+      queryKey,
+      client,
+      supportsWorkspaceLaunchManagement,
+      onReload: handleReload,
+      isHostGone,
+      onBackToProjects,
+      projectLinks: (
+        <SettingsGroup
+          title={t("settings.projectLinks.entry.sectionTitle")}
+          testID="project-links-group"
+        >
+          {entry}
+        </SettingsGroup>
+      ),
+    });
+
   return (
     <View role="main">
       <SettingsDetailHeader
@@ -292,6 +342,8 @@ function ProjectSettingsBody({
         title={selectedHost.projectName}
         trailing={editButton}
       />
+
+      <ProjectDetailsGroup selectedHost={selectedHost} />
 
       <ProjectEditSheet
         // A new instance per open seeds the form from the project as it stands now.
@@ -306,20 +358,105 @@ function ProjectSettingsBody({
         snapshot={editSnapshot}
       />
 
-      {renderContent({
-        readQuery,
-        loadedConfig,
-        loadedRevision,
-        hasUncommittedWorktreeSetupChanges,
-        readError,
-        selectedHost,
-        queryKey,
-        client,
-        onReload: handleReload,
-        isHostGone,
-        onBackToProjects,
-      })}
+      {/* The entry can move as config loads without remounting the dialog or its pending save. */}
+      <ProjectLinksEntry
+        key={JSON.stringify([selectedHost.serverId, selectedHost.projectId])}
+        serverId={selectedHost.serverId}
+        projectId={selectedHost.projectId}
+        placements={projectLinkPlacements}
+        suggestions={projectLinkSuggestions}
+      >
+        {renderProjectSettings}
+      </ProjectLinksEntry>
     </View>
+  );
+}
+
+function ProjectDetailsGroup({ selectedHost }: { selectedHost: ProjectHostEntry }) {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const { serverId, serverName, repoRoot } = selectedHost;
+  const isLocalExecution = useIsLocalDaemon(serverId);
+  const { targets } = useDesktopOpenTargets({ isLocalExecution });
+  const fileManager = targets.find((target) => target.kind === "file-manager");
+  const { status, refetch: refetchCheckoutStatus } = useCheckoutStatusQuery({
+    serverId,
+    cwd: repoRoot,
+  });
+  // Project roots without an active workspace do not receive checkout status pushes.
+  useFocusEffect(
+    useCallback(() => {
+      void refetchCheckoutStatus({ cancelRefetch: false });
+    }, [refetchCheckoutStatus]),
+  );
+  const repositoryUrl = status?.isGit
+    ? buildForgeRepositoryUrl(forgeFromRemoteUrl(status.remoteUrl), status)
+    : null;
+  const { mutate: openFileManager, isPending: isOpeningSourceDirectory } = useMutation({
+    mutationFn: (editorId: string) => openDesktopTarget({ editorId, workspacePath: repoRoot }),
+    onError: () => toast.error(t("sidebar.project.actions.openFolderFailed")),
+  });
+
+  const copySourceDirectory = useCallback(async () => {
+    try {
+      if (await Clipboard.setStringAsync(repoRoot)) {
+        toast.copied(t("common.states.copied"));
+        return;
+      }
+    } catch {
+      // Some platforms throw on clipboard failure, others return false.
+    }
+    toast.error(t("common.errors.unableToCopy"));
+  }, [repoRoot, t, toast]);
+
+  const openSourceDirectory = useCallback(() => {
+    if (fileManager) {
+      openFileManager(fileManager.id);
+    }
+  }, [fileManager, openFileManager]);
+
+  const openRepository = useCallback(() => {
+    if (repositoryUrl) {
+      void openExternalUrl(repositoryUrl).catch(() =>
+        toast.error(t("settings.project.details.openRepositoryFailed")),
+      );
+    }
+  }, [repositoryUrl, t, toast]);
+
+  return (
+    <SettingsGroup title={t("settings.project.details.title")} testID="project-details-section">
+      <SettingsCard>
+        <SettingsRow label={t("settings.groups.host")} hint={serverName} />
+        <SettingsRow label={t("settings.project.details.sourceDirectory")} hint={repoRoot}>
+          <View style={styles.sourceDirectoryActions}>
+            <Button
+              variant="outline"
+              accessibilityLabel={t("settings.project.details.copySourceDirectory")}
+              onPress={copySourceDirectory}
+            >
+              {t("common.actions.copy")}
+            </Button>
+            {fileManager ? (
+              <Button
+                variant="outline"
+                loading={isOpeningSourceDirectory}
+                onPress={openSourceDirectory}
+              >
+                {t("workspace.fileActions.openIn", { target: fileManager.label })}
+              </Button>
+            ) : null}
+          </View>
+        </SettingsRow>
+        {repositoryUrl ? (
+          <SettingsDetailRow
+            label={t("settings.project.details.repository")}
+            hint={repositoryUrl}
+            external
+            onPress={openRepository}
+          />
+        ) : null}
+      </SettingsCard>
+    </SettingsGroup>
   );
 }
 
@@ -332,9 +469,11 @@ interface RenderContentInput {
   selectedHost: ProjectHostEntry;
   queryKey: readonly [string, string, string];
   client: DaemonClient;
+  supportsWorkspaceLaunchManagement: boolean;
   onReload: () => void;
   isHostGone: boolean;
   onBackToProjects: () => void;
+  projectLinks: ReactNode;
 }
 
 function renderContent({
@@ -346,35 +485,48 @@ function renderContent({
   selectedHost,
   queryKey,
   client,
+  supportsWorkspaceLaunchManagement,
   onReload,
   isHostGone,
   onBackToProjects,
+  projectLinks,
 }: RenderContentInput) {
+  const withProjectLinks = (status: ReactNode) => (
+    <>
+      {status}
+      {projectLinks}
+    </>
+  );
+
   if (readQuery.isLoading) {
-    return (
+    return withProjectLinks(
       <View style={styles.centered}>
         <LoadingSpinner color={ResolveSpinnerColor()} />
-      </View>
+      </View>,
     );
   }
 
   if (readQuery.isError) {
-    return <ReadFailureCallout kind="transport" error={readQuery.error} onReload={onReload} />;
+    return withProjectLinks(
+      <ReadFailureCallout kind="transport" error={readQuery.error} onReload={onReload} />,
+    );
   }
 
   if (readError) {
-    return <ReadFailureCallout kind={readError.code} error={null} onReload={onReload} />;
+    return withProjectLinks(
+      <ReadFailureCallout kind={readError.code} error={null} onReload={onReload} />,
+    );
   }
 
   if (isHostGone) {
-    return <NoEditableTarget onBackToProjects={onBackToProjects} />;
+    return withProjectLinks(<NoEditableTarget onBackToProjects={onBackToProjects} />);
   }
 
   if (!loadedConfig) {
-    return (
+    return withProjectLinks(
       <View style={styles.centered}>
         <LoadingSpinner color={ResolveSpinnerColor()} />
-      </View>
+      </View>,
     );
   }
 
@@ -388,8 +540,11 @@ function renderContent({
       repoRoot={selectedHost.repoRoot}
       queryKey={queryKey}
       client={client}
+      supportsWorkspaceLaunchManagement={supportsWorkspaceLaunchManagement}
       onReload={onReload}
-    />
+    >
+      {projectLinks}
+    </ProjectConfigForm>
   );
 }
 
@@ -463,22 +618,26 @@ function errorToDetail(error: unknown): string | null {
 }
 
 interface ProjectConfigFormProps {
+  children: ReactNode;
   baseConfig: PaseoConfigRaw;
   revision: PaseoConfigRevision | null;
   hasUncommittedWorktreeSetupChanges: boolean;
   repoRoot: string;
   queryKey: readonly [string, string, string];
   client: DaemonClient;
+  supportsWorkspaceLaunchManagement: boolean;
   onReload: () => void;
 }
 
 function ProjectConfigForm({
+  children,
   baseConfig,
   revision,
   hasUncommittedWorktreeSetupChanges,
   repoRoot,
   queryKey,
   client,
+  supportsWorkspaceLaunchManagement,
   onReload,
 }: ProjectConfigFormProps) {
   const { t } = useTranslation();
@@ -488,6 +647,8 @@ function ProjectConfigForm({
   const [draft, setDraft] = useState<ProjectConfigDraft>(() => configToDraft(baseConfig));
   const [writeError, setWriteError] = useState<ProjectConfigRpcError | null>(null);
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editingLaunchId, setEditingLaunchId] = useState<string | null>(null);
+  const [launchBeforeEditing, setLaunchBeforeEditing] = useState<ProjectLaunchDraft | null>(null);
 
   const saveMutation = useMutation({
     mutationFn: async (input: {
@@ -525,9 +686,13 @@ function ProjectConfigForm({
 
   const handleSave = useCallback(() => {
     if (writeError?.code === "stale_project_config") return;
-    const config = applyDraftToConfig({ draft, base: baseConfig });
+    const config = applyDraftToConfig({
+      draft,
+      base: baseConfig,
+      editLaunches: supportsWorkspaceLaunchManagement,
+    });
     saveMutation.mutate({ config, expectedRevision: revision });
-  }, [draft, baseConfig, revision, writeError, saveMutation]);
+  }, [draft, baseConfig, revision, writeError, saveMutation, supportsWorkspaceLaunchManagement]);
 
   const handleReload = useCallback(() => {
     setWriteError(null);
@@ -632,11 +797,101 @@ function ProjectConfigForm({
     setEditingScriptId(null);
   }, []);
 
+  const handleRemoveLaunch = useCallback(
+    async (launch: ProjectLaunchDraft) => {
+      const ok = await confirmDialog({
+        title: t("settings.project.launches.removeTitle"),
+        message: t("settings.project.launches.removeMessage", {
+          name: launch.name || t("settings.project.launches.removeFallbackName"),
+        }),
+        confirmLabel: t("settings.project.launches.actions.remove"),
+        cancelLabel: t("settings.project.actions.cancel"),
+        destructive: true,
+      });
+      if (!ok) return;
+      updateDraft((d) => ({
+        ...d,
+        launches: d.launches.filter((entry) => entry.id !== launch.id),
+      }));
+    },
+    [t, updateDraft],
+  );
+
+  const handleEditLaunch = useCallback((launch: ProjectLaunchDraft) => {
+    setLaunchBeforeEditing({ ...launch });
+    setEditingLaunchId(launch.id);
+  }, []);
+
+  const handleAddLaunch = useCallback(() => {
+    const id = `launch-draft-new-${Date.now()}`;
+    setLaunchBeforeEditing(null);
+    updateDraft((d) => ({
+      ...d,
+      launches: [
+        ...d.launches,
+        {
+          id,
+          name: "",
+          commandText: "",
+          rawEntry: {},
+        },
+      ],
+    }));
+    setEditingLaunchId(id);
+  }, [updateDraft]);
+
+  const handleEditingLaunchDraftChange = useCallback(
+    (next: ProjectLaunchDraft) => {
+      updateDraft((d) => ({
+        ...d,
+        launches: d.launches.map((entry) => (entry.id === next.id ? next : entry)),
+      }));
+    },
+    [updateDraft],
+  );
+
+  const handleCancelEditingLaunch = useCallback(() => {
+    if (!editingLaunchId) {
+      return;
+    }
+    updateDraft((d) => {
+      if (launchBeforeEditing?.id === editingLaunchId) {
+        return {
+          ...d,
+          launches: d.launches.map((row) =>
+            row.id === editingLaunchId ? launchBeforeEditing : row,
+          ),
+        };
+      }
+      return { ...d, launches: d.launches.filter((row) => row.id !== editingLaunchId) };
+    });
+    setEditingLaunchId(null);
+    setLaunchBeforeEditing(null);
+  }, [editingLaunchId, launchBeforeEditing, updateDraft]);
+
+  const handleSaveEditingLaunch = useCallback(() => {
+    setEditingLaunchId(null);
+    setLaunchBeforeEditing(null);
+  }, []);
+
   const editingScript = draft.scripts.find((entry) => entry.id === editingScriptId);
+  const editingLaunch = draft.launches.find((entry) => entry.id === editingLaunchId);
+
+  const duplicateLaunchNames = useMemo(
+    () => getDuplicateLaunchNames(draft.launches),
+    [draft.launches],
+  );
 
   const hasInvalidScripts = useMemo(
     () => draft.scripts.some((script) => validateScript(script, t).hasErrors),
     [draft.scripts, t],
+  );
+
+  const hasInvalidLaunches = useMemo(
+    () =>
+      supportsWorkspaceLaunchManagement &&
+      draft.launches.some((launch) => validateLaunch(launch, t, duplicateLaunchNames).hasErrors),
+    [draft.launches, duplicateLaunchNames, t, supportsWorkspaceLaunchManagement],
   );
 
   const scriptsTrailing = useMemo(
@@ -653,6 +908,22 @@ function ProjectConfigForm({
       </Pressable>
     ),
     [handleAddScript, t],
+  );
+
+  const launchesTrailing = useMemo(
+    () => (
+      <Pressable
+        onPress={handleAddLaunch}
+        hitSlop={8}
+        style={settingsStyles.sectionHeaderLink}
+        accessibilityRole="button"
+        accessibilityLabel={t("settings.project.launches.actions.add")}
+        testID="launches-add-button"
+      >
+        <Plus size={ICON_SIZE} color={styles.iconColor.color} />
+      </Pressable>
+    ),
+    [handleAddLaunch, t],
   );
 
   const setupDocsLink = useMemo(
@@ -676,7 +947,7 @@ function ProjectConfigForm({
 
   const isStale = writeError?.code === "stale_project_config";
   const isWriteFailed = writeError?.code === "write_failed";
-  const saveDisabled = saveMutation.isPending || isStale || hasInvalidScripts;
+  const saveDisabled = saveMutation.isPending || isStale || hasInvalidScripts || hasInvalidLaunches;
 
   return (
     <View>
@@ -747,6 +1018,34 @@ function ProjectConfigForm({
           )}
         </View>
       </SettingsGroup>
+
+      {supportsWorkspaceLaunchManagement ? (
+        <SettingsGroup
+          title={t("settings.project.launches.title")}
+          info={t("settings.project.launches.info")}
+          trailing={launchesTrailing}
+          testID="launches-group"
+        >
+          <View style={settingsStyles.card} testID="launches-list">
+            {draft.launches.length === 0 ? (
+              <View style={settingsStyles.row}>
+                <Text style={styles.emptyScripts}>{t("settings.project.launches.empty")}</Text>
+              </View>
+            ) : (
+              draft.launches.map((launch, index) => (
+                <LaunchRow
+                  key={launch.id}
+                  launch={launch}
+                  isFirst={index === 0}
+                  onEdit={handleEditLaunch}
+                  onRemove={handleRemoveLaunch}
+                />
+              ))
+            )}
+          </View>
+        </SettingsGroup>
+      ) : null}
+      {children}
 
       <SettingsGroup
         title={t("settings.project.metadata.title")}
@@ -820,6 +1119,15 @@ function ProjectConfigForm({
           onChange={handleEditingDraftChange}
           onCancel={handleCancelEditing}
           onSave={handleSaveEditing}
+        />
+      ) : null}
+      {editingLaunch ? (
+        <LaunchEditModal
+          launch={editingLaunch}
+          duplicateLaunchNames={duplicateLaunchNames}
+          onChange={handleEditingLaunchDraftChange}
+          onCancel={handleCancelEditingLaunch}
+          onSave={handleSaveEditingLaunch}
         />
       ) : null}
     </View>
@@ -927,6 +1235,54 @@ function ScriptRow({ script, isFirst, onEdit, onRemove }: ScriptRowProps) {
   );
 }
 
+interface LaunchRowProps {
+  launch: ProjectLaunchDraft;
+  isFirst: boolean;
+  onEdit: (launch: ProjectLaunchDraft) => void;
+  onRemove: (launch: ProjectLaunchDraft) => void;
+}
+
+function LaunchRow({ launch, isFirst, onEdit, onRemove }: LaunchRowProps) {
+  const { t } = useTranslation();
+  const handleEdit = useCallback(() => onEdit(launch), [launch, onEdit]);
+  const handleRemove = useCallback(() => onRemove(launch), [launch, onRemove]);
+  const rowStyle = isFirst ? styles.scriptRow : styles.scriptRowWithBorder;
+
+  return (
+    <View style={rowStyle} testID={`launch-row-${launch.id}`}>
+      <Pressable style={styles.scriptRowMain} onPress={handleEdit}>
+        <Text style={settingsStyles.rowTitle} numberOfLines={1}>
+          {launch.name || t("settings.project.launches.untitled")}
+        </Text>
+        <Text style={settingsStyles.rowHint} numberOfLines={1}>
+          {launch.commandText.split("\n")[0] ?? ""}
+        </Text>
+      </Pressable>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          accessibilityLabel={t("settings.project.launches.menuAccessibility")}
+          testID={`launch-row-menu-${launch.id}`}
+          style={styles.scriptKebab}
+        >
+          <MoreVertical size={ICON_SIZE} color={styles.chevronColor.color} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" minWidth={160}>
+          <DropdownMenuItem testID={`launch-action-${launch.id}-edit`} onSelect={handleEdit}>
+            {t("settings.project.launches.actions.edit")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            testID={`launch-action-${launch.id}-remove`}
+            destructive
+            onSelect={handleRemove}
+          >
+            {t("settings.project.launches.actions.remove")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </View>
+  );
+}
+
 function scriptHint(script: ProjectScriptDraft, t: TFunction): string {
   const pieces: string[] = [];
   if (script.type) pieces.push(script.type);
@@ -946,6 +1302,27 @@ function validateScript(script: ProjectScriptDraft, t: TFunction): ScriptValidat
     script.name.trim().length === 0 ? t("settings.project.scripts.nameRequired") : null;
   const commandError =
     script.commandText.trim().length === 0 ? t("settings.project.scripts.commandRequired") : null;
+  return {
+    hasErrors: Boolean(nameError || commandError),
+    nameError,
+    commandError,
+  };
+}
+
+function validateLaunch(
+  launch: ProjectLaunchDraft,
+  t: TFunction,
+  duplicateLaunchNames: ReadonlySet<string>,
+): ScriptValidation {
+  const trimmedName = launch.name.trim();
+  let nameError: string | null = null;
+  if (trimmedName.length === 0) {
+    nameError = t("settings.project.launches.nameRequired");
+  } else if (duplicateLaunchNames.has(trimmedName)) {
+    nameError = t("settings.project.launches.nameDuplicate");
+  }
+  const commandError =
+    launch.commandText.trim().length === 0 ? t("settings.project.launches.commandRequired") : null;
   return {
     hasErrors: Boolean(nameError || commandError),
     nameError,
@@ -1091,7 +1468,122 @@ function ScriptEditModal({ script, onChange, onCancel, onSave }: ScriptEditModal
   );
 }
 
+interface LaunchEditModalProps {
+  launch: ProjectLaunchDraft;
+  duplicateLaunchNames: ReadonlySet<string>;
+  onChange: (next: ProjectLaunchDraft) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}
+
+function LaunchEditModal({
+  launch,
+  duplicateLaunchNames,
+  onChange,
+  onCancel,
+  onSave,
+}: LaunchEditModalProps) {
+  const { t } = useTranslation();
+  const [touched, setTouched] = useState<ScriptFieldsTouched>(NONE_TOUCHED);
+
+  useEffect(() => {
+    setTouched(NONE_TOUCHED);
+  }, [launch.id]);
+
+  const markTouched = useCallback((field: keyof ScriptFieldsTouched) => {
+    setTouched((prev) => (prev[field] ? prev : { ...prev, [field]: true }));
+  }, []);
+  const handleNameChange = useCallback(
+    (text: string) => onChange({ ...launch, name: text }),
+    [launch, onChange],
+  );
+  const handleCommandChange = useCallback(
+    (text: string) => onChange({ ...launch, commandText: text }),
+    [launch, onChange],
+  );
+  const handleNameBlur = useCallback(() => markTouched("name"), [markTouched]);
+  const handleCommandBlur = useCallback(() => markTouched("command"), [markTouched]);
+  const validation = validateLaunch(launch, t, duplicateLaunchNames);
+  const handleSavePress = useCallback(() => {
+    if (validation.hasErrors) {
+      setTouched(ALL_TOUCHED);
+      return;
+    }
+    onSave();
+  }, [onSave, validation.hasErrors]);
+  const sheetHeader = useMemo<SheetHeader>(
+    () => ({
+      title: launch.name
+        ? t("settings.project.launches.editLaunch", { name: launch.name })
+        : t("settings.project.launches.newLaunch"),
+    }),
+    [launch.name, t],
+  );
+
+  return (
+    <AdaptiveModalSheet
+      visible
+      header={sheetHeader}
+      onClose={onCancel}
+      testID="launch-edit-modal"
+      desktopMaxWidth={560}
+    >
+      <View style={styles.modalSection}>
+        <Text style={styles.modalLabel}>{t("settings.project.launches.name")}</Text>
+        <TextInput
+          testID="launch-edit-name"
+          accessibilityLabel={t("settings.project.launches.nameAccessibility")}
+          initialValue={launch.name}
+          onChangeText={handleNameChange}
+          onBlur={handleNameBlur}
+          placeholder="dev"
+          placeholderTextColor={styles.placeholderColor.color}
+          style={styles.modalInput}
+        />
+        {touched.name && validation.nameError ? (
+          <Text testID="launch-edit-name-error" style={styles.fieldError}>
+            {validation.nameError}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.modalSection}>
+        <Text style={styles.modalLabel}>{t("settings.project.launches.command")}</Text>
+        <TextInput
+          testID="launch-edit-command"
+          accessibilityLabel={t("settings.project.launches.commandAccessibility")}
+          multiline
+          initialValue={launch.commandText}
+          onChangeText={handleCommandChange}
+          onBlur={handleCommandBlur}
+          placeholder="./bin/dev"
+          placeholderTextColor={styles.placeholderColor.color}
+          style={styles.modalMultilineInput}
+        />
+        {touched.command && validation.commandError ? (
+          <Text testID="launch-edit-command-error" style={styles.fieldError}>
+            {validation.commandError}
+          </Text>
+        ) : null}
+      </View>
+      <Text style={styles.modalHint}>{t("settings.project.launches.commandHint")}</Text>
+      <View style={styles.modalFooter}>
+        <Button onPress={onCancel} variant="ghost" size="md" testID="launch-edit-cancel">
+          {t("settings.project.actions.cancel")}
+        </Button>
+        <Button onPress={handleSavePress} variant="default" size="md" testID="launch-edit-save">
+          {t("settings.project.actions.save")}
+        </Button>
+      </View>
+    </AdaptiveModalSheet>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
+  sourceDirectoryActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[2],
+  },
   noTargetContainer: {
     padding: theme.spacing[4],
     alignItems: "flex-start",
