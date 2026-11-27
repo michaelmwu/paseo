@@ -18,6 +18,7 @@ import {
   type AgentPromptContentBlock,
   type AgentPromptInput,
   type AgentRunOptions,
+  type PlanReviewTurn,
   type AgentRunResult,
   type AgentRuntimeInfo,
   type AgentSession,
@@ -4095,9 +4096,11 @@ export class CodexAppServerAgentSession implements AgentSession {
       throw new Error("A foreground turn is already active");
     }
 
-    this.dismissPendingPlanApprovals("Dismissed by a new prompt");
+    const review = options?.planReview;
+    if (!review) this.dismissPendingPlanApprovals("Dismissed by a new prompt");
 
     try {
+      review?.signal.throwIfAborted();
       await this.connect();
       if (!this.client) {
         throw new Error("Codex client not initialized");
@@ -4139,6 +4142,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         hasDeveloperInstructions: turnStart.hasDeveloperInstructions,
         hasCodexConfig: turnStart.hasCodexConfig,
       });
+      if (review) this.preparePlanReviewDispatch(review, turnStart.params);
       await this.client.request("turn/start", turnStart.params, TURN_START_TIMEOUT_MS);
       return { turnId };
     } catch (error) {
@@ -4148,6 +4152,24 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.activeClientMessageId = null;
       throw error;
     }
+  }
+
+  private preparePlanReviewDispatch(review: PlanReviewTurn, params: Record<string, unknown>): void {
+    review.signal.throwIfAborted();
+    const mode = this.resolvedCollaborationMode;
+    const requiresPlan = review.mode === "plan";
+    if (this.planModeEnabled !== requiresPlan || (mode?.mode === "plan") !== requiresPlan) {
+      throw new Error("Codex changed modes before the plan review could start.");
+    }
+    if (requiresPlan && this.pendingPermissions.get(review.permissionRequestId)?.kind !== "plan") {
+      throw new Error("This plan is no longer awaiting review.");
+    }
+    if (mode) {
+      params.collaborationMode = { mode: mode.mode, settings: mode.settings };
+    } else {
+      delete params.collaborationMode;
+    }
+    this.dismissPendingPlanApprovals("Superseded by plan feedback");
   }
 
   async steerActiveTurn(

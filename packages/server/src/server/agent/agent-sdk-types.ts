@@ -207,7 +207,15 @@ export type AgentPromptContentBlock =
 
 export type AgentPromptInput = string | AgentPromptContentBlock[];
 
+/** Internal admission constraints for a turn started from a plan review. */
+export interface PlanReviewTurn {
+  mode: "plan" | "implement";
+  permissionRequestId: string;
+  signal: AbortSignal;
+}
+
 export interface AgentRunOptions {
+  planReview?: PlanReviewTurn;
   outputSchema?: unknown;
   resumeFrom?: AgentPersistenceHandle;
   maxThinkingTokens?: number;
@@ -222,6 +230,8 @@ export interface AgentSteerOptions extends AgentRunOptions {
 export type SteerResult = { status: "accepted" } | { status: "unavailable" };
 
 export interface SteerActiveTurnOptions extends AgentSteerOptions {
+  /** Supersede only this proposal while delivering a review steer. */
+  planPermissionRequestId?: string;
   expectedTurnId: string;
 }
 

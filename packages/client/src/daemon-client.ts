@@ -3114,9 +3114,16 @@ export class DaemonClient {
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.plan.review.response">(
       {
         message: { type: "agent.plan.review.request", ...input },
-        timeout: 60_000,
+        timeout: 180_000,
       },
-    );
+    ).catch((error: unknown) => {
+      if (isWaiterTimeoutError(error)) {
+        throw new Error(
+          "Could not confirm the plan review. Check the conversation before trying again.",
+        );
+      }
+      throw error;
+    });
     if (payload.error) {
       throw new Error(payload.error);
     }

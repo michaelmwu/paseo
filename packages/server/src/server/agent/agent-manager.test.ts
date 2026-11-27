@@ -1,3 +1,4 @@
+import { wrapSessionProvider } from "./provider-registry.js";
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -8992,9 +8993,18 @@ test("permission request notifies once without forcing unread attention state", 
   expect(attentionReasons).toContain("permission");
 });
 
-test.each(["claude", "codex"] as const)(
-  "plan review for %s consumes the proposal once and delivers notes before implementation",
-  async (provider) => {
+test.each([
+  ["claude", "claude", "success"],
+  ["codex", "codex", "success"],
+  ["claude", "custom-claude", "success"],
+  ["codex", "custom-codex", "success"],
+  ["claude", "claude", "startup failed"],
+  ["codex", "codex", "stopped"],
+] as const)(
+  "plan review for %s as %s with %s implementation",
+  async (provider, configuredProvider, outcome) => {
+    const startingImplementation = deferred<AbortSignal>();
+    const releaseImplementation = deferred<void>();
     const releasePlanningTurn = deferred<void>();
     const permissionAnswered = deferred<void>();
     const calls: string[] = [];
@@ -9029,7 +9039,7 @@ test.each(["claude", "codex"] as const)(
         calls.push(`plan-mode:${value}`);
       }
 
-      override async startTurn(prompt?: AgentPromptInput) {
+      override async startTurn(prompt?: AgentPromptInput, options?: AgentRunOptions) {
         if (prompt === "prepare") {
           if (request) this.pushEvent({ type: "permission_requested", provider, request });
           void (async () => {
@@ -9038,9 +9048,19 @@ test.each(["claude", "codex"] as const)(
           })();
           return { turnId: "planning" };
         }
+        if (outcome === "startup failed") throw new Error("Claude input startup failed");
+        if (outcome === "stopped") {
+          startingImplementation.resolve(options!.planReview!.signal);
+          await releaseImplementation.promise;
+          options!.planReview!.signal.throwIfAborted();
+        }
         calls.push(String(prompt));
         this.pushEvent({ type: "turn_completed", provider, turnId: "implement" });
         return { turnId: "implement" };
+      }
+
+      override async interrupt() {
+        releaseImplementation.resolve();
       }
 
       override async respondToPermission(_requestId?: string, response?: AgentPermissionResponse) {
@@ -9059,16 +9079,24 @@ test.each(["claude", "codex"] as const)(
 
     class ReviewClient extends TestAgentClient {
       override async createSession(config: AgentSessionConfig) {
-        return new ReviewSession(config);
+        const session = new ReviewSession(config);
+        return configuredProvider === provider
+          ? session
+          : wrapSessionProvider(configuredProvider, session);
       }
     }
 
     const manager = new AgentManager({
-      clients: { [provider]: new ReviewClient(provider) },
+      clients: { [configuredProvider]: new ReviewClient(configuredProvider) },
       logger,
     });
     const agent = await manager.createAgent(
-      { provider, cwd: process.cwd(), modeId: "plan", featureValues: { plan_mode: true } },
+      {
+        provider: configuredProvider,
+        cwd: process.cwd(),
+        modeId: "plan",
+        featureValues: { plan_mode: true },
+      },
       undefined,
       { workspaceId: undefined },
     );
@@ -9087,6 +9115,14 @@ test.each(["claude", "codex"] as const)(
       };
       await expect(manager.reviewPlan({ ...input, text: "  " })).rejects.toThrow("Enter feedback");
       const review = manager.reviewPlan(input);
+      const outcomeCheck =
+        outcome === "success"
+          ? expect(review).resolves.toBeUndefined()
+          : expect(review).rejects.toThrow(
+              outcome === "stopped"
+                ? "The plan review was canceled"
+                : "Claude input startup failed",
+            );
       const duplicate = expect(manager.reviewPlan(input)).rejects.toThrow(
         "no longer awaiting review",
       );
@@ -9096,8 +9132,21 @@ test.each(["claude", "codex"] as const)(
         releasePlanningTurn.resolve();
         await planning;
       }
-      await review;
+      if (outcome === "stopped") {
+        const signal = await startingImplementation.promise;
+        await manager.cancelAgentRun(agent.id);
+        expect(signal.aborted).toBe(true);
+      }
+      await outcomeCheck;
       await duplicate;
+      if (outcome !== "success") {
+        expect(calls).toEqual(
+          provider === "claude"
+            ? ["mode:acceptEdits", "mode:plan"]
+            : ["plan-mode:false", "plan-mode:true"],
+        );
+        return;
+      }
       expect(calls).toEqual([
         provider === "claude" ? "mode:acceptEdits" : "plan-mode:false",
         expect.stringContaining("Add the original text."),
@@ -9107,6 +9156,7 @@ test.each(["claude", "codex"] as const)(
         expect.objectContaining({ type: "user_message", text: calls[1] }),
       );
     } finally {
+      releaseImplementation.resolve();
       releasePlanningTurn.resolve();
       await planning.catch(() => undefined);
       await manager.closeAgent(agent.id);
